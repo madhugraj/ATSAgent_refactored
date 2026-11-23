@@ -22,7 +22,23 @@ const out = await Bun.build({
   // handler (server-function modules the worker shares); never loaded here.
   // playwright runs from node_modules at runtime (the website reader's
   // renderer); bundling it pulls in chromium-bidi paths that cannot resolve.
-  external: ["#tanstack-*", "tanstack-start-*", "playwright", "playwright-core", "chromium-bidi"],
+  // Phase 2: the worker's import graph now reaches the @ats/* package server
+  // entries, whose marker import (@tanstack/react-start/server-only) and the
+  // observability chain pull @tanstack/start-server-core internals and
+  // playwright subpaths into the graph. Keep the whole scopes out, subpaths
+  // included: the voice worker never carries the Start server or a browser
+  // driver (map §4 L4 — the full de-scoping lands in Phase 7).
+  external: [
+    "#tanstack-*",
+    "@tanstack/*",
+    "tanstack-start-*",
+    "playwright",
+    "playwright/*",
+    "playwright-core",
+    "playwright-core/*",
+    "chromium-bidi",
+    "chromium-bidi/*",
+  ],
 });
 if (!out.success) {
   for (const m of out.logs) console.error(m);

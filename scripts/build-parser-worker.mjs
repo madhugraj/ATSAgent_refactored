@@ -11,6 +11,15 @@ import { fileURLToPath } from "node:url";
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const out = await Bun.build({
+  // Defensive: the parser must never carry @tanstack or browser-driver code.
+  external: [
+    "#tanstack-*",
+    "@tanstack/*",
+    "playwright",
+    "playwright/*",
+    "playwright-core",
+    "playwright-core/*",
+  ],
   entrypoints: [join(REPO_ROOT, "apps/web/src/server/parser/worker.ts")],
   outdir: join(REPO_ROOT, ".output/parser-worker"),
   naming: "index.mjs",
