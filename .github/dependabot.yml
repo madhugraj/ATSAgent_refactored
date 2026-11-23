@@ -11,7 +11,7 @@
 version: 2
 updates:
   - package-ecosystem: bun
-    directory: /
+    directory: /apps/web # the app's manifest; the root monorepo manifest is managed by hand during the refactor
     schedule: { interval: weekly, day: monday }
     open-pull-requests-limit: 5
     allow:
@@ -34,7 +34,7 @@ updates:
     labels: [dependencies, ci]
 
   - package-ecosystem: docker
-    directory: /
+    directory: /apps/web # Dockerfile moved into apps/web at bootstrap (deviation 2)
     schedule: { interval: weekly, day: monday }
     allow:
       - dependency-name: "*"
