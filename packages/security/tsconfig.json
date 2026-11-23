@@ -1,0 +1,18 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    // Interim (while app-side shims stand, removed in Phase 8): this package's
+    // typecheck program reaches the observability package (hidden-text.test.ts
+    // → app cv-text.server → parser client → the app's log shim →
+    // @ats/observability/server), and the moved observability files still
+    // consume app-side modules (`@/server/{db,audit,crypto,safe-fetch}`,
+    // `@db/schema`, `@/lib/…`). Same aliases as apps/web/tsconfig.json and
+    // packages/observability/tsconfig.json, so every package resolves them to
+    // the same files.
+    "paths": {
+      "@/*": ["../../apps/web/src/*"],
+      "@db/*": ["../../apps/web/drizzle/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}
