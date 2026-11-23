@@ -1,0 +1,6 @@
+# Source paths (at SOURCE_SHA) intentionally not in this repo. parity.mjs reads this list.
+.env  # vestigial Lovable/Supabase values; Lovable decoupled 2026-10-05 (roadmap.md); never tracked here
+.github/workflows/deploy.yml  # deploy wiring moves in Phase 8 (deviation 7)
+.github/workflows/deploy-gke.yml  # deploy wiring moves in Phase 8 (deviation 7)
+test_data/Mobile_Application_Developer_JD.docx  # refactor rule 5: never copy test_data/; fixture, unreferenced by the suite (89/89 green without it)
+test_data/Offer Letter - Template.pdf  # refactor rule 5: never copy test_data/; fixture, unreferenced by the suite (89/89 green without it)

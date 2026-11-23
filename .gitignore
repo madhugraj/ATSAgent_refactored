@@ -67,4 +67,6 @@ ai_interviewer/
 test_data/
 .env
 .env.*
+!.env.example
 SECURITY_AUDIT_REPORT*
+.turbo/

@@ -15,6 +15,8 @@ const tables = [...s.matchAll(/pgTable\(\s*"([a-z_]+)"/g)].map((m) => m[1]);
 
 /** Owner map from boundary-map §7. */
 const OWNERS = {
+  // — approved 2026-11-23 (phase-1 review): 22 tables new at dcb6a4b —
+  desk: ["demand_outlooks"],
   auth: ["users", "sessions", "platform_admins", "notification_states"],
   org: [
     "organizations",
@@ -64,6 +66,9 @@ const OWNERS = {
     "interview_slot_offers",
     "round_substitutes",
     "panelists",
+    "interview_confirmations",
+    "plan_change_proposals",
+    "scorecard_chases",
     "member_interviewer_profiles",
     "panelist_scorecard_links",
     "evaluations",
@@ -82,6 +87,16 @@ const OWNERS = {
     "salary_benchmarks",
     "comp_knowledge",
     "hr_incentive_schemes",
+    // approved 2026-11-23 (phase-1 review): pay / labour-policy tables
+    "pay_zones",
+    "pooling_regions",
+    "exchange_rates",
+    "pay_figures",
+    "pay_convention_drafts",
+    "policy_sources",
+    "policy_reads",
+    "policy_briefings",
+    "policy_findings",
   ],
   onboarding: ["onboarding_documents", "hrms_employees", "hrms_sync_state", "hrms_field_mappings"],
   integrations: ["source_integrations", "integration_credentials", "org_linkedin_connections"],
@@ -93,7 +108,12 @@ const OWNERS = {
     "board_webhook_events",
     "board_sync_state",
   ],
-  voice: ["screening_calls", "phone_screening_settings", "voice_worker_heartbeat"],
+  voice: [
+    "screening_calls",
+    "phone_screening_settings",
+    "voice_worker_heartbeat",
+    "call_reviews", // approved (phase-1 review)
+  ],
   analytics: ["skill_nodes", "skill_edges", "skill_evidence", "ontology_snapshots"],
   agents: [
     "agent_policies",
@@ -111,17 +131,8 @@ const OWNERS = {
     "hiring_messages",
     "copilot_messages",
     "product_catalogue_commercials",
-  ],
-  desk: ["demand_outlooks"],
-};
-
-/**
- * New tables from #69/#78, proposed by the executor per §10's rule (the
- * writer owns the table; writers verified by grep at dcb6a4b). The reviewer
- * approves these at Gate 1 — until then they are PROPOSED, not final.
- */
-const PROPOSED = {
-  agents: [
+    // approved 2026-11-23 (phase-1 review): studio / workflow tables,
+    // writers verified at dcb6a4b
     "agent_blueprints",
     "agent_blueprint_keys",
     "agent_workflows",
@@ -132,20 +143,15 @@ const PROPOSED = {
     "workflow_api_keys",
     "workflow_runs",
   ],
-  interviews: ["interview_confirmations", "plan_change_proposals", "scorecard_chases"],
-  offers: [
-    "pay_zones",
-    "pooling_regions",
-    "exchange_rates",
-    "pay_figures",
-    "pay_convention_drafts",
-    "policy_sources",
-    "policy_reads",
-    "policy_briefings",
-    "policy_findings",
-  ],
-  voice: ["call_reviews"],
+  desk: ["demand_outlooks"],
 };
+
+/**
+ * Empty by design: every proposal from the phase-1 review has been approved
+ * and merged into OWNERS. The script fails if anything lands here, so a new
+ * table cannot pass without an owner decision (review answer 1).
+ */
+const PROPOSED = {};
 
 const ownerOf = {};
 for (const [owner, list] of [...Object.entries(OWNERS), ...Object.entries(PROPOSED)])
@@ -171,4 +177,4 @@ if (missing.length) {
 const proposedCount = tables.filter((t) =>
   Object.keys(PROPOSED).some((o) => PROPOSED[o].includes(t)),
 ).length;
-console.log(`\nok — every table owned (${proposedCount} still PROPOSED, awaiting Gate 1 review)`);
+console.log(`\nok — every table owned (${proposedCount} still PROPOSED)`);
