@@ -45,8 +45,13 @@ jobs:
       - name: Dependency audit (high+ blocks)
         run: bun audit --audit-level=high
         continue-on-error: false
+      # Full-history scan: the action's push-event partial scan breaks when
+      # the range start is a rewritten or absent commit (force-push, history
+      # rewrite) — it exits 1 with "unknown revision" before finding anything.
       - name: Secrets scan
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        with:
+          log-opts: --all
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # table-owners runs here; graph+inventory run locally against the source
