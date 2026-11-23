@@ -1,0 +1,1698 @@
+{
+ "ui -> auth": [
+  "components/AccountMenu.tsx => lib/auth-client.ts",
+  "components/AccountMenu.tsx => lib/password-policy.ts",
+  "components/AuthGate.tsx => lib/auth-client.ts",
+  "components/AuthGate.tsx => lib/work-email.ts",
+  "components/AuthGate.tsx => lib/password-policy.ts",
+  "components/OnboardingWizard.tsx => lib/auth-client.ts",
+  "components/OrgGate.tsx => lib/auth-client.ts",
+  "components/StageMover.tsx => lib/step-up-client.ts",
+  "components/StepUpDialog.tsx => lib/step-up-client.ts",
+  "components/StepUpDialog.tsx => lib/step-up.functions.ts",
+  "routes/agents.index.tsx => lib/step-up-client.ts",
+  "routes/api/auth/change-password.ts => server/password.ts",
+  "routes/api/auth/change-password.ts => server/identity.ts",
+  "routes/api/auth/change-password.ts => lib/password-policy.ts",
+  "routes/api/auth/confirm.ts => server/action-token.ts",
+  "routes/api/auth/login.ts => server/password.ts",
+  "routes/api/auth/login.ts => server/identity.ts",
+  "routes/api/auth/me.ts => server/identity.ts",
+  "routes/api/auth/register.ts => server/password.ts",
+  "routes/api/auth/register.ts => server/action-token.ts",
+  "routes/api/auth/register.ts => lib/work-email.ts",
+  "routes/api/auth/register.ts => lib/password-policy.ts",
+  "routes/api/auth/request-reset.ts => server/action-token.ts",
+  "routes/api/auth/reset.ts => server/action-token.ts",
+  "routes/api/auth/reset.ts => server/password.ts",
+  "routes/api/auth/reset.ts => lib/password-policy.ts",
+  "routes/api/auth/session.ts => server/identity.ts",
+  "routes/api/public/linkedin/callback.ts => server/identity.ts",
+  "routes/auth.reset.tsx => lib/auth-client.ts",
+  "routes/auth.reset.tsx => lib/password-policy.ts",
+  "routes/desk.tsx => lib/step-up-client.ts",
+  "routes/offers.tsx => lib/step-up-client.ts"
+ ],
+ "ui -> agents": [
+  "components/AgentDetailDrawer.tsx => lib/agents-observability.functions.ts",
+  "components/AgentDetailDrawer.tsx => lib/agents.catalog.ts",
+  "components/AgentUtilisation.tsx => lib/agents-observability.functions.ts",
+  "components/AgentUtilisation.tsx => lib/agents.catalog.ts",
+  "components/OrgAgentWorkspace.tsx => lib/agents.functions.ts",
+  "components/SilentPanelCard.tsx => lib/panel-agent.functions.ts",
+  "routes/agents.index.tsx => lib/agents.catalog.ts",
+  "routes/agents.index.tsx => lib/agents.functions.ts",
+  "routes/agents.observability.tsx => lib/agents-observability.functions.ts",
+  "routes/agents.observability.tsx => lib/agents.catalog.ts",
+  "routes/agents.register.tsx => lib/eval-catalog.ts",
+  "routes/agents.register.tsx => lib/agents.catalog.ts",
+  "routes/agents.register.tsx => lib/agents.functions.ts",
+  "routes/agents.settings.tsx => lib/agents.catalog.ts",
+  "routes/agents.settings.tsx => lib/agents.functions.ts",
+  "routes/agents.settings.tsx => lib/agents-telemetry.functions.ts",
+  "routes/api/public/agent-tick.ts => server/agents/index.ts",
+  "routes/api/public/agent-tick.ts => server/agents/runtime.server.ts",
+  "routes/desk.tsx => lib/agents.catalog.ts",
+  "routes/desk.tsx => lib/agents.functions.ts",
+  "routes/index.tsx => lib/agents.functions.ts",
+  "routes/interviews.index.tsx => lib/panel-agent.functions.ts",
+  "routes/platform-agents.tsx => lib/agents.catalog.ts",
+  "routes/platform-agents.tsx => lib/platform-agents.functions.ts"
+ ],
+ "ui -> comms": [
+  "components/AgentPopup.tsx => lib/notifications.functions.ts",
+  "components/AgentPopup.tsx => lib/nudges.functions.ts",
+  "components/AssessmentPolicyCard.tsx => lib/nudges.functions.ts",
+  "components/NotificationBell.tsx => lib/notifications.functions.ts",
+  "components/OfferLetterDialog.tsx => lib/templates.functions.ts",
+  "routes/api/auth/register.ts => lib/email-templates/send-email.ts",
+  "routes/api/auth/request-reset.ts => lib/email-templates/send-email.ts",
+  "routes/api/public/inbound-email.ts => lib/local-inbox.server.ts",
+  "routes/api/public/process-email-outbox.ts => lib/email-outbox.server.ts",
+  "routes/inbox.tsx => lib/local-inbox.functions.ts",
+  "routes/index.tsx => lib/notifications.functions.ts",
+  "routes/integrations.tsx => lib/email-settings.functions.ts",
+  "routes/integrations.tsx => lib/local-inbox.functions.ts",
+  "routes/interviews.index.tsx => lib/ics.ts",
+  "routes/interviews.mine.tsx => lib/ics.ts",
+  "routes/requisitions.$id.tsx => lib/templates.functions.ts",
+  "routes/templates.tsx => lib/templates.functions.ts"
+ ],
+ "ui -> offers": [
+  "components/AgentPopup.tsx => lib/compensation.functions.ts",
+  "components/CompensationPanel.tsx => lib/compensation.functions.ts",
+  "components/CompensationPanel.tsx => lib/negotiation.functions.ts",
+  "components/CompensationPanel.tsx => lib/money.ts",
+  "components/HiringCost.tsx => lib/hiring-cost.functions.ts",
+  "components/HiringCost.tsx => lib/cost-format.ts",
+  "components/MarketBenchmark.tsx => lib/market.functions.ts",
+  "components/MarketBenchmark.tsx => lib/comp-knowledge.functions.ts",
+  "components/OfferLetterDialog.tsx => lib/offers.functions.ts",
+  "components/OfferLetterDialog.tsx => lib/offer-letter-pdf.ts",
+  "components/salary-benchmark.tsx => lib/salary-benchmark.functions.ts",
+  "routes/hiring-cost.tsx => lib/cost-format.ts",
+  "routes/hiring-cost.tsx => lib/hiring-cost.functions.ts",
+  "routes/index.tsx => lib/roi.functions.ts",
+  "routes/negotiate.$token.tsx => lib/negotiation.functions.ts",
+  "routes/negotiate.$token.tsx => lib/money.ts",
+  "routes/offer.$token.tsx => lib/offer-response.functions.ts",
+  "routes/offers.tsx => lib/offers.functions.ts",
+  "routes/pay.$token.tsx => lib/compensation.functions.ts",
+  "routes/pay.$token.tsx => lib/money.ts",
+  "routes/roi.tsx => lib/roi.functions.ts"
+ ],
+ "ui -> catalogue": [
+  "components/AgreementFields.tsx => lib/legal/acceptance.ts",
+  "components/AgreementFields.tsx => lib/legal/agreements.ts",
+  "components/LegalPage.tsx => lib/legal/agreements.ts",
+  "components/OnboardingWizard.tsx => lib/legal/acceptance.ts",
+  "components/OrgGate.tsx => lib/legal/acceptance.ts",
+  "components/OrgGate.tsx => lib/org-agreements.functions.ts",
+  "components/OrgGate.tsx => lib/legal/agreements.ts",
+  "routes/catalogue.tsx => lib/catalogue.functions.ts",
+  "routes/catalogue.tsx => lib/product-catalogue.ts",
+  "routes/catalogue.tsx => lib/catalogue-export.ts",
+  "routes/platform.tsx => lib/legal/agreements.ts"
+ ],
+ "ui -> core": [
+  "components/AuthGate.tsx => lib/public-paths.ts",
+  "components/OrgGate.tsx => lib/public-paths.ts",
+  "components/PasswordInput.tsx => lib/utils.ts",
+  "components/ats.tsx => lib/utils.ts",
+  "components/ui/accordion.tsx => lib/utils.ts",
+  "components/ui/alert-dialog.tsx => lib/utils.ts",
+  "components/ui/alert.tsx => lib/utils.ts",
+  "components/ui/avatar.tsx => lib/utils.ts",
+  "components/ui/badge.tsx => lib/utils.ts",
+  "components/ui/breadcrumb.tsx => lib/utils.ts",
+  "components/ui/button.tsx => lib/utils.ts",
+  "components/ui/calendar.tsx => lib/utils.ts",
+  "components/ui/card.tsx => lib/utils.ts",
+  "components/ui/carousel.tsx => lib/utils.ts",
+  "components/ui/chart.tsx => lib/utils.ts",
+  "components/ui/checkbox.tsx => lib/utils.ts",
+  "components/ui/command.tsx => lib/utils.ts",
+  "components/ui/context-menu.tsx => lib/utils.ts",
+  "components/ui/dialog.tsx => lib/utils.ts",
+  "components/ui/drawer.tsx => lib/utils.ts",
+  "components/ui/dropdown-menu.tsx => lib/utils.ts",
+  "components/ui/form.tsx => lib/utils.ts",
+  "components/ui/hover-card.tsx => lib/utils.ts",
+  "components/ui/input-otp.tsx => lib/utils.ts",
+  "components/ui/input.tsx => lib/utils.ts",
+  "components/ui/label.tsx => lib/utils.ts",
+  "components/ui/menubar.tsx => lib/utils.ts",
+  "components/ui/navigation-menu.tsx => lib/utils.ts",
+  "components/ui/pagination.tsx => lib/utils.ts",
+  "components/ui/popover.tsx => lib/utils.ts",
+  "components/ui/progress.tsx => lib/utils.ts",
+  "components/ui/radio-group.tsx => lib/utils.ts",
+  "components/ui/resizable.tsx => lib/utils.ts",
+  "components/ui/scroll-area.tsx => lib/utils.ts",
+  "components/ui/select.tsx => lib/utils.ts",
+  "components/ui/separator.tsx => lib/utils.ts",
+  "components/ui/sheet.tsx => lib/utils.ts",
+  "components/ui/sidebar.tsx => lib/utils.ts",
+  "components/ui/skeleton.tsx => lib/utils.ts",
+  "components/ui/slider.tsx => lib/utils.ts",
+  "components/ui/switch.tsx => lib/utils.ts",
+  "components/ui/table.tsx => lib/utils.ts",
+  "components/ui/tabs.tsx => lib/utils.ts",
+  "components/ui/textarea.tsx => lib/utils.ts",
+  "components/ui/toggle-group.tsx => lib/utils.ts",
+  "components/ui/toggle.tsx => lib/utils.ts",
+  "components/ui/tooltip.tsx => lib/utils.ts",
+  "routes/api/public/agent-tick.ts => server/cron-auth.ts",
+  "routes/api/public/board-sync.ts => server/cron-auth.ts",
+  "routes/api/public/inbox-sync.ts => server/cron-auth.ts",
+  "routes/api/public/linkedin/callback.ts => server/crypto.ts",
+  "routes/api/public/process-email-outbox.ts => server/cron-auth.ts",
+  "routes/api/public/screening-prep.ts => server/cron-auth.ts",
+  "routes/api/public/sync-candidates.ts => server/cron-auth.ts",
+  "routes/api/public/sync-candidates.ts => server/audit.ts",
+  "routes/api/public/sync-hrms.ts => server/cron-auth.ts",
+  "routes/candidates.$id.tsx => lib/external-links.ts",
+  "routes/candidates.index.tsx => lib/external-links.ts",
+  "routes/requisitions.index.tsx => lib/errors.ts",
+  "routes/templates.tsx => lib/errors.ts",
+  "start.ts => lib/error-page.ts"
+ ],
+ "ui -> UNMAPPED": [
+  "components/Brand.tsx => ../ATSAgent_refactored/scripts/refactor/UNRESOLVED:@/assets/yavar-logo.png",
+  "routes/__root.tsx => ../ATSAgent_refactored/scripts/refactor/UNRESOLVED:../styles.css?url"
+ ],
+ "ui -> org": [
+  "components/CandidateCollab.tsx => lib/data.ts",
+  "components/CandidateCollab.tsx => lib/collaboration.functions.ts",
+  "components/CommandPalette.tsx => lib/data.ts",
+  "components/LeadershipBoard.tsx => lib/data.ts",
+  "components/OfferLetterDialog.tsx => lib/data.ts",
+  "components/OnboardingWizard.tsx => lib/org.functions.ts",
+  "components/OntologyGraph.tsx => lib/ontology.server.ts",
+  "components/OntologyGraph3D.tsx => lib/ontology.server.ts",
+  "components/OrgAgentWorkspace.tsx => lib/org-context.functions.ts",
+  "components/OrgAgentWorkspace.tsx => lib/org-profile.functions.ts",
+  "components/OrgAgentWorkspace.tsx => lib/org-profile.ts",
+  "components/OrgProfileNotice.tsx => lib/org-profile.functions.ts",
+  "components/RolePeek.tsx => lib/data.ts",
+  "components/ScreeningPanel.tsx => lib/data.ts",
+  "components/StageMover.tsx => lib/data.ts",
+  "components/board-connect-panel.tsx => lib/integrations.functions.ts",
+  "components/pickers.tsx => lib/data.ts",
+  "components/salary-benchmark.tsx => lib/data.ts",
+  "hooks/useOrg.ts => lib/org.functions.ts",
+  "hooks/useRoles.ts => lib/org.functions.ts",
+  "routes/brain.tsx => lib/ontology.functions.ts",
+  "routes/candidates.$id.tsx => lib/data.ts",
+  "routes/candidates.index.tsx => lib/data.ts",
+  "routes/candidates.index.tsx => lib/collaboration.functions.ts",
+  "routes/collaboration.tsx => lib/data.ts",
+  "routes/collaboration.tsx => lib/collaboration.functions.ts",
+  "routes/ijp.tsx => lib/data.ts",
+  "routes/index.tsx => lib/data.ts",
+  "routes/integrations.tsx => lib/integrations.functions.ts",
+  "routes/integrations.tsx => lib/integrations-oauth.functions.ts",
+  "routes/interviews.index.tsx => lib/data.ts",
+  "routes/masters.tsx => lib/data.ts",
+  "routes/masters.tsx => lib/master.functions.ts",
+  "routes/matching.tsx => lib/data.ts",
+  "routes/matching.tsx => lib/integrations.functions.ts",
+  "routes/offers.tsx => lib/data.ts",
+  "routes/org-profile.tsx => lib/org-context.functions.ts",
+  "routes/org-profile.tsx => lib/org-profile.functions.ts",
+  "routes/org-profile.tsx => lib/org-profile.ts",
+  "routes/organisation.tsx => lib/org.functions.ts",
+  "routes/reports.tsx => lib/data.ts",
+  "routes/requisitions.$id.tsx => lib/data.ts",
+  "routes/requisitions.index.tsx => lib/data.ts",
+  "routes/screening.tsx => lib/data.ts",
+  "routes/team.tsx => lib/org.functions.ts",
+  "routes/templates.tsx => lib/data.ts"
+ ],
+ "ui -> interviews": [
+  "components/CompetencyRating.tsx => lib/interview-plan.ts",
+  "components/InterviewPlanCard.tsx => lib/interview-plan.functions.ts",
+  "components/InterviewPlanCard.tsx => lib/interview-plan.ts",
+  "components/InterviewerProfileCell.tsx => lib/interviewers.functions.ts",
+  "components/PanelBriefView.tsx => lib/panel-brief.ts",
+  "components/PanelDirectory.tsx => lib/panelists.functions.ts",
+  "components/ScreeningPanel.tsx => lib/screening-coverage.ts",
+  "routes/api/public/integrations/google/callback.ts => lib/meetings-oauth.server.ts",
+  "routes/api/public/integrations/microsoft/callback.ts => lib/meetings-oauth.server.ts",
+  "routes/api/public/integrations/zoom/callback.ts => lib/meetings-oauth.server.ts",
+  "routes/assess.$token.tsx => lib/assessment.functions.ts",
+  "routes/candidates.$id.tsx => lib/interviews.functions.ts",
+  "routes/candidates.$id.tsx => lib/assessment.functions.ts",
+  "routes/desk.tsx => lib/panels.functions.ts",
+  "routes/interviews.index.tsx => lib/interviews.functions.ts",
+  "routes/interviews.index.tsx => lib/meetings.functions.ts",
+  "routes/interviews.mine.tsx => lib/interviews.functions.ts",
+  "routes/schedule.$token.tsx => lib/slot-offers.functions.ts",
+  "routes/scorecard.$token.tsx => lib/panelist-links.functions.ts",
+  "routes/team.tsx => lib/interviewers.functions.ts"
+ ],
+ "ui -> desk": [
+  "components/Copilot.tsx => lib/copilot.functions.ts",
+  "components/Copilot.tsx => lib/user-manual.ts",
+  "components/OrgAgentWorkspace.tsx => lib/org-desk.functions.ts",
+  "components/PreOnboardingDialog.tsx => lib/onboarding.catalogue.ts",
+  "routes/desk.tsx => lib/desk-view.ts",
+  "routes/desk.tsx => lib/hiring-desk.functions.ts",
+  "routes/help.tsx => lib/user-manual.ts",
+  "routes/help.tsx => lib/manual-export.ts"
+ ],
+ "ui -> requisitions": [
+  "components/HiringManagerPicker.tsx => lib/role-hiring-manager.functions.ts",
+  "components/LeadershipBoard.tsx => lib/lifecycle.ts",
+  "components/StageMover.tsx => lib/lifecycle.ts",
+  "components/StageMover.tsx => lib/lifecycle.functions.ts",
+  "components/ats.tsx => lib/lifecycle.ts",
+  "routes/candidates.$id.tsx => lib/lifecycle.ts",
+  "routes/candidates.index.tsx => lib/lifecycle.ts",
+  "routes/ijp.tsx => lib/requisitions.functions.ts",
+  "routes/index.tsx => lib/lifecycle.ts",
+  "routes/interviews.index.tsx => lib/lifecycle.ts",
+  "routes/interviews.mine.tsx => lib/lifecycle.ts",
+  "routes/matching.tsx => lib/requisitions.functions.ts",
+  "routes/matching.tsx => lib/lifecycle.functions.ts",
+  "routes/reports.tsx => lib/lifecycle.ts",
+  "routes/requisitions.$id.tsx => lib/work-mode.ts",
+  "routes/requisitions.$id.tsx => lib/requisitions.functions.ts",
+  "routes/requisitions.index.tsx => lib/requisitions.functions.ts",
+  "routes/requisitions.index.tsx => lib/jd-dedupe.ts",
+  "routes/requisitions.index.tsx => lib/role-profile.functions.ts",
+  "routes/screening.tsx => lib/lifecycle.ts"
+ ],
+ "ui -> onboarding": [
+  "components/HrPerformance.tsx => lib/hr-performance.functions.ts",
+  "components/PreOnboardingDialog.tsx => lib/onboarding.functions.ts",
+  "components/salary-benchmark.tsx => lib/career-ladder.ts",
+  "routes/api/public/sync-hrms.ts => lib/hrms.server.ts",
+  "routes/candidates.index.tsx => lib/career.ts",
+  "routes/index.tsx => lib/hr-performance.functions.ts",
+  "routes/integrations.tsx => lib/hrms.functions.ts",
+  "routes/integrations.tsx => lib/hrms.ts",
+  "routes/offers.tsx => lib/onboarding.functions.ts"
+ ],
+ "ui -> voice": [
+  "components/PhoneScreeningCalls.tsx => lib/phone-screening.functions.ts",
+  "components/PhoneScreeningCalls.tsx => lib/screening-calls.functions.ts",
+  "components/PhoneScreeningCard.tsx => lib/phone-screening.functions.ts",
+  "routes/integrations.tsx => lib/phone-screening.functions.ts"
+ ],
+ "ui -> matching": [
+  "components/ScreeningPanel.tsx => lib/screening.functions.ts",
+  "components/ScreeningRationale.tsx => lib/screening-rationale.functions.ts",
+  "routes/api/public/inbox-sync.ts => lib/autoscore.server.ts",
+  "routes/api/public/screening-prep.ts => lib/screening-prep.server.ts",
+  "routes/api/public/sync-candidates.ts => lib/verification.server.ts",
+  "routes/api/public/sync-candidates.ts => lib/bias.server.ts",
+  "routes/candidates.$id.tsx => lib/matching.functions.ts",
+  "routes/candidates.$id.tsx => lib/verification.functions.ts",
+  "routes/candidates.index.tsx => lib/matching.functions.ts",
+  "routes/candidates.index.tsx => lib/verification.functions.ts",
+  "routes/index.tsx => lib/shortlist.ts",
+  "routes/matching.tsx => lib/matching.functions.ts",
+  "routes/matching.tsx => lib/shortlist.ts",
+  "routes/requisitions.$id.tsx => lib/matching.functions.ts",
+  "routes/requisitions.$id.tsx => lib/shortlist.ts",
+  "routes/screening.tsx => lib/screening-queue.functions.ts"
+ ],
+ "ui -> db": [
+  "components/ScreeningPanel.tsx => drizzle/schema.ts",
+  "routes/agents.settings.tsx => drizzle/schema.ts",
+  "routes/api/auth/change-password.ts => server/db.ts",
+  "routes/api/auth/change-password.ts => drizzle/schema.ts",
+  "routes/api/auth/confirm.ts => server/db.ts",
+  "routes/api/auth/confirm.ts => drizzle/schema.ts",
+  "routes/api/auth/login.ts => server/db.ts",
+  "routes/api/auth/login.ts => drizzle/schema.ts",
+  "routes/api/auth/register.ts => server/db.ts",
+  "routes/api/auth/register.ts => drizzle/schema.ts",
+  "routes/api/auth/request-reset.ts => server/db.ts",
+  "routes/api/auth/request-reset.ts => drizzle/schema.ts",
+  "routes/api/auth/reset.ts => server/db.ts",
+  "routes/api/auth/reset.ts => drizzle/schema.ts",
+  "routes/api/public/inbox-sync.ts => server/db.ts",
+  "routes/api/public/inbox-sync.ts => drizzle/schema.ts",
+  "routes/api/public/linkedin/callback.ts => server/db.ts",
+  "routes/api/public/linkedin/callback.ts => drizzle/schema.ts",
+  "routes/api/public/sync-candidates.ts => server/db.ts",
+  "routes/api/public/sync-candidates.ts => drizzle/schema.ts",
+  "routes/api/public/sync-hrms.ts => server/db.ts",
+  "routes/api/public/sync-hrms.ts => drizzle/schema.ts",
+  "routes/integrations.tsx => lib/database.types.ts"
+ ],
+ "ui -> ai": [
+  "components/TrainingDataCard.tsx => lib/training.functions.ts",
+  "routes/integrations.tsx => lib/ai-settings.functions.ts",
+  "routes/platform-ai-usage.tsx => lib/platform-ai-usage.functions.ts"
+ ],
+ "ui -> distribution": [
+  "components/board-connect-panel.tsx => lib/boards.functions.ts",
+  "components/board-enterprise-panel.tsx => lib/boards.functions.ts",
+  "components/requisition-distribution.tsx => lib/distribution.functions.ts",
+  "components/requisition-distribution.tsx => lib/job-channels.ts",
+  "components/requisition-job-boards.tsx => lib/boards.functions.ts",
+  "routes/api/public/board-sync.ts => server/boards/poll.server.ts",
+  "routes/api/public/boards/$provider.$token.ts => server/boards/ingest.server.ts",
+  "routes/api/public/distribution.ts => server/distribution/distribution.server.ts",
+  "routes/api/public/feeds/$token.$format.ts => server/distribution/distribution.server.ts",
+  "routes/candidates.index.tsx => lib/job-channels.ts",
+  "routes/distribution.tsx => lib/distribution.functions.ts",
+  "routes/distribution.tsx => lib/job-channels.ts",
+  "routes/integrations.tsx => lib/boards.functions.ts",
+  "routes/reports.tsx => lib/job-channels.ts"
+ ],
+ "ui -> platform-admin": [
+  "hooks/usePlatform.ts => lib/platform.functions.ts",
+  "routes/index.tsx => lib/platform.functions.ts",
+  "routes/platform-ai-usage.tsx => lib/platform.functions.ts",
+  "routes/platform-health.tsx => lib/platform-health.functions.ts",
+  "routes/platform.tsx => lib/platform.functions.ts"
+ ],
+ "agents -> db": [
+  "lib/agents-observability.functions.ts => server/db.ts",
+  "lib/agents-observability.functions.ts => drizzle/schema.ts",
+  "lib/agents-telemetry.functions.ts => server/db.ts",
+  "lib/agents-telemetry.functions.ts => drizzle/schema.ts",
+  "lib/agents.catalog.ts => drizzle/schema.ts",
+  "lib/agents.functions.ts => server/db.ts",
+  "lib/agents.functions.ts => drizzle/schema.ts",
+  "server/agents/alerts.server.ts => server/db.ts",
+  "server/agents/alerts.server.ts => drizzle/schema.ts",
+  "server/agents/autonomy.server.ts => server/db.ts",
+  "server/agents/autonomy.server.ts => drizzle/schema.ts",
+  "server/agents/distribution-agent.server.ts => server/db.ts",
+  "server/agents/eval.server.ts => server/db.ts",
+  "server/agents/eval.server.ts => drizzle/schema.ts",
+  "server/agents/events.ts => server/db.ts",
+  "server/agents/events.ts => drizzle/schema.ts",
+  "server/agents/expert-gate.server.ts => drizzle/schema.ts",
+  "server/agents/expert-gate.server.ts => server/db.ts",
+  "server/agents/health.server.ts => server/db.ts",
+  "server/agents/health.server.ts => drizzle/schema.ts",
+  "server/agents/hiring-cost.server.ts => server/db.ts",
+  "server/agents/hiring-cost.server.ts => drizzle/schema.ts",
+  "server/agents/index.ts => drizzle/schema.ts",
+  "server/agents/manifest.server.ts => server/db.ts",
+  "server/agents/manifest.server.ts => drizzle/schema.ts",
+  "server/agents/metrics.server.ts => server/db.ts",
+  "server/agents/orchestrator.server.ts => server/db.ts",
+  "server/agents/orchestrator.server.ts => drizzle/schema.ts",
+  "server/agents/otel.server.ts => server/db.ts",
+  "server/agents/otel.server.ts => drizzle/schema.ts",
+  "server/agents/panel-gate.server.ts => drizzle/schema.ts",
+  "server/agents/panel-gate.server.ts => server/db.ts",
+  "server/agents/platform.server.ts => server/db.ts",
+  "server/agents/policy.ts => server/db.ts",
+  "server/agents/policy.ts => drizzle/schema.ts",
+  "server/agents/pool-match.server.ts => server/db.ts",
+  "server/agents/pool-match.server.ts => drizzle/schema.ts",
+  "server/agents/registry.ts => drizzle/schema.ts",
+  "server/agents/replay.server.ts => server/db.ts",
+  "server/agents/replay.server.ts => drizzle/schema.ts",
+  "server/agents/runtime.server.ts => drizzle/schema.ts",
+  "server/agents/runtime.server.ts => server/db.ts",
+  "server/agents/sourcing.server.ts => server/db.ts",
+  "server/agents/sourcing.server.ts => drizzle/schema.ts",
+  "server/agents/talent-search.server.ts => server/db.ts",
+  "server/agents/talent-search.server.ts => drizzle/schema.ts",
+  "server/agents/task-liveness.ts => drizzle/schema.ts",
+  "server/agents/tools-expert.ts => drizzle/schema.ts",
+  "server/agents/tools-expert.ts => server/db.ts",
+  "server/agents/tools-negotiation-call.ts => drizzle/schema.ts",
+  "server/agents/tools-negotiation-call.ts => server/db.ts",
+  "server/agents/tools-org.ts => drizzle/schema.ts",
+  "server/agents/tools-org.ts => server/db.ts",
+  "server/agents/tools-phase2.ts => server/db.ts",
+  "server/agents/tools-phase2.ts => drizzle/schema.ts",
+  "server/agents/tools-phase3.ts => server/db.ts",
+  "server/agents/tools-phase3.ts => drizzle/schema.ts",
+  "server/agents/tools-phase4.ts => server/db.ts",
+  "server/agents/tools-phase4.ts => drizzle/schema.ts",
+  "server/agents/tools-scheduling-call.ts => drizzle/schema.ts",
+  "server/agents/tools-scheduling-call.ts => server/db.ts",
+  "server/agents/tools-screening-call.ts => drizzle/schema.ts",
+  "server/agents/tools-screening-call.ts => server/db.ts",
+  "server/agents/tools-sourcing.ts => server/db.ts",
+  "server/agents/tools-sourcing.ts => drizzle/schema.ts",
+  "server/agents/tools.ts => server/db.ts",
+  "server/agents/tools.ts => drizzle/schema.ts",
+  "server/agents/utilisation.server.ts => server/db.ts",
+  "server/agents/utilisation.server.ts => drizzle/schema.ts"
+ ],
+ "agents -> auth": [
+  "lib/agents-observability.functions.ts => lib/auth.middleware.ts",
+  "lib/agents-telemetry.functions.ts => lib/auth.middleware.ts",
+  "lib/agents.functions.ts => lib/auth.middleware.ts",
+  "lib/agents.functions.ts => server/step-up.ts",
+  "lib/panel-agent.functions.ts => lib/auth.middleware.ts",
+  "lib/platform-agents.functions.ts => lib/auth.middleware.ts",
+  "server/agents/expert-gate.server.ts => lib/auth.middleware.ts",
+  "server/agents/registry.ts => lib/auth.middleware.ts",
+  "server/agents/runtime.server.ts => lib/auth.middleware.ts",
+  "server/agents/tools-distribution.ts => lib/auth.middleware.ts"
+ ],
+ "agents -> core": [
+  "lib/agents-observability.functions.ts => server/log.ts",
+  "lib/agents-observability.functions.ts => server/audit.ts",
+  "lib/agents-telemetry.functions.ts => server/crypto.ts",
+  "lib/agents-telemetry.functions.ts => server/audit.ts",
+  "lib/agents-telemetry.functions.ts => server/safe-fetch.ts",
+  "lib/agents.functions.ts => server/audit.ts",
+  "lib/agents.functions.ts => server/log.ts",
+  "server/agents/alerts.server.ts => server/env.ts",
+  "server/agents/alerts.server.ts => server/audit.ts",
+  "server/agents/alerts.server.ts => server/crypto.ts",
+  "server/agents/alerts.server.ts => server/log.ts",
+  "server/agents/alerts.server.ts => server/safe-fetch.ts",
+  "server/agents/distribution-agent.server.ts => server/env.ts",
+  "server/agents/distribution-agent.server.ts => server/audit.ts",
+  "server/agents/distribution-agent.server.ts => server/erase.server.ts",
+  "server/agents/events.ts => server/log.ts",
+  "server/agents/expert-gate.server.ts => server/audit.ts",
+  "server/agents/health.server.ts => server/audit.ts",
+  "server/agents/health.server.ts => server/log.ts",
+  "server/agents/health.server.ts => server/slo.server.ts",
+  "server/agents/orchestrator.server.ts => server/log.ts",
+  "server/agents/otel.server.ts => server/crypto.ts",
+  "server/agents/otel.server.ts => server/log.ts",
+  "server/agents/otel.server.ts => server/safe-fetch.ts",
+  "server/agents/panel-gate.server.ts => lib/local-time.ts",
+  "server/agents/panel-gate.server.ts => server/audit.ts",
+  "server/agents/pool-match.server.ts => server/audit.ts",
+  "server/agents/runtime.server.ts => server/audit.ts",
+  "server/agents/runtime.server.ts => server/log.ts",
+  "server/agents/runtime.server.ts => server/request-context.ts",
+  "server/agents/sourcing.server.ts => server/env.ts",
+  "server/agents/tools-expert.ts => server/guards.ts",
+  "server/agents/tools-phase2.ts => server/env.ts",
+  "server/agents/tools-phase3.ts => server/guards.ts",
+  "server/agents/tools-phase3.ts => lib/local-time.ts"
+ ],
+ "agents -> ai": [
+  "lib/agents-observability.functions.ts => lib/ai-gateway.server.ts",
+  "lib/agents.functions.ts => server/redteam/check.server.ts",
+  "lib/agents.functions.ts => lib/ai-gateway.server.ts",
+  "server/agents/health.server.ts => server/redteam/check.server.ts",
+  "server/agents/hiring-cost.server.ts => server/ai-pricing.ts",
+  "server/agents/manifest.server.ts => lib/ai-gateway.server.ts",
+  "server/agents/orchestrator.server.ts => lib/training.functions.ts",
+  "server/agents/registry.ts => server/ai-usage.ts",
+  "server/agents/runtime.server.ts => lib/ai-gateway.server.ts",
+  "server/agents/runtime.server.ts => server/training/capture.server.ts",
+  "server/agents/talent-search.server.ts => lib/ai-gateway.server.ts"
+ ],
+ "agents -> desk": [
+  "lib/agents.functions.ts => server/desk/desk.server.ts",
+  "server/agents/orchestrator.server.ts => server/desk/desk.server.ts",
+  "server/agents/runtime.server.ts => server/desk/desk.server.ts",
+  "server/agents/tools.ts => server/desk/desk.server.ts"
+ ],
+ "ai -> db": [
+  "lib/ai-gateway.server.ts => server/db.ts",
+  "lib/ai-gateway.server.ts => drizzle/schema.ts",
+  "lib/ai-settings.functions.ts => server/db.ts",
+  "lib/ai-settings.functions.ts => drizzle/schema.ts",
+  "lib/platform-ai-usage.functions.ts => server/db.ts",
+  "lib/platform-ai-usage.functions.ts => drizzle/schema.ts",
+  "lib/training.functions.ts => server/db.ts",
+  "lib/training.functions.ts => drizzle/schema.ts",
+  "server/ai-spend-cap.ts => server/db.ts",
+  "server/ai-spend-cap.ts => drizzle/schema.ts",
+  "server/ai-usage.ts => server/db.ts",
+  "server/ai-usage.ts => drizzle/schema.ts",
+  "server/redteam/check.server.ts => server/db.ts",
+  "server/redteam/check.server.ts => drizzle/schema.ts",
+  "server/training/capture.server.ts => server/db.ts",
+  "server/training/capture.server.ts => drizzle/schema.ts"
+ ],
+ "ai -> voice": [
+  "lib/ai-gateway.server.ts => server/voice/debug.ts"
+ ],
+ "ai -> core": [
+  "lib/ai-gateway.server.ts => server/crypto.ts",
+  "lib/ai-gateway.server.ts => server/log.ts",
+  "lib/ai-settings.functions.ts => server/audit.ts",
+  "lib/training.functions.ts => server/audit.ts",
+  "server/training/capture.server.ts => server/log.ts"
+ ],
+ "ai -> auth": [
+  "lib/ai-settings.functions.ts => lib/auth.middleware.ts",
+  "lib/platform-ai-usage.functions.ts => lib/auth.middleware.ts",
+  "lib/training.functions.ts => lib/auth.middleware.ts"
+ ],
+ "candidates -> db": [
+  "lib/apply.functions.ts => server/db.ts",
+  "lib/apply.functions.ts => drizzle/schema.ts",
+  "lib/candidates.functions.ts => server/db.ts",
+  "lib/candidates.functions.ts => drizzle/schema.ts",
+  "lib/capture.functions.ts => server/db.ts",
+  "lib/capture.functions.ts => drizzle/schema.ts",
+  "lib/capture.server.ts => server/db.ts",
+  "lib/capture.server.ts => drizzle/schema.ts",
+  "lib/collect.functions.ts => server/db.ts",
+  "lib/collect.functions.ts => drizzle/schema.ts",
+  "lib/dedupe.functions.ts => server/db.ts",
+  "lib/dedupe.functions.ts => drizzle/schema.ts",
+  "lib/linkedin.functions.ts => server/db.ts",
+  "lib/linkedin.functions.ts => drizzle/schema.ts",
+  "lib/linkedin.server.ts => server/db.ts",
+  "lib/linkedin.server.ts => drizzle/schema.ts",
+  "lib/pool-share.ts => drizzle/schema.ts",
+  "lib/resume.functions.ts => server/db.ts",
+  "lib/resume.functions.ts => drizzle/schema.ts"
+ ],
+ "candidates -> agents": [
+  "lib/apply.functions.ts => server/agents/injection.ts",
+  "lib/dedupe.functions.ts => server/agents/runtime.server.ts"
+ ],
+ "candidates -> ai": [
+  "lib/apply.functions.ts => lib/ai-gateway.server.ts",
+  "lib/capture.server.ts => lib/ai-gateway.server.ts",
+  "lib/social.server.ts => lib/ai-gateway.server.ts"
+ ],
+ "candidates -> distribution": [
+  "lib/apply.functions.ts => lib/job-channels.ts",
+  "lib/apply.functions.ts => server/distribution/distribution.server.ts",
+  "lib/apply.functions.ts => server/distribution/content.ts",
+  "lib/candidates.functions.ts => lib/job-channels.ts",
+  "lib/capture.server.ts => lib/job-channels.ts"
+ ],
+ "candidates -> comms": [
+  "lib/apply.functions.ts => lib/email-outbox.server.ts",
+  "lib/collect.functions.ts => lib/local-inbox.server.ts"
+ ],
+ "interviews -> db": [
+  "lib/assessment-timeline.server.ts => server/db.ts",
+  "lib/assessment-timeline.server.ts => drizzle/schema.ts",
+  "lib/assessment.functions.ts => server/db.ts",
+  "lib/assessment.functions.ts => drizzle/schema.ts",
+  "lib/calendar-availability.server.ts => server/db.ts",
+  "lib/calendar-availability.server.ts => drizzle/schema.ts",
+  "lib/interview-plan.functions.ts => server/db.ts",
+  "lib/interview-plan.functions.ts => drizzle/schema.ts",
+  "lib/interview-plan.server.ts => server/db.ts",
+  "lib/interview-plan.server.ts => drizzle/schema.ts",
+  "lib/interviewer-brief.server.ts => server/db.ts",
+  "lib/interviewer-brief.server.ts => drizzle/schema.ts",
+  "lib/interviewers.server.ts => drizzle/schema.ts",
+  "lib/interviewers.server.ts => server/db.ts",
+  "lib/interviews.functions.ts => server/db.ts",
+  "lib/interviews.functions.ts => drizzle/schema.ts",
+  "lib/meetings-oauth.server.ts => server/db.ts",
+  "lib/meetings-oauth.server.ts => drizzle/schema.ts",
+  "lib/meetings.functions.ts => server/db.ts",
+  "lib/meetings.functions.ts => drizzle/schema.ts",
+  "lib/panel-brief.server.ts => drizzle/schema.ts",
+  "lib/panel-brief.server.ts => server/db.ts",
+  "lib/panelist-links.server.ts => drizzle/schema.ts",
+  "lib/panelist-links.server.ts => server/db.ts",
+  "lib/panelists.server.ts => drizzle/schema.ts",
+  "lib/panelists.server.ts => server/db.ts",
+  "lib/panels.functions.ts => drizzle/schema.ts",
+  "lib/panels.functions.ts => server/db.ts",
+  "lib/panels.server.ts => drizzle/schema.ts",
+  "lib/panels.server.ts => server/db.ts",
+  "lib/screening-coverage.ts => drizzle/schema.ts",
+  "lib/slot-offers.server.ts => server/db.ts",
+  "lib/slot-offers.server.ts => drizzle/schema.ts",
+  "server/panel/assess.server.ts => drizzle/schema.ts",
+  "server/panel/assess.server.ts => server/db.ts",
+  "server/panel/review.server.ts => drizzle/schema.ts",
+  "server/panel/review.server.ts => server/db.ts",
+  "server/panel/transcripts.server.ts => drizzle/schema.ts",
+  "server/panel/transcripts.server.ts => server/db.ts"
+ ],
+ "interviews -> comms": [
+  "lib/assessment-timeline.server.ts => lib/email-outbox.server.ts",
+  "lib/assessment.functions.ts => lib/email-outbox.server.ts",
+  "lib/interviewer-brief.server.ts => lib/ics.ts",
+  "lib/interviewer-brief.server.ts => lib/email-outbox.server.ts",
+  "lib/interviews.functions.ts => lib/ics.ts",
+  "lib/interviews.functions.ts => lib/email-outbox.server.ts",
+  "lib/slot-offers.server.ts => lib/email-outbox.server.ts",
+  "server/panel/assess.server.ts => lib/email-outbox.server.ts"
+ ],
+ "interviews -> desk": [
+  "lib/assessment-timeline.server.ts => server/desk/desk.server.ts",
+  "lib/interviews.functions.ts => server/desk/desk.server.ts",
+  "lib/slot-offers.server.ts => server/desk/desk.server.ts",
+  "server/panel/review.server.ts => server/desk/desk.server.ts"
+ ],
+ "interviews -> core": [
+  "lib/assessment-timeline.server.ts => server/env.ts",
+  "lib/assessment-timeline.server.ts => server/audit.ts",
+  "lib/assessment-timeline.server.ts => server/log.ts",
+  "lib/interview-plan.functions.ts => server/guards.ts",
+  "lib/interview-plan.functions.ts => server/audit.ts",
+  "lib/interviewer-brief.server.ts => server/env.ts",
+  "lib/interviewers.server.ts => server/audit.ts",
+  "lib/interviews.functions.ts => lib/local-time.ts",
+  "lib/interviews.functions.ts => server/audit.ts",
+  "lib/meeting-transcripts.server.ts => server/safe-fetch.ts",
+  "lib/meetings-oauth.server.ts => server/env.ts",
+  "lib/meetings.server.ts => server/env.ts",
+  "lib/panelist-links.server.ts => server/env.ts",
+  "lib/panelist-links.server.ts => server/audit.ts",
+  "lib/panelists.server.ts => server/audit.ts",
+  "lib/panels.functions.ts => server/guards.ts",
+  "lib/panels.server.ts => server/audit.ts",
+  "lib/slot-offers.server.ts => server/env.ts",
+  "lib/slot-offers.server.ts => server/audit.ts",
+  "lib/slot-offers.server.ts => server/log.ts",
+  "server/panel/assess.server.ts => server/env.ts",
+  "server/panel/review.server.ts => server/audit.ts",
+  "server/panel/review.server.ts => server/log.ts",
+  "server/panel/transcripts.server.ts => server/audit.ts",
+  "server/panel/transcripts.server.ts => server/log.ts"
+ ],
+ "interviews -> requisitions": [
+  "lib/assessment-timeline.server.ts => lib/pipeline.server.ts",
+  "lib/interviews.functions.ts => lib/lifecycle.ts",
+  "lib/interviews.functions.ts => lib/stage-events.server.ts",
+  "lib/slot-offers.server.ts => lib/pipeline.server.ts",
+  "server/panel/review.server.ts => lib/pipeline.server.ts"
+ ],
+ "interviews -> agents": [
+  "lib/assessment-timeline.server.ts => server/agents/context.ts",
+  "lib/assessment-timeline.server.ts => server/agents/events.ts",
+  "lib/assessment-timeline.server.ts => server/agents/policy.ts",
+  "lib/assessment.functions.ts => server/agents/context.ts",
+  "lib/interviews.functions.ts => server/agents/events.ts",
+  "lib/slot-offers.server.ts => server/agents/events.ts",
+  "server/panel/assess.server.ts => server/agents/context.ts",
+  "server/panel/review.server.ts => server/agents/policy.ts",
+  "server/panel/review.server.ts => server/agents/events.ts",
+  "server/panel/transcripts.server.ts => server/agents/events.ts"
+ ],
+ "interviews -> matching": [
+  "lib/assessment-timeline.server.ts => lib/screening.functions.ts"
+ ],
+ "interviews -> auth": [
+  "lib/assessment.functions.ts => lib/auth.middleware.ts",
+  "lib/interview-plan.functions.ts => lib/auth.middleware.ts",
+  "lib/interviewers.functions.ts => lib/auth.middleware.ts",
+  "lib/interviews.functions.ts => lib/auth.middleware.ts",
+  "lib/meetings-oauth.server.ts => lib/oauth-state.ts",
+  "lib/meetings.functions.ts => lib/auth.middleware.ts",
+  "lib/panelists.functions.ts => lib/auth.middleware.ts",
+  "lib/panels.functions.ts => lib/auth.middleware.ts",
+  "server/panel/review.server.ts => lib/auth.middleware.ts"
+ ],
+ "interviews -> ai": [
+  "lib/assessment.server.ts => lib/ai-gateway.server.ts",
+  "lib/interviews.functions.ts => server/training/capture.server.ts",
+  "server/panel/assess.server.ts => lib/ai-gateway.server.ts",
+  "server/panel/prompts.ts => lib/ai-gateway.server.ts",
+  "server/panel/review.server.ts => server/training/capture.server.ts"
+ ],
+ "auth -> db": [
+  "lib/auth.middleware.ts => server/db.ts",
+  "lib/auth.middleware.ts => drizzle/schema.ts",
+  "server/identity.ts => server/db.ts",
+  "server/identity.ts => drizzle/schema.ts",
+  "server/step-up.ts => server/db.ts",
+  "server/step-up.ts => drizzle/schema.ts"
+ ],
+ "matching -> db": [
+  "lib/autoscore.server.ts => server/db.ts",
+  "lib/autoscore.server.ts => drizzle/schema.ts",
+  "lib/bias.server.ts => server/db.ts",
+  "lib/bias.server.ts => drizzle/schema.ts",
+  "lib/matching.functions.ts => server/db.ts",
+  "lib/matching.functions.ts => drizzle/schema.ts",
+  "lib/screening-prep.server.ts => server/db.ts",
+  "lib/screening-prep.server.ts => drizzle/schema.ts",
+  "lib/screening-queue.functions.ts => server/db.ts",
+  "lib/screening-queue.functions.ts => drizzle/schema.ts",
+  "lib/screening-rationale.functions.ts => drizzle/schema.ts",
+  "lib/screening-rationale.functions.ts => server/db.ts",
+  "lib/screening.functions.ts => server/db.ts",
+  "lib/screening.functions.ts => drizzle/schema.ts",
+  "lib/verification.functions.ts => server/db.ts",
+  "lib/verification.functions.ts => drizzle/schema.ts"
+ ],
+ "matching -> interviews": [
+  "lib/autoscore.server.ts => lib/logistics.ts",
+  "lib/matching.functions.ts => lib/logistics.ts",
+  "lib/matching.server.ts => lib/logistics.ts",
+  "lib/screening-rationale.functions.ts => lib/screening-coverage.ts"
+ ],
+ "matching -> requisitions": [
+  "lib/autoscore.server.ts => lib/stage-events.server.ts",
+  "lib/matching.functions.ts => lib/stage-events.server.ts"
+ ],
+ "matching -> ai": [
+  "lib/autoscore.server.ts => server/ai-spend-cap.ts",
+  "lib/matching.functions.ts => lib/ai-gateway.server.ts",
+  "lib/matching.server.ts => lib/ai-gateway.server.ts",
+  "lib/screening.server.ts => lib/ai-gateway.server.ts",
+  "lib/verification.server.ts => lib/ai-gateway.server.ts"
+ ],
+ "matching -> agents": [
+  "lib/autoscore.server.ts => server/agents/context.ts",
+  "lib/matching.server.ts => server/agents/injection.ts",
+  "lib/screening-prep.server.ts => server/agents/context.ts"
+ ],
+ "distribution -> db": [
+  "lib/boards.functions.ts => server/db.ts",
+  "lib/boards.functions.ts => drizzle/schema.ts",
+  "server/boards/ingest.server.ts => server/db.ts",
+  "server/boards/ingest.server.ts => drizzle/schema.ts",
+  "server/boards/poll.server.ts => server/db.ts",
+  "server/boards/poll.server.ts => drizzle/schema.ts",
+  "server/boards/publish.server.ts => server/db.ts",
+  "server/boards/publish.server.ts => drizzle/schema.ts",
+  "server/boards/registry.ts => server/db.ts",
+  "server/boards/registry.ts => drizzle/schema.ts",
+  "server/distribution/distribution.server.ts => drizzle/schema.ts",
+  "server/distribution/distribution.server.ts => server/db.ts",
+  "server/distribution/google-indexing.server.ts => drizzle/schema.ts",
+  "server/distribution/google-indexing.server.ts => server/db.ts"
+ ],
+ "distribution -> auth": [
+  "lib/boards.functions.ts => lib/auth.middleware.ts",
+  "lib/distribution.functions.ts => lib/auth.middleware.ts"
+ ],
+ "distribution -> org": [
+  "lib/boards.functions.ts => server/integration-seeds.server.ts",
+  "server/boards/partner.ts => lib/integrations.server.ts",
+  "server/boards/registry.ts => lib/integrations.server.ts"
+ ],
+ "distribution -> core": [
+  "lib/boards.functions.ts => server/crypto.ts",
+  "lib/boards.functions.ts => server/audit.ts",
+  "lib/boards.functions.ts => server/env.ts",
+  "server/boards/indeed.ts => server/safe-fetch.ts",
+  "server/boards/ingest.server.ts => server/safe-fetch.ts",
+  "server/boards/linkedin.ts => server/safe-fetch.ts",
+  "server/boards/naukri.ts => server/safe-fetch.ts",
+  "server/boards/partner.ts => server/safe-fetch.ts",
+  "server/boards/publish.server.ts => server/audit.ts",
+  "server/boards/publish.server.ts => server/guards.ts",
+  "server/boards/publish.server.ts => server/env.ts",
+  "server/distribution/distribution.server.ts => server/env.ts",
+  "server/distribution/distribution.server.ts => server/audit.ts",
+  "server/distribution/distribution.server.ts => server/crypto.ts",
+  "server/distribution/distribution.server.ts => server/guards.ts",
+  "server/distribution/google-indexing.server.ts => server/env.ts"
+ ],
+ "interviews -> org": [
+  "lib/calendar-availability.server.ts => lib/integrations.server.ts",
+  "lib/meetings-oauth.server.ts => lib/integrations.server.ts",
+  "lib/meetings.functions.ts => lib/integrations.server.ts",
+  "server/panel/transcripts.server.ts => lib/integrations.server.ts"
+ ],
+ "candidates -> auth": [
+  "lib/candidates.functions.ts => lib/auth.middleware.ts",
+  "lib/capture.functions.ts => lib/auth.middleware.ts",
+  "lib/collect.functions.ts => lib/auth.middleware.ts",
+  "lib/dedupe.functions.ts => lib/auth.middleware.ts",
+  "lib/linkedin.functions.ts => lib/auth.middleware.ts",
+  "lib/linkedin.server.ts => lib/oauth-state.ts",
+  "lib/resume.functions.ts => lib/auth.middleware.ts"
+ ],
+ "candidates -> core": [
+  "lib/candidates.functions.ts => server/erase.server.ts",
+  "lib/candidates.functions.ts => server/guards.ts",
+  "lib/capture.functions.ts => server/env.ts",
+  "lib/capture.functions.ts => server/crypto.ts",
+  "lib/capture.functions.ts => server/audit.ts",
+  "lib/capture.server.ts => server/guards.ts",
+  "lib/collect.functions.ts => server/env.ts",
+  "lib/collect.functions.ts => server/crypto.ts",
+  "lib/linkedin.functions.ts => server/audit.ts",
+  "lib/linkedin.server.ts => server/env.ts",
+  "lib/linkedin.server.ts => server/crypto.ts",
+  "lib/resume.functions.ts => server/storage.ts",
+  "lib/social.server.ts => server/safe-fetch.ts",
+  "server/parser/client.ts => server/log.ts"
+ ],
+ "candidates -> requisitions": [
+  "lib/candidates.functions.ts => lib/pipeline.server.ts",
+  "lib/capture.server.ts => lib/intake.server.ts",
+  "lib/cv-intake.ts => lib/intake.functions.ts"
+ ],
+ "candidates -> matching": [
+  "lib/capture.server.ts => lib/verification.server.ts",
+  "lib/capture.server.ts => lib/autoscore.server.ts",
+  "lib/collect.functions.ts => lib/autoscore.server.ts",
+  "lib/cv-intake.ts => lib/shortlist.ts"
+ ],
+ "catalogue -> auth": [
+  "lib/catalogue.functions.ts => lib/auth.middleware.ts",
+  "lib/org-agreements.functions.ts => lib/auth.middleware.ts"
+ ],
+ "catalogue -> db": [
+  "lib/catalogue.functions.ts => server/db.ts",
+  "lib/catalogue.functions.ts => drizzle/schema.ts"
+ ],
+ "org -> auth": [
+  "lib/collaboration.functions.ts => lib/auth.middleware.ts",
+  "lib/integrations-oauth.functions.ts => lib/auth.middleware.ts",
+  "lib/integrations-oauth.functions.ts => lib/oauth-state.ts",
+  "lib/integrations.functions.ts => lib/auth.middleware.ts",
+  "lib/master.functions.ts => lib/auth.middleware.ts",
+  "lib/ontology.functions.ts => lib/auth.middleware.ts",
+  "lib/org-context.functions.ts => lib/auth.middleware.ts",
+  "lib/org-context.server.ts => lib/auth.middleware.ts",
+  "lib/org-profile.functions.ts => lib/auth.middleware.ts",
+  "lib/org-profile.server.ts => lib/auth.middleware.ts",
+  "lib/org.functions.ts => lib/auth.middleware.ts",
+  "lib/org.functions.ts => server/claims.ts",
+  "lib/org.functions.ts => lib/work-email.ts",
+  "lib/queries.functions.ts => lib/auth.middleware.ts"
+ ],
+ "org -> db": [
+  "lib/collaboration.functions.ts => server/db.ts",
+  "lib/collaboration.functions.ts => drizzle/schema.ts",
+  "lib/data.ts => lib/database.types.ts",
+  "lib/integrations.functions.ts => server/db.ts",
+  "lib/integrations.functions.ts => drizzle/schema.ts",
+  "lib/integrations.server.ts => server/db.ts",
+  "lib/integrations.server.ts => drizzle/schema.ts",
+  "lib/master.functions.ts => server/db.ts",
+  "lib/master.functions.ts => drizzle/schema.ts",
+  "lib/ontology.functions.ts => server/db.ts",
+  "lib/ontology.functions.ts => drizzle/schema.ts",
+  "lib/org-context.functions.ts => server/db.ts",
+  "lib/org-context.functions.ts => drizzle/schema.ts",
+  "lib/org-context.server.ts => server/db.ts",
+  "lib/org-context.server.ts => drizzle/schema.ts",
+  "lib/org-profile.functions.ts => server/db.ts",
+  "lib/org-profile.functions.ts => drizzle/schema.ts",
+  "lib/org-profile.server.ts => server/db.ts",
+  "lib/org-profile.server.ts => drizzle/schema.ts",
+  "lib/org-profile.ts => drizzle/schema.ts",
+  "lib/org.functions.ts => server/db.ts",
+  "lib/org.functions.ts => drizzle/schema.ts",
+  "lib/queries.functions.ts => server/db.ts",
+  "lib/queries.functions.ts => drizzle/schema.ts",
+  "server/integration-seeds.server.ts => server/db.ts",
+  "server/integration-seeds.server.ts => drizzle/schema.ts",
+  "server/org-agreements.server.ts => drizzle/schema.ts",
+  "server/org-agreements.server.ts => server/db.ts",
+  "server/org-setup.server.ts => server/db.ts",
+  "server/org-setup.server.ts => drizzle/schema.ts"
+ ],
+ "org -> requisitions": [
+  "lib/collaboration.functions.ts => lib/pipeline.server.ts"
+ ],
+ "org -> core": [
+  "lib/collaboration.functions.ts => server/guards.ts",
+  "lib/integrations.functions.ts => server/audit.ts",
+  "lib/integrations.server.ts => server/env.ts",
+  "lib/integrations.server.ts => server/crypto.ts",
+  "lib/org-context.server.ts => server/audit.ts",
+  "lib/org-context.server.ts => server/safe-fetch.ts",
+  "lib/org-context.server.ts => server/storage.ts",
+  "lib/org-profile.server.ts => server/audit.ts",
+  "lib/org-profile.server.ts => server/storage.ts",
+  "lib/org.functions.ts => server/audit.ts",
+  "lib/org.functions.ts => server/client-ip.ts",
+  "server/org-agreements.server.ts => server/audit.ts"
+ ],
+ "offers -> db": [
+  "lib/comp-knowledge.functions.ts => server/db.ts",
+  "lib/comp-knowledge.functions.ts => drizzle/schema.ts",
+  "lib/comp-knowledge.server.ts => server/db.ts",
+  "lib/comp-knowledge.server.ts => drizzle/schema.ts",
+  "lib/compensation.functions.ts => server/db.ts",
+  "lib/compensation.functions.ts => drizzle/schema.ts",
+  "lib/compensation.server.ts => server/db.ts",
+  "lib/compensation.server.ts => drizzle/schema.ts",
+  "lib/negotiation.functions.ts => server/db.ts",
+  "lib/negotiation.functions.ts => drizzle/schema.ts",
+  "lib/negotiation.server.ts => server/db.ts",
+  "lib/negotiation.server.ts => drizzle/schema.ts",
+  "lib/offer-response.server.ts => server/db.ts",
+  "lib/offer-response.server.ts => drizzle/schema.ts",
+  "lib/offers.functions.ts => server/db.ts",
+  "lib/offers.functions.ts => drizzle/schema.ts",
+  "lib/roi.functions.ts => server/db.ts",
+  "lib/roi.functions.ts => drizzle/schema.ts",
+  "lib/salary-benchmark.functions.ts => server/db.ts",
+  "lib/salary-benchmark.functions.ts => drizzle/schema.ts"
+ ],
+ "offers -> auth": [
+  "lib/comp-knowledge.functions.ts => lib/auth.middleware.ts",
+  "lib/compensation.functions.ts => lib/auth.middleware.ts",
+  "lib/compensation.server.ts => lib/auth.middleware.ts",
+  "lib/hiring-cost.functions.ts => lib/auth.middleware.ts",
+  "lib/market.functions.ts => lib/auth.middleware.ts",
+  "lib/negotiation.functions.ts => lib/auth.middleware.ts",
+  "lib/negotiation.server.ts => lib/auth.middleware.ts",
+  "lib/offers.functions.ts => lib/auth.middleware.ts",
+  "lib/offers.functions.ts => server/step-up.ts",
+  "lib/roi.functions.ts => lib/auth.middleware.ts",
+  "lib/salary-benchmark.functions.ts => lib/auth.middleware.ts"
+ ],
+ "offers -> core": [
+  "lib/comp-knowledge.functions.ts => server/audit.ts",
+  "lib/comp-knowledge.functions.ts => server/guards.ts",
+  "lib/compensation.server.ts => server/env.ts",
+  "lib/compensation.server.ts => server/audit.ts",
+  "lib/hiring-cost.functions.ts => server/guards.ts",
+  "lib/market.server.ts => server/safe-fetch.ts",
+  "lib/negotiation.server.ts => server/audit.ts",
+  "lib/negotiation.server.ts => server/env.ts",
+  "lib/offer-response.server.ts => server/audit.ts",
+  "lib/offers.functions.ts => server/env.ts",
+  "lib/offers.functions.ts => server/log.ts",
+  "lib/offers.functions.ts => server/audit.ts"
+ ],
+ "offers -> comms": [
+  "lib/compensation.functions.ts => lib/email-outbox.server.ts",
+  "lib/compensation.server.ts => lib/email-outbox.server.ts",
+  "lib/negotiation.server.ts => lib/email-outbox.server.ts",
+  "lib/offers.functions.ts => lib/templates.server.ts",
+  "lib/offers.functions.ts => lib/email-outbox.server.ts"
+ ],
+ "offers -> interviews": [
+  "lib/compensation.functions.ts => lib/assessment-timeline.server.ts",
+  "lib/compensation.server.ts => lib/assessment-timeline.server.ts",
+  "lib/negotiation.server.ts => lib/assessment-timeline.server.ts"
+ ],
+ "offers -> desk": [
+  "lib/compensation.server.ts => server/desk/desk.server.ts",
+  "lib/negotiation.server.ts => server/desk/desk.server.ts",
+  "lib/offer-response.server.ts => server/desk/desk.server.ts",
+  "lib/offers.functions.ts => server/desk/desk.server.ts"
+ ],
+ "offers -> agents": [
+  "lib/compensation.server.ts => server/agents/events.ts",
+  "lib/compensation.server.ts => server/agents/policy.ts",
+  "lib/hiring-cost.functions.ts => server/agents/hiring-cost.server.ts",
+  "lib/negotiation.server.ts => server/agents/events.ts",
+  "lib/offer-response.server.ts => server/agents/events.ts",
+  "lib/offers.functions.ts => server/agents/events.ts"
+ ],
+ "desk -> db": [
+  "lib/copilot.functions.ts => server/db.ts",
+  "lib/copilot.functions.ts => drizzle/schema.ts",
+  "lib/hiring-desk.functions.ts => server/db.ts",
+  "lib/hiring-desk.functions.ts => drizzle/schema.ts",
+  "lib/org-desk.functions.ts => server/db.ts",
+  "lib/org-desk.functions.ts => drizzle/schema.ts",
+  "server/desk/desk.server.ts => server/db.ts",
+  "server/desk/desk.server.ts => drizzle/schema.ts",
+  "server/desk/org-desk.server.ts => server/db.ts",
+  "server/desk/org-desk.server.ts => drizzle/schema.ts"
+ ],
+ "desk -> auth": [
+  "lib/copilot.functions.ts => lib/auth.middleware.ts",
+  "lib/hiring-desk.functions.ts => lib/auth.middleware.ts",
+  "lib/org-desk.functions.ts => lib/auth.middleware.ts",
+  "server/desk/desk.server.ts => lib/auth.middleware.ts"
+ ],
+ "desk -> ai": [
+  "lib/copilot.functions.ts => lib/ai-gateway.server.ts",
+  "lib/hiring-desk.functions.ts => lib/ai-gateway.server.ts",
+  "lib/org-desk.functions.ts => lib/ai-gateway.server.ts",
+  "server/desk/desk.server.ts => lib/ai-gateway.server.ts",
+  "server/desk/org-desk.server.ts => lib/ai-gateway.server.ts"
+ ],
+ "org -> matching": [
+  "lib/data.ts => lib/screening-queue.functions.ts"
+ ],
+ "org -> offers": [
+  "lib/data.ts => lib/salary-benchmark.functions.ts"
+ ],
+ "org -> comms": [
+  "lib/data.ts => lib/templates.functions.ts",
+  "lib/org.functions.ts => lib/email-templates/send-email.ts"
+ ],
+ "candidates -> org": [
+  "lib/dedupe.ts => lib/data.ts"
+ ],
+ "comms -> db": [
+  "lib/email-outbox.server.ts => server/db.ts",
+  "lib/email-outbox.server.ts => drizzle/schema.ts",
+  "lib/email-settings.functions.ts => server/db.ts",
+  "lib/email-settings.functions.ts => drizzle/schema.ts",
+  "lib/local-inbox.functions.ts => server/db.ts",
+  "lib/local-inbox.functions.ts => drizzle/schema.ts",
+  "lib/local-inbox.server.ts => server/db.ts",
+  "lib/local-inbox.server.ts => drizzle/schema.ts",
+  "lib/notifications.functions.ts => server/db.ts",
+  "lib/notifications.functions.ts => drizzle/schema.ts",
+  "lib/nudges.functions.ts => server/db.ts",
+  "lib/nudges.functions.ts => drizzle/schema.ts",
+  "lib/templates.functions.ts => server/db.ts",
+  "lib/templates.functions.ts => drizzle/schema.ts",
+  "lib/templates.server.ts => server/db.ts",
+  "lib/templates.server.ts => drizzle/schema.ts"
+ ],
+ "comms -> auth": [
+  "lib/email-settings.functions.ts => lib/auth.middleware.ts",
+  "lib/local-inbox.functions.ts => lib/auth.middleware.ts",
+  "lib/local-inbox.functions.ts => lib/work-email.ts",
+  "lib/notifications.functions.ts => lib/auth.middleware.ts",
+  "lib/nudges.functions.ts => lib/auth.middleware.ts",
+  "lib/templates.functions.ts => lib/auth.middleware.ts"
+ ],
+ "comms -> core": [
+  "lib/email-settings.functions.ts => server/audit.ts",
+  "lib/nudges.functions.ts => server/audit.ts",
+  "lib/templates.functions.ts => server/storage.ts"
+ ],
+ "desk -> agents": [
+  "lib/hiring-desk.functions.ts => server/agents/index.ts",
+  "lib/hiring-desk.functions.ts => server/agents/runtime.server.ts",
+  "lib/hiring-desk.functions.ts => server/agents/orchestrator.server.ts",
+  "lib/org-desk.functions.ts => server/agents/index.ts",
+  "lib/org-desk.functions.ts => server/agents/runtime.server.ts",
+  "server/desk/desk.server.ts => server/agents/run-messages.ts",
+  "server/desk/desk.server.ts => server/agents/registry.ts",
+  "server/desk/desk.server.ts => server/agents/task-liveness.ts",
+  "server/desk/desk.server.ts => server/agents/policy.ts",
+  "server/desk/desk.server.ts => server/agents/runtime.server.ts",
+  "server/desk/desk.server.ts => server/agents/tools.ts",
+  "server/desk/desk.server.ts => server/agents/orchestrator.server.ts",
+  "server/desk/desk.server.ts => server/agents/events.ts",
+  "server/desk/desk.server.ts => server/agents/context.ts",
+  "server/desk/desk.server.ts => server/agents/index.ts",
+  "server/desk/org-desk.server.ts => server/agents/policy.ts",
+  "server/desk/org-desk.server.ts => server/agents/runtime.server.ts",
+  "server/desk/org-desk.server.ts => server/agents/orchestrator.server.ts"
+ ],
+ "desk -> core": [
+  "lib/hiring-desk.functions.ts => server/guards.ts",
+  "lib/hiring-desk.functions.ts => server/audit.ts",
+  "server/desk/desk.server.ts => lib/local-time.ts",
+  "server/desk/desk.server.ts => server/audit.ts",
+  "server/desk/desk.server.ts => server/log.ts",
+  "server/desk/org-desk.server.ts => server/log.ts"
+ ],
+ "onboarding -> auth": [
+  "lib/hr-performance.functions.ts => lib/auth.middleware.ts",
+  "lib/hrms.functions.ts => lib/auth.middleware.ts",
+  "lib/onboarding.functions.ts => lib/auth.middleware.ts"
+ ],
+ "onboarding -> db": [
+  "lib/hr-performance.functions.ts => server/db.ts",
+  "lib/hr-performance.functions.ts => drizzle/schema.ts",
+  "lib/hrms.functions.ts => server/db.ts",
+  "lib/hrms.functions.ts => drizzle/schema.ts",
+  "lib/hrms.server.ts => server/db.ts",
+  "lib/hrms.server.ts => drizzle/schema.ts",
+  "lib/onboarding.functions.ts => server/db.ts",
+  "lib/onboarding.functions.ts => drizzle/schema.ts",
+  "lib/onboarding.server.ts => server/db.ts",
+  "lib/onboarding.server.ts => drizzle/schema.ts"
+ ],
+ "onboarding -> org": [
+  "lib/hrms.functions.ts => lib/integrations.server.ts",
+  "lib/hrms.server.ts => lib/integrations.server.ts"
+ ],
+ "onboarding -> core": [
+  "lib/hrms.functions.ts => server/audit.ts",
+  "lib/hrms.server.ts => server/env.ts",
+  "lib/hrms.server.ts => server/audit.ts",
+  "lib/hrms.server.ts => server/safe-fetch.ts",
+  "lib/onboarding.functions.ts => server/audit.ts",
+  "lib/onboarding.functions.ts => server/storage.ts",
+  "lib/onboarding.server.ts => server/storage.ts"
+ ],
+ "requisitions -> auth": [
+  "lib/intake.functions.ts => lib/auth.middleware.ts",
+  "lib/lifecycle.functions.ts => lib/auth.middleware.ts",
+  "lib/lifecycle.functions.ts => server/step-up.ts",
+  "lib/pipeline.server.ts => lib/auth.middleware.ts",
+  "lib/requisitions.functions.ts => lib/auth.middleware.ts",
+  "lib/requisitions.server.ts => lib/auth.middleware.ts",
+  "lib/role-hiring-manager.functions.ts => lib/auth.middleware.ts",
+  "lib/role-profile.functions.ts => lib/auth.middleware.ts"
+ ],
+ "requisitions -> agents": [
+  "lib/intake.functions.ts => server/agents/context.ts",
+  "lib/intake.server.ts => server/agents/injection.ts",
+  "lib/intake.server.ts => server/agents/context.ts",
+  "lib/requisitions.functions.ts => server/agents/runtime.server.ts",
+  "lib/requisitions.server.ts => server/agents/events.ts",
+  "lib/stage-events.server.ts => server/agents/runtime.server.ts",
+  "lib/stage-events.server.ts => server/agents/events.ts"
+ ],
+ "requisitions -> distribution": [
+  "lib/intake.server.ts => lib/job-channels.ts",
+  "lib/pipeline.server.ts => lib/job-channels.ts",
+  "lib/requisitions.server.ts => server/boards/publish.server.ts"
+ ],
+ "requisitions -> db": [
+  "lib/intake.server.ts => server/db.ts",
+  "lib/intake.server.ts => drizzle/schema.ts",
+  "lib/lifecycle.functions.ts => server/db.ts",
+  "lib/lifecycle.functions.ts => drizzle/schema.ts",
+  "lib/lifecycle.ts => lib/database.types.ts",
+  "lib/pipeline.server.ts => server/db.ts",
+  "lib/pipeline.server.ts => drizzle/schema.ts",
+  "lib/requisitions.functions.ts => server/db.ts",
+  "lib/requisitions.functions.ts => drizzle/schema.ts",
+  "lib/requisitions.server.ts => server/db.ts",
+  "lib/requisitions.server.ts => drizzle/schema.ts",
+  "lib/role-hiring-manager.server.ts => drizzle/schema.ts",
+  "lib/role-hiring-manager.server.ts => server/db.ts",
+  "lib/stage-events.server.ts => server/db.ts",
+  "lib/stage-events.server.ts => drizzle/schema.ts"
+ ],
+ "requisitions -> core": [
+  "lib/intake.server.ts => server/storage.ts",
+  "lib/intake.server.ts => server/guards.ts",
+  "lib/requisitions.functions.ts => server/audit.ts",
+  "lib/requisitions.server.ts => server/audit.ts",
+  "lib/role-hiring-manager.functions.ts => server/guards.ts",
+  "lib/role-hiring-manager.server.ts => server/audit.ts"
+ ],
+ "requisitions -> ai": [
+  "lib/intake.server.ts => lib/ai-gateway.server.ts",
+  "lib/role-profile.server.ts => lib/ai-gateway.server.ts",
+  "lib/stage-events.server.ts => server/training/capture.server.ts"
+ ],
+ "org -> interviews": [
+  "lib/integrations-oauth.functions.ts => lib/meetings-oauth.server.ts",
+  "lib/integrations-oauth.functions.ts => server/panel/transcripts.server.ts",
+  "lib/integrations.server.ts => lib/meetings.server.ts"
+ ],
+ "org -> distribution": [
+  "lib/integrations.functions.ts => lib/job-channels.ts"
+ ],
+ "catalogue -> ui": [
+  "lib/legal/agreements.ts => components/LegalPage.tsx",
+  "lib/legal/dpa.ts => components/LegalPage.tsx",
+  "lib/legal/privacy.ts => components/LegalPage.tsx",
+  "lib/legal/terms.ts => components/LegalPage.tsx"
+ ],
+ "comms -> distribution": [
+  "lib/local-inbox.server.ts => lib/job-channels.ts"
+ ],
+ "comms -> requisitions": [
+  "lib/local-inbox.server.ts => lib/intake.server.ts",
+  "lib/nudges.functions.ts => lib/pipeline.server.ts"
+ ],
+ "comms -> candidates": [
+  "lib/local-inbox.server.ts => lib/cv-text.server.ts"
+ ],
+ "comms -> onboarding": [
+  "lib/local-inbox.server.ts => lib/onboarding.server.ts"
+ ],
+ "offers -> ai": [
+  "lib/market.server.ts => lib/ai-gateway.server.ts",
+  "lib/offer-response.server.ts => server/training/capture.server.ts",
+  "lib/offers.functions.ts => lib/ai-gateway.server.ts",
+  "lib/offers.functions.ts => server/training/capture.server.ts",
+  "lib/salary-benchmark.functions.ts => lib/ai-gateway.server.ts",
+  "lib/salary-benchmark.server.ts => lib/ai-gateway.server.ts"
+ ],
+ "matching -> auth": [
+  "lib/matching.functions.ts => lib/auth.middleware.ts",
+  "lib/screening-queue.functions.ts => lib/auth.middleware.ts",
+  "lib/screening-rationale.functions.ts => lib/auth.middleware.ts",
+  "lib/screening.functions.ts => lib/auth.middleware.ts",
+  "lib/verification.functions.ts => lib/auth.middleware.ts"
+ ],
+ "matching -> comms": [
+  "lib/matching.functions.ts => lib/templates.server.ts"
+ ],
+ "matching -> candidates": [
+  "lib/matching.functions.ts => lib/social.server.ts",
+  "lib/matching.server.ts => lib/social.server.ts"
+ ],
+ "matching -> org": [
+  "lib/matching.functions.ts => lib/org-context.server.ts",
+  "lib/matching.server.ts => lib/org-context.server.ts",
+  "lib/screening.server.ts => lib/org-context.server.ts",
+  "lib/shortlist.ts => lib/data.ts"
+ ],
+ "matching -> onboarding": [
+  "lib/matching.server.ts => lib/career.ts"
+ ],
+ "offers -> voice": [
+  "lib/negotiation.functions.ts => server/voice/negotiation-request.server.ts"
+ ],
+ "comms -> agents": [
+  "lib/notifications.functions.ts => server/agents/task-liveness.ts",
+  "lib/notifications.functions.ts => server/agents/health.server.ts",
+  "lib/notifications.functions.ts => server/agents/policy.ts"
+ ],
+ "comms -> interviews": [
+  "lib/notifications.functions.ts => lib/assessment-timeline.server.ts",
+  "lib/nudges.functions.ts => lib/assessment-timeline.server.ts"
+ ],
+ "comms -> offers": [
+  "lib/notifications.functions.ts => lib/compensation.server.ts",
+  "lib/notifications.functions.ts => lib/negotiation.server.ts"
+ ],
+ "auth -> core": [
+  "lib/oauth-state.ts => server/env.ts",
+  "server/step-up.ts => server/audit.ts"
+ ],
+ "offers -> requisitions": [
+  "lib/offer-response.server.ts => lib/stage-events.server.ts"
+ ],
+ "offers -> onboarding": [
+  "lib/offers.functions.ts => lib/onboarding.server.ts",
+  "lib/salary-benchmark.functions.ts => lib/career-ladder.ts",
+  "lib/salary-benchmark.server.ts => lib/career-ladder.ts"
+ ],
+ "onboarding -> ai": [
+  "lib/onboarding.functions.ts => server/training/capture.server.ts",
+  "lib/onboarding.server.ts => lib/ai-gateway.server.ts"
+ ],
+ "onboarding -> agents": [
+  "lib/onboarding.functions.ts => server/agents/events.ts",
+  "lib/onboarding.server.ts => server/agents/context.ts",
+  "lib/onboarding.server.ts => server/agents/events.ts"
+ ],
+ "onboarding -> candidates": [
+  "lib/onboarding.server.ts => lib/cv-text.server.ts"
+ ],
+ "org -> ai": [
+  "lib/ontology.functions.ts => lib/ai-gateway.server.ts",
+  "lib/org-context.server.ts => lib/ai-gateway.server.ts"
+ ],
+ "catalogue -> org": [
+  "lib/org-agreements.functions.ts => server/org-agreements.server.ts"
+ ],
+ "catalogue -> core": [
+  "lib/org-agreements.functions.ts => server/client-ip.ts"
+ ],
+ "org -> agents": [
+  "lib/org-context.functions.ts => server/agents/policy.ts",
+  "lib/org-context.functions.ts => server/agents/runtime.server.ts",
+  "lib/org-context.functions.ts => server/agents/orchestrator.server.ts",
+  "lib/org-context.server.ts => server/agents/injection.ts",
+  "lib/org-profile.server.ts => server/agents/injection.ts",
+  "lib/org-profile.server.ts => server/agents/orchestrator.server.ts",
+  "lib/org-profile.server.ts => server/agents/runtime.server.ts"
+ ],
+ "org -> candidates": [
+  "lib/org-context.server.ts => lib/cv-text.server.ts",
+  "lib/queries.functions.ts => lib/pool-share.ts"
+ ],
+ "desk -> org": [
+  "lib/org-desk.functions.ts => lib/org-profile.ts",
+  "lib/org-desk.functions.ts => lib/org-profile.server.ts",
+  "server/desk/desk.server.ts => lib/org-context.server.ts",
+  "server/desk/org-desk.server.ts => lib/org-profile.ts",
+  "server/desk/org-desk.server.ts => lib/org-profile.server.ts",
+  "server/desk/org-desk.server.ts => lib/org-context.server.ts"
+ ],
+ "org -> catalogue": [
+  "lib/org.functions.ts => lib/legal/acceptance.ts",
+  "server/org-agreements.server.ts => lib/legal/agreements.ts",
+  "server/org-agreements.server.ts => lib/legal/acceptance.ts"
+ ],
+ "agents -> interviews": [
+  "lib/panel-agent.functions.ts => server/panel/transcripts.server.ts",
+  "server/agents/expert-gate.server.ts => lib/interview-plan.server.ts",
+  "server/agents/health.server.ts => lib/panels.server.ts",
+  "server/agents/orchestrator.server.ts => lib/slot-offers.server.ts",
+  "server/agents/orchestrator.server.ts => server/panel/transcripts.server.ts",
+  "server/agents/orchestrator.server.ts => lib/assessment-timeline.server.ts",
+  "server/agents/panel-gate.server.ts => lib/interview-plan.server.ts",
+  "server/agents/panel-gate.server.ts => lib/interview-plan.ts",
+  "server/agents/panel-gate.server.ts => lib/panels.server.ts",
+  "server/agents/panel-gate.server.ts => lib/calendar-availability.server.ts",
+  "server/agents/panel-gate.server.ts => lib/interviewer-brief.server.ts",
+  "server/agents/panel-gate.server.ts => lib/interviews.functions.ts",
+  "server/agents/panel-gate.server.ts => lib/panelists.server.ts",
+  "server/agents/runtime.server.ts => server/panel/review.server.ts",
+  "server/agents/runtime.server.ts => lib/interview-plan.server.ts",
+  "server/agents/runtime.server.ts => lib/screening-coverage.ts",
+  "server/agents/tools-expert.ts => lib/interview-plan.server.ts",
+  "server/agents/tools-panel.ts => server/panel/assess.server.ts",
+  "server/agents/tools-panel.ts => server/panel/review.server.ts",
+  "server/agents/tools-phase2.ts => lib/assessment.functions.ts",
+  "server/agents/tools-phase2.ts => lib/assessment-timeline.server.ts",
+  "server/agents/tools-phase3.ts => lib/panels.server.ts",
+  "server/agents/tools-phase3.ts => lib/interview-plan.server.ts",
+  "server/agents/tools-phase3.ts => lib/panelists.server.ts",
+  "server/agents/tools-phase3.ts => lib/calendar-availability.server.ts",
+  "server/agents/tools-phase3.ts => lib/slot-offers.server.ts",
+  "server/agents/tools-phase3.ts => lib/meetings.functions.ts",
+  "server/agents/tools-phase3.ts => lib/interviews.functions.ts",
+  "server/agents/tools-phase4.ts => lib/interview-plan.server.ts"
+ ],
+ "voice -> auth": [
+  "lib/phone-screening.functions.ts => lib/auth.middleware.ts",
+  "lib/screening-calls.functions.ts => lib/auth.middleware.ts"
+ ],
+ "voice -> ai": [
+  "lib/phone-screening.functions.ts => lib/ai-gateway.server.ts",
+  "server/voice/call-session.server.ts => lib/ai-gateway.server.ts",
+  "server/voice/negotiation-session.server.ts => lib/ai-gateway.server.ts",
+  "server/voice/scheduling-session.server.ts => lib/ai-gateway.server.ts",
+  "server/voice/settings.server.ts => lib/ai-gateway.server.ts"
+ ],
+ "voice -> core": [
+  "lib/phone-screening.functions.ts => server/audit.ts",
+  "lib/screening-calls.functions.ts => server/audit.ts",
+  "server/voice/call-session.server.ts => server/log.ts",
+  "server/voice/dispatcher.server.ts => server/log.ts",
+  "server/voice/negotiation-request.server.ts => server/audit.ts",
+  "server/voice/negotiation-session.server.ts => server/log.ts",
+  "server/voice/negotiation-session.server.ts => server/audit.ts",
+  "server/voice/opt-out.server.ts => server/audit.ts",
+  "server/voice/request.server.ts => server/audit.ts",
+  "server/voice/scheduling-outcome.server.ts => server/log.ts",
+  "server/voice/scheduling-request.server.ts => server/audit.ts",
+  "server/voice/scheduling-session.server.ts => server/log.ts",
+  "server/voice/settings.server.ts => server/audit.ts",
+  "server/voice/settings.server.ts => server/env.ts",
+  "server/voice/sip-line.ts => server/env.ts",
+  "server/voice/worker.ts => server/env.ts",
+  "server/voice/worker.ts => server/log.ts"
+ ],
+ "platform-admin -> auth": [
+  "lib/platform-health.functions.ts => lib/auth.middleware.ts",
+  "lib/platform.functions.ts => lib/auth.middleware.ts"
+ ],
+ "platform-admin -> core": [
+  "lib/platform-health.functions.ts => server/slo.server.ts",
+  "lib/platform.functions.ts => server/audit.ts",
+  "lib/platform.functions.ts => server/storage.ts"
+ ],
+ "platform-admin -> db": [
+  "lib/platform.functions.ts => server/db.ts",
+  "lib/platform.functions.ts => drizzle/schema.ts"
+ ],
+ "platform-admin -> org": [
+  "lib/platform.functions.ts => server/org-agreements.server.ts"
+ ],
+ "platform-admin -> comms": [
+  "lib/platform.functions.ts => lib/email-templates/send-email.ts"
+ ],
+ "requisitions -> org": [
+  "lib/requisitions.server.ts => lib/org-profile.ts",
+  "lib/requisitions.server.ts => lib/org-profile.server.ts"
+ ],
+ "offers -> org": [
+  "lib/roi.functions.ts => lib/ontology.server.ts",
+  "lib/roi.server.ts => lib/ontology.server.ts"
+ ],
+ "voice -> db": [
+  "lib/screening-calls.functions.ts => drizzle/schema.ts",
+  "lib/screening-calls.functions.ts => server/db.ts",
+  "server/voice/call-brief.server.ts => drizzle/schema.ts",
+  "server/voice/call-brief.server.ts => server/db.ts",
+  "server/voice/call-session.server.ts => drizzle/schema.ts",
+  "server/voice/call-session.server.ts => server/db.ts",
+  "server/voice/dispatcher.server.ts => drizzle/schema.ts",
+  "server/voice/dispatcher.server.ts => server/db.ts",
+  "server/voice/negotiation-brief.server.ts => drizzle/schema.ts",
+  "server/voice/negotiation-brief.server.ts => server/db.ts",
+  "server/voice/negotiation-call-tools.ts => drizzle/schema.ts",
+  "server/voice/negotiation-request.server.ts => drizzle/schema.ts",
+  "server/voice/negotiation-request.server.ts => server/db.ts",
+  "server/voice/negotiation-session.server.ts => drizzle/schema.ts",
+  "server/voice/negotiation-session.server.ts => server/db.ts",
+  "server/voice/opt-out.server.ts => drizzle/schema.ts",
+  "server/voice/opt-out.server.ts => server/db.ts",
+  "server/voice/request.server.ts => drizzle/schema.ts",
+  "server/voice/request.server.ts => server/db.ts",
+  "server/voice/scheduling-brief.server.ts => drizzle/schema.ts",
+  "server/voice/scheduling-brief.server.ts => server/db.ts",
+  "server/voice/scheduling-outcome.server.ts => drizzle/schema.ts",
+  "server/voice/scheduling-outcome.server.ts => server/db.ts",
+  "server/voice/scheduling-request.server.ts => drizzle/schema.ts",
+  "server/voice/scheduling-request.server.ts => server/db.ts",
+  "server/voice/scheduling-session.server.ts => drizzle/schema.ts",
+  "server/voice/scheduling-session.server.ts => server/db.ts",
+  "server/voice/settings.server.ts => drizzle/schema.ts",
+  "server/voice/settings.server.ts => server/db.ts"
+ ],
+ "matching -> core": [
+  "lib/screening.functions.ts => server/storage.ts",
+  "lib/verification.server.ts => server/safe-fetch.ts"
+ ],
+ "requisitions -> comms": [
+  "lib/stage-events.server.ts => lib/email-outbox.server.ts"
+ ],
+ "comms -> ai": [
+  "lib/templates.functions.ts => lib/ai-gateway.server.ts"
+ ],
+ "ui -> candidates": [
+  "routes/api/public/capture.ts => lib/capture.server.ts",
+  "routes/api/public/distribution.ts => lib/capture.server.ts",
+  "routes/api/public/linkedin/callback.ts => lib/linkedin.server.ts",
+  "routes/apply.$id.tsx => lib/apply.functions.ts",
+  "routes/apply.$id.tsx => lib/cv-extract.ts",
+  "routes/candidates.$id.tsx => lib/resume.functions.ts",
+  "routes/candidates.$id.tsx => lib/resume-download.ts",
+  "routes/candidates.index.tsx => lib/resume.functions.ts",
+  "routes/candidates.index.tsx => lib/resume-download.ts",
+  "routes/candidates.index.tsx => lib/candidates.functions.ts",
+  "routes/candidates.index.tsx => lib/cv-intake.ts",
+  "routes/candidates.index.tsx => lib/dedupe.ts",
+  "routes/desk.tsx => lib/cv-intake.ts",
+  "routes/index.tsx => lib/dedupe.ts",
+  "routes/index.tsx => lib/candidates.functions.ts",
+  "routes/integrations.tsx => lib/linkedin.functions.ts",
+  "routes/integrations.tsx => lib/collect.functions.ts",
+  "routes/integrations.tsx => lib/capture.functions.ts",
+  "routes/matching.tsx => lib/cv-extract.ts",
+  "routes/requisitions.$id.tsx => lib/cv-extract.ts",
+  "routes/requisitions.$id.tsx => lib/cv-intake.ts",
+  "routes/requisitions.$id.tsx => lib/linkedin.functions.ts",
+  "routes/screening.tsx => lib/resume.functions.ts",
+  "routes/screening.tsx => lib/resume-download.ts",
+  "routes/templates.tsx => lib/cv-extract.ts"
+ ],
+ "agents -> comms": [
+  "server/agents/alerts.server.ts => lib/email-outbox.server.ts",
+  "server/agents/panel-gate.server.ts => lib/email-outbox.server.ts",
+  "server/agents/sourcing.server.ts => lib/local-inbox.server.ts",
+  "server/agents/tools-phase2.ts => lib/email-outbox.server.ts",
+  "server/agents/tools-phase3.ts => lib/email-outbox.server.ts",
+  "server/agents/tools-phase4.ts => lib/email-outbox.server.ts",
+  "server/agents/tools-scheduling-call.ts => lib/email-outbox.server.ts",
+  "server/agents/tools-sourcing.ts => lib/email-outbox.server.ts",
+  "server/agents/tools.ts => lib/templates.server.ts"
+ ],
+ "agents -> voice": [
+  "server/agents/definitions.ts => server/voice/call-prompt.ts",
+  "server/agents/definitions.ts => server/voice/negotiation-call-tools.ts",
+  "server/agents/definitions.ts => server/voice/negotiation-prompt.ts",
+  "server/agents/definitions.ts => server/voice/scheduling-prompt.ts",
+  "server/agents/definitions.ts => server/voice/charter.ts",
+  "server/agents/health.server.ts => server/voice/negotiation-graders.ts",
+  "server/agents/orchestrator.server.ts => server/voice/scheduling-request.server.ts",
+  "server/agents/tools-negotiation-call.ts => server/voice/negotiation-call-tools.ts",
+  "server/agents/tools-negotiation-call.ts => server/voice/negotiation-brief.server.ts",
+  "server/agents/tools-negotiation-call.ts => server/voice/negotiation-session.server.ts",
+  "server/agents/tools-negotiation-call.ts => server/voice/opt-out.server.ts",
+  "server/agents/tools-negotiation-call.ts => server/voice/negotiation-request.server.ts",
+  "server/agents/tools-phase2.ts => server/voice/settings.server.ts",
+  "server/agents/tools-scheduling-call.ts => server/voice/scheduling-call-tools.ts",
+  "server/agents/tools-scheduling-call.ts => server/voice/scheduling-brief.server.ts",
+  "server/agents/tools-scheduling-call.ts => server/voice/scheduling-outcome.server.ts",
+  "server/agents/tools-scheduling-call.ts => server/voice/scheduling-request.server.ts",
+  "server/agents/tools-screening-call.ts => server/voice/call-tools.ts",
+  "server/agents/tools-screening-call.ts => server/voice/call-brief.server.ts",
+  "server/agents/tools-screening-call.ts => server/voice/settings.server.ts",
+  "server/agents/tools-screening-call.ts => server/voice/request.server.ts"
+ ],
+ "agents -> distribution": [
+  "server/agents/distribution-agent.server.ts => lib/job-channels.ts",
+  "server/agents/distribution-agent.server.ts => server/distribution/distribution.server.ts",
+  "server/agents/health.server.ts => lib/job-channels.ts",
+  "server/agents/orchestrator.server.ts => server/distribution/distribution.server.ts",
+  "server/agents/orchestrator.server.ts => server/distribution/google-indexing.server.ts",
+  "server/agents/sourcing.server.ts => lib/job-channels.ts",
+  "server/agents/sourcing.server.ts => server/boards/registry.ts",
+  "server/agents/tools-distribution.ts => lib/job-channels.ts",
+  "server/agents/tools-distribution.ts => server/distribution/distribution.server.ts",
+  "server/agents/tools.ts => server/boards/publish.server.ts"
+ ],
+ "agents -> matching": [
+  "server/agents/expert-gate.server.ts => lib/expert-brief.ts",
+  "server/agents/tools-expert.ts => lib/expert-brief.ts",
+  "server/agents/tools-phase2.ts => lib/autoscore.server.ts",
+  "server/agents/tools-phase2.ts => lib/screening.functions.ts",
+  "server/agents/tools-phase3.ts => lib/bias.server.ts",
+  "server/agents/tools.ts => lib/matching.functions.ts"
+ ],
+ "agents -> offers": [
+  "server/agents/orchestrator.server.ts => lib/negotiation.server.ts",
+  "server/agents/orchestrator.server.ts => lib/compensation.server.ts",
+  "server/agents/runtime.server.ts => lib/money.ts",
+  "server/agents/runtime.server.ts => lib/compensation.server.ts",
+  "server/agents/runtime.server.ts => lib/negotiation.server.ts",
+  "server/agents/runtime.server.ts => lib/offers.functions.ts",
+  "server/agents/tools-negotiation-call.ts => lib/money.ts",
+  "server/agents/tools-phase2.ts => lib/compensation.server.ts",
+  "server/agents/tools-phase4.ts => lib/money.ts",
+  "server/agents/tools-phase4.ts => lib/compensation.server.ts",
+  "server/agents/tools-phase4.ts => lib/negotiation.server.ts",
+  "server/agents/tools-phase4.ts => lib/offers.functions.ts",
+  "server/agents/tools-screening-call.ts => lib/compensation.server.ts",
+  "server/agents/tools.ts => lib/money.ts",
+  "server/agents/tools.ts => lib/market.server.ts"
+ ],
+ "agents -> org": [
+  "server/agents/runtime.server.ts => lib/org-profile.ts",
+  "server/agents/runtime.server.ts => lib/org-profile.server.ts",
+  "server/agents/runtime.server.ts => lib/org-context.server.ts",
+  "server/agents/tools-org.ts => lib/org-profile.ts",
+  "server/agents/tools-org.ts => lib/org-profile.server.ts",
+  "server/agents/tools-org.ts => lib/org-context.server.ts"
+ ],
+ "agents -> onboarding": [
+  "server/agents/runtime.server.ts => lib/onboarding.server.ts",
+  "server/agents/runtime.server.ts => lib/onboarding.functions.ts",
+  "server/agents/tools-phase4.ts => lib/onboarding.server.ts"
+ ],
+ "agents -> requisitions": [
+  "server/agents/runtime.server.ts => lib/requisitions.server.ts",
+  "server/agents/runtime.server.ts => lib/pipeline.server.ts",
+  "server/agents/tools-distribution.ts => lib/requisitions.server.ts",
+  "server/agents/tools-org.ts => lib/requisitions.server.ts",
+  "server/agents/tools-phase2.ts => lib/requisitions.server.ts",
+  "server/agents/tools-phase2.ts => lib/pipeline.server.ts",
+  "server/agents/tools-phase3.ts => lib/requisitions.server.ts",
+  "server/agents/tools-phase3.ts => lib/pipeline.server.ts",
+  "server/agents/tools-phase4.ts => lib/requisitions.server.ts",
+  "server/agents/tools.ts => lib/work-mode.ts",
+  "server/agents/tools.ts => lib/requisitions.server.ts"
+ ],
+ "ai -> agents": [
+  "server/ai-usage.ts => server/agents/context.ts",
+  "server/training/capture.server.ts => server/agents/context.ts"
+ ],
+ "core -> db": [
+  "server/audit.ts => server/db.ts",
+  "server/audit.ts => drizzle/schema.ts",
+  "server/erase.server.ts => drizzle/schema.ts",
+  "server/erase.server.ts => server/db.ts",
+  "server/guards.ts => server/db.ts",
+  "server/guards.ts => drizzle/schema.ts",
+  "server/rate-limit.ts => server/db.ts",
+  "server/slo.server.ts => server/db.ts",
+  "server/slo.server.ts => drizzle/schema.ts"
+ ],
+ "distribution -> requisitions": [
+  "server/boards/ingest.server.ts => lib/intake.server.ts",
+  "server/boards/publish.server.ts => lib/work-mode.ts"
+ ],
+ "distribution -> comms": [
+  "server/boards/ingest.server.ts => lib/email-outbox.server.ts"
+ ],
+ "distribution -> candidates": [
+  "server/boards/linkedin.ts => lib/linkedin.server.ts",
+  "server/boards/registry.ts => lib/linkedin.server.ts"
+ ],
+ "db -> core": [
+  "server/db.ts => server/env.ts"
+ ],
+ "desk -> requisitions": [
+  "server/desk/desk.server.ts => lib/work-mode.ts",
+  "server/desk/desk.server.ts => lib/requisitions.server.ts"
+ ],
+ "desk -> distribution": [
+  "server/desk/desk.server.ts => lib/job-channels.ts"
+ ],
+ "desk -> interviews": [
+  "server/desk/desk.server.ts => lib/screening-coverage.ts",
+  "server/desk/desk.server.ts => lib/interview-plan.server.ts"
+ ],
+ "desk -> matching": [
+  "server/desk/desk.server.ts => lib/autoscore.server.ts"
+ ],
+ "desk -> comms": [
+  "server/desk/desk.server.ts => lib/templates.server.ts",
+  "server/desk/desk.server.ts => lib/email-outbox.server.ts"
+ ],
+ "core -> agents": [
+  "server/erase.server.ts => server/agents/runtime.server.ts",
+  "server/slo.server.ts => server/agents/alerts.server.ts"
+ ],
+ "ai -> matching": [
+  "server/redteam/check.server.ts => lib/screening.server.ts"
+ ],
+ "core -> comms": [
+  "server/slo.server.ts => lib/email-templates/send-email.ts"
+ ],
+ "voice -> matching": [
+  "server/voice/call-brief.server.ts => lib/screening.server.ts",
+  "server/voice/call-prompt.ts => lib/screening.server.ts",
+  "server/voice/call-session.server.ts => lib/screening.functions.ts"
+ ],
+ "voice -> distribution": [
+  "server/voice/call-brief.server.ts => lib/job-channels.ts"
+ ],
+ "voice -> requisitions": [
+  "server/voice/call-brief.server.ts => lib/work-mode.ts",
+  "server/voice/scheduling-brief.server.ts => lib/pipeline.server.ts"
+ ],
+ "voice -> comms": [
+  "server/voice/call-brief.server.ts => lib/email-outbox.server.ts",
+  "server/voice/call-session.server.ts => lib/email-outbox.server.ts",
+  "server/voice/dispatcher.server.ts => lib/email-outbox.server.ts",
+  "server/voice/negotiation-request.server.ts => lib/email-outbox.server.ts",
+  "server/voice/negotiation-session.server.ts => lib/email-outbox.server.ts",
+  "server/voice/request.server.ts => lib/email-outbox.server.ts",
+  "server/voice/scheduling-brief.server.ts => lib/email-outbox.server.ts",
+  "server/voice/scheduling-outcome.server.ts => lib/email-outbox.server.ts",
+  "server/voice/scheduling-request.server.ts => lib/email-outbox.server.ts",
+  "server/voice/scheduling-session.server.ts => lib/email-outbox.server.ts"
+ ],
+ "voice -> offers": [
+  "server/voice/call-brief.server.ts => lib/compensation.server.ts",
+  "server/voice/call-session.server.ts => lib/compensation.server.ts",
+  "server/voice/negotiation-brief.server.ts => lib/negotiation.server.ts",
+  "server/voice/negotiation-request.server.ts => lib/negotiation.server.ts"
+ ],
+ "voice -> agents": [
+  "server/voice/call-session.server.ts => server/agents/context.ts",
+  "server/voice/call-session.server.ts => server/agents/index.ts",
+  "server/voice/call-session.server.ts => server/agents/registry.ts",
+  "server/voice/call-session.server.ts => server/agents/manifest.server.ts",
+  "server/voice/call-session.server.ts => server/agents/events.ts",
+  "server/voice/negotiation-session.server.ts => server/agents/context.ts",
+  "server/voice/scheduling-request.server.ts => server/agents/events.ts",
+  "server/voice/scheduling-session.server.ts => server/agents/context.ts"
+ ],
+ "voice -> desk": [
+  "server/voice/call-session.server.ts => server/desk/desk.server.ts",
+  "server/voice/negotiation-session.server.ts => server/desk/desk.server.ts",
+  "server/voice/scheduling-session.server.ts => server/desk/desk.server.ts"
+ ],
+ "voice -> interviews": [
+  "server/voice/call-session.server.ts => lib/screening-coverage.ts",
+  "server/voice/negotiation-brief.server.ts => lib/interview-plan.server.ts",
+  "server/voice/schedule.ts => lib/calendar-availability.server.ts",
+  "server/voice/scheduling-brief.server.ts => lib/slot-offers.server.ts",
+  "server/voice/scheduling-brief.server.ts => lib/interview-plan.server.ts",
+  "server/voice/scheduling-outcome.server.ts => lib/slot-offers.server.ts",
+  "server/voice/scheduling-prompt.ts => lib/interview-with.ts",
+  "server/voice/scheduling-request.server.ts => lib/slot-offers.server.ts",
+  "server/voice/scheduling-request.server.ts => lib/calendar-availability.server.ts"
+ ],
+ "voice -> org": [
+  "server/voice/negotiation-brief.server.ts => lib/org-profile.ts",
+  "server/voice/negotiation-brief.server.ts => lib/org-profile.server.ts",
+  "server/voice/negotiation-request.server.ts => lib/org-profile.server.ts",
+  "server/voice/negotiation-request.server.ts => lib/org-profile.ts"
+ ],
+ "UNMAPPED -> core": [
+  "server.ts => lib/error-capture.ts",
+  "server.ts => lib/error-page.ts",
+  "server.ts => server/client-ip.ts",
+  "server.ts => server/http-metrics.ts",
+  "server.ts => server/log.ts",
+  "server.ts => server/rate-limit.ts",
+  "server.ts => server/env.ts",
+  "server.ts => server/request-context.ts",
+  "server.ts => server/slo.server.ts"
+ ],
+ "db -> interviews": [
+  "drizzle/schema.ts => lib/interview-plan.ts",
+  "drizzle/schema.ts => lib/vtt.ts",
+  "drizzle/schema.ts => lib/panel-assessment.ts"
+ ],
+ "db -> matching": [
+  "drizzle/schema.ts => lib/expert-brief.ts"
+ ]
+}

@@ -1,0 +1,404 @@
+import {
+  Activity,
+  BarChart3,
+  Bot,
+  BookMarked,
+  BookOpen,
+  BookOpenText,
+  Brain,
+  Briefcase,
+  Building2,
+  CalendarClock,
+  Coins,
+  Database,
+  FileSignature,
+  Gauge,
+  Globe2,
+  Handshake,
+  Inbox,
+  LayoutDashboard,
+  LayoutTemplate,
+  Megaphone,
+  MessagesSquare,
+  PhoneCall,
+  Headphones,
+  Scale,
+  Plug,
+  PackageOpen,
+  Workflow,
+  ShieldCheck,
+  Target,
+  Settings,
+  SlidersHorizontal,
+  Users,
+  Waypoints,
+} from "lucide-react";
+
+import type { NavCtx } from "@/hooks/useNavCtx";
+
+/**
+ * Role-scoped journey. Each item carries its own visibility predicate; groups are hubs —
+ * one sidebar entry each, with the hub's pages as tabs above the page. Predicates mirror — never replace — the server-side role
+ * enforcement on every server function. Shared by the sidebar (AppShell) and the ⌘K
+ * command palette (CommandPalette).
+ *
+ * `mode` splits the menu between the two ways of working (the top-bar switch):
+ * "agent" items show in Agent mode, "manual" items in Manual mode, items without a
+ * mode (dashboard, administration, help) in both. Both modes work on the same records.
+ */
+export type WorkMode = "agent" | "manual";
+
+export type NavItem = {
+  to: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  show: (c: NavCtx) => boolean;
+  mode?: WorkMode;
+  /** Search params for links into a tab of a page (e.g. Agent activity). */
+  search?: Record<string, string>;
+};
+/**
+ * A hub: one sidebar entry whose pages show as tabs across the top of the page.
+ * `bottom` hubs (settings, platform, help) sit at the foot of the sidebar.
+ */
+export type NavGroup = {
+  heading: string;
+  icon: typeof LayoutDashboard;
+  items: NavItem[];
+  bottom?: boolean;
+  /** Word dropped from page labels on this hub's tabs ("Agent settings" → "Settings"). */
+  tabPrefix?: string;
+};
+
+export const NAV_GROUPS: NavGroup[] = [
+  {
+    heading: "Home",
+    icon: LayoutDashboard,
+    items: [
+      { to: "/", label: "Dashboard", icon: LayoutDashboard, show: (c) => c.inOrg },
+      // Interviewers submit scorecards in either way of working.
+      { to: "/interviews/mine", label: "My interviews", icon: CalendarClock, show: (c) => c.inOrg },
+    ],
+  },
+  {
+    heading: "Agents",
+    icon: Bot,
+    tabPrefix: "Agent",
+    items: [
+      {
+        to: "/desk",
+        label: "Hiring desk",
+        icon: MessagesSquare,
+        show: (c) => c.inOrg,
+        mode: "agent",
+      },
+      { to: "/agents", label: "Waiting for you", icon: Bot, show: (c) => c.inOrg, mode: "agent" },
+      {
+        to: "/agents",
+        search: { tab: "activity" },
+        label: "Agent activity",
+        icon: Activity,
+        show: (c) => c.inOrg,
+        mode: "agent",
+      },
+    ],
+  },
+  {
+    // Configuring and overseeing the agents — governance roles only.
+    heading: "Agent admin",
+    icon: SlidersHorizontal,
+    tabPrefix: "Agent",
+    items: [
+      {
+        to: "/agents/settings",
+        label: "Agent settings",
+        icon: Bot,
+        show: (c) => c.governance,
+        mode: "agent",
+      },
+      {
+        to: "/agents/observability",
+        label: "Agent observability",
+        icon: Activity,
+        show: (c) => c.governance,
+        mode: "agent",
+      },
+      {
+        to: "/agents/call-reviews",
+        label: "Call reviews",
+        icon: Headphones,
+        // Reviews quote call transcripts (pay included): the people who may read them.
+        show: (c) => c.recruiterView,
+        mode: "agent",
+      },
+      {
+        to: "/agents/governance",
+        label: "Agent governance",
+        icon: Scale,
+        show: (c) => c.governance,
+        mode: "agent",
+      },
+      {
+        to: "/agents/intelligence",
+        label: "Agent intelligence",
+        icon: Waypoints,
+        show: (c) => c.governance,
+        mode: "agent",
+      },
+      {
+        to: "/agents/register",
+        label: "Agent register",
+        icon: ShieldCheck,
+        show: (c) => c.governance,
+        mode: "agent",
+      },
+    ],
+  },
+  {
+    heading: "Pipeline",
+    icon: Workflow,
+    items: [
+      {
+        to: "/requisitions",
+        label: "Requisitions & JD",
+        icon: Briefcase,
+        show: (c) => c.inOrg,
+        mode: "manual",
+      },
+      // Matching is a hiring-team tool: recruiters run it, hiring managers and
+      // department heads review the results for their own requisitions.
+      {
+        to: "/matching",
+        label: "JD ↔ CV matching",
+        icon: Target,
+        show: (c) => c.recruiterView || c.approver,
+        mode: "manual",
+      },
+      {
+        to: "/screening",
+        label: "Screening calls",
+        icon: PhoneCall,
+        show: (c) => c.recruiterView,
+        mode: "manual",
+      },
+      {
+        to: "/interviews",
+        label: "Interviews",
+        icon: CalendarClock,
+        show: (c) => c.recruiterView,
+        mode: "manual",
+      },
+      {
+        to: "/offers",
+        label: "Offers",
+        icon: FileSignature,
+        show: (c) => c.recruiterView,
+        mode: "manual",
+      },
+    ],
+  },
+  {
+    heading: "Candidates",
+    icon: Users,
+    items: [
+      {
+        to: "/candidates",
+        label: "Talent pool",
+        icon: Users,
+        show: (c) => c.recruiterView,
+        mode: "manual",
+      },
+      {
+        to: "/collaboration",
+        label: "Team & sharing",
+        icon: Handshake,
+        show: (c) => c.inOrg,
+        mode: "manual",
+      },
+    ],
+  },
+  {
+    heading: "Sourcing",
+    icon: Megaphone,
+    items: [
+      {
+        to: "/inbox",
+        label: "Careers inbox",
+        icon: Inbox,
+        show: (c) => c.recruiterView,
+        mode: "manual",
+      },
+      // Both ways of working: advertising a role is the same either way.
+      {
+        to: "/distribution",
+        label: "Job distribution",
+        icon: Megaphone,
+        show: (c) => c.recruiterView || c.governance,
+      },
+      {
+        to: "/ijp",
+        label: "Internal postings",
+        icon: Building2,
+        show: (c) => c.recruiterView,
+        mode: "manual",
+      },
+    ],
+  },
+  {
+    heading: "Insights",
+    icon: BarChart3,
+    items: [
+      {
+        to: "/reports",
+        label: "Reports",
+        icon: BarChart3,
+        show: (c) => c.approver,
+        mode: "manual",
+      },
+      {
+        to: "/hiring-cost",
+        label: "Hiring cost",
+        icon: Coins,
+        show: (c) => c.governance,
+      },
+      {
+        to: "/roi",
+        label: "Return on Individual",
+        icon: Gauge,
+        show: (c) => c.leadership,
+        mode: "manual",
+      },
+      {
+        to: "/brain",
+        label: "Talent Brain",
+        icon: Brain,
+        // the organisation's skill and role ontology, in either way of working
+        show: (c) => c.leadership || c.governance,
+      },
+    ],
+  },
+  {
+    heading: "Settings",
+    icon: Settings,
+    bottom: true,
+    items: [
+      { to: "/team", label: "Users & roles", icon: ShieldCheck, show: (c) => c.governance },
+      {
+        to: "/organisation",
+        label: "Organisation",
+        icon: Building2,
+        show: (c) => c.isOwner,
+      },
+      {
+        to: "/org-profile",
+        label: "Organisation profile",
+        icon: BookOpenText,
+        // Owners work on the profile as the Organisation page's Profile tab;
+        // the HR head and the CBO keep this page.
+        show: (c) => c.governance && !c.isOwner,
+      },
+      { to: "/integrations", label: "Integrations", icon: Plug, show: (c) => c.governance },
+      { to: "/masters", label: "Master data", icon: Database, show: (c) => c.governance },
+      {
+        to: "/templates",
+        label: "Content templates",
+        icon: LayoutTemplate,
+        show: (c) => c.governance,
+      },
+    ],
+  },
+  {
+    heading: "Platform",
+    icon: Globe2,
+    bottom: true,
+    items: [
+      {
+        to: "/platform",
+        label: "Platform console",
+        icon: Globe2,
+        show: (c) => c.isSuperUser || c.claimable,
+      },
+      {
+        to: "/platform-ai-usage",
+        label: "AI usage",
+        icon: Coins,
+        show: (c) => c.isSuperUser,
+      },
+      {
+        to: "/platform-agents",
+        label: "Platform agents",
+        icon: Bot,
+        show: (c) => c.isSuperUser,
+      },
+      {
+        to: "/platform-agent-studio",
+        label: "Agent studio",
+        icon: PackageOpen,
+        show: (c) => c.isSuperUser,
+      },
+      {
+        to: "/platform-agent-workflows",
+        label: "Agent workflows",
+        icon: Workflow,
+        show: (c) => c.isSuperUser,
+      },
+      {
+        to: "/platform-health",
+        label: "Service health",
+        icon: Activity,
+        show: (c) => c.isSuperUser,
+      },
+      {
+        to: "/catalogue",
+        label: "Product catalogue",
+        icon: BookMarked,
+        show: (c) => c.isSuperUser,
+      },
+    ],
+  },
+  {
+    heading: "Help",
+    icon: BookOpen,
+    bottom: true,
+    items: [{ to: "/help", label: "User manual", icon: BookOpen, show: () => true }],
+  },
+];
+
+/**
+ * The way of working a page belongs to (null for shared pages). Only a menu
+ * page itself sets the mode; a record opened from either side (a requisition
+ * linked from the hiring desk, a candidate from an approval) keeps the mode you
+ * are in, so following a link never flips the menu.
+ */
+export function modeForPath(pathname: string): WorkMode | null {
+  let best: { len: number; mode: WorkMode | null } = { len: -1, mode: null };
+  const path = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  for (const item of NAV_GROUPS.flatMap((g) => g.items)) {
+    const to = item.to;
+    const hit = path === to;
+    if (hit && to.length > best.len) best = { len: to.length, mode: item.mode ?? null };
+  }
+  return best.mode;
+}
+
+function matches(to: string, pathname: string) {
+  return to === "/" ? pathname === "/" : pathname === to || pathname.startsWith(`${to}/`);
+}
+
+/** The hub a page belongs to, by longest matching path (null when none). */
+export function hubForPath(pathname: string): NavGroup | null {
+  let best: { len: number; hub: NavGroup | null } = { len: -1, hub: null };
+  for (const hub of NAV_GROUPS)
+    for (const item of hub.items)
+      if (matches(item.to, pathname) && item.to.length > best.len)
+        best = { len: item.to.length, hub };
+  return best.hub;
+}
+
+/** A page's label on its hub's tab strip, without the hub's repeated prefix word. */
+export function tabLabel(hub: NavGroup, item: NavItem): string {
+  const pre = hub.tabPrefix ? `${hub.tabPrefix} ` : "";
+  if (!pre || !item.label.startsWith(pre)) return item.label;
+  const rest = item.label.slice(pre.length);
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
+}

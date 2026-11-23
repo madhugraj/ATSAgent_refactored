@@ -1,0 +1,5596 @@
+/**
+ * Hiring desk (docs/agentic-plan.md §13.2, Phase 6a): one chat thread per
+ * hiring need.
+ *
+ * A TA member describes the need in plain words; the desk fills a fixed set
+ * of details (slots) one short question at a time, shows similar roles, and
+ * — once the person chooses — creates the draft requisition as that person
+ * or reuses an existing role, then hands the work to the specialist agents.
+ * Every agent run working for the thread posts its results, its requests for
+ * a person, and the ranked candidate list back into the thread.
+ *
+ * The model only extracts details and words the next question; what happens
+ * next (which agent, which records) is decided here in plain code.
+ */
+import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "../agents/run-messages";
+import { localWhen } from "@/lib/local-time";
+import { placeLabel } from "@/lib/work-mode";
+import type { Stage } from "@/lib/lifecycle";
+import { sourceLabel as channelSourceLabel } from "@/lib/job-channels";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
+import { z } from "zod";
+
+import { INJECTION_RULES, aiJson, untrusted } from "@/lib/ai-gateway.server";
+import { db } from "../db";
+import { writeAudit } from "../audit";
+import { log } from "../log";
+import { getTool } from "../agents/registry";
+import { taskIsLive } from "../agents/task-liveness";
+import {
+  agentPolicies,
+  agentRuns,
+  agentTasks,
+  applications,
+  candidates,
+  hiringConversations,
+  hiringMessages,
+  jobDescriptions,
+  matchScores,
+  requisitions,
+  type AgentType,
+  type ScreeningCoverage,
+  screeningCalls,
+  candidateAssessments,
+} from "@db/schema";
+
+/* ------------------------------------------------------------------ slots */
+
+const skillList = z.array(z.string().trim().min(1).max(60)).max(20);
+
+/** The hiring details the desk gathers. Budget is in lakhs per annum (LPA). */
+export const DeskSlots = z.object({
+  roleTitle: z.string().trim().min(2).max(120).optional(),
+  location: z.string().trim().min(2).max(120).optional(),
+  /** Where the work happens (migration 0041). */
+  workMode: z.enum(["onsite", "hybrid", "remote"]).optional(),
+  experienceMin: z.number().min(0).max(40).optional(),
+  experienceMax: z.number().min(0).max(50).optional(),
+  openings: z.number().int().min(1).max(100).optional(),
+  mustHaveSkills: skillList.optional(),
+  goodToHaveSkills: skillList.optional(),
+  budgetLpaMax: z.number().min(0).max(1000).optional(),
+  /** The pay band the person gave, when they gave one (LPA). */
+  bandLpaMin: z.number().min(0).max(1000).optional(),
+  bandLpaMax: z.number().min(0).max(1000).optional(),
+  maxNoticeDays: z.number().int().min(0).max(365).optional(),
+  employmentType: z.enum(["full_time", "contract", "internship"]).optional(),
+  urgency: z.enum(["immediate", "within_a_month", "flexible"]).optional(),
+  // For a deeper JD (asked once, after the required details):
+  responsibilities: z.string().trim().max(3000).optional(),
+  reportingTo: z.string().trim().max(200).optional(),
+  successMeasures: z.string().trim().max(2000).optional(),
+  education: z.string().trim().max(500).optional(),
+  /** The person asked the JD to fill responsibilities / success from typical market practice. */
+  researchRole: z.boolean().optional(),
+  /** Set by the desk once the JD-detail question has been asked. */
+  jdDetailsAsked: z.boolean().optional(),
+  /** The hiring manager as the person named them (a name or an e-mail). */
+  hiringManager: z.string().trim().min(2).max(120).optional(),
+  /** Set by the system only: the registered member that name resolved to. */
+  hiringManagerMemberId: z.string().uuid().optional(),
+});
+export type DeskSlots = z.infer<typeof DeskSlots>;
+
+/** Details without which no requisition is drafted, in the order they are asked. */
+export const REQUIRED_SLOTS = [
+  "roleTitle",
+  "location",
+  "workMode",
+  "experience",
+  "openings",
+  "mustHaveSkills",
+  // A registered member: they approve the role's interview panels (docs/interview-panel-plan.md).
+  "hiringManager",
+] as const;
+export type RequiredSlot = (typeof REQUIRED_SLOTS)[number];
+
+const FALLBACK_QUESTION: Record<RequiredSlot, string> = {
+  roleTitle: "Which role are you hiring for?",
+  location: "Which location is this role based in?",
+  workMode: "Is this role onsite, hybrid or remote?",
+  experience: "How many years of experience should candidates have (for example 3–6)?",
+  openings: "How many people do you need for this role?",
+  mustHaveSkills: "Which skills are must-haves for this role?",
+  hiringManager: "Who is the hiring manager for this role? They approve its interview panels.",
+};
+
+export function missingSlots(s: DeskSlots): RequiredSlot[] {
+  return REQUIRED_SLOTS.filter((k) => {
+    if (k === "experience") return s.experienceMin === undefined;
+    if (k === "mustHaveSkills") return !s.mustHaveSkills?.length;
+    if (k === "hiringManager") return !s.hiringManagerMemberId;
+    return s[k] === undefined;
+  });
+}
+
+/** Active members who can be a role's hiring manager: hiring managers and department heads first. */
+export async function hiringManagerOptions(
+  orgId: string,
+): Promise<{ memberId: string; name: string; email: string }[]> {
+  const rows = (await db.execute(sql`
+    select m.id, coalesce(nullif(m.full_name, ''), m.email) as name, m.email,
+      exists (select 1 from user_roles r where r.user_id = m.user_id and r.org_id = m.org_id
+        and r.role in ('hiring_manager', 'department_head')) as manager
+    from org_members m
+    where m.org_id = ${orgId} and m.status = 'active'
+    order by manager desc, name`)) as unknown as {
+    id: string;
+    name: string;
+    email: string;
+    manager: boolean;
+  }[];
+  const managers = rows.filter((r) => r.manager);
+  return (managers.length ? managers : rows).map((r) => ({
+    memberId: r.id,
+    name: r.name,
+    email: r.email,
+  }));
+}
+
+/**
+ * The registered member a person meant by "the hiring manager is …" — by e-mail,
+ * or by name (whole name, or a unique first name). Null when nobody matches, or
+ * more than one does: the desk then asks again; it never guesses.
+ */
+export async function resolveHiringManager(
+  orgId: string,
+  said: string,
+): Promise<{ memberId: string; name: string } | null> {
+  const want = said.trim().toLowerCase();
+  const rows = (await db.execute(sql`
+    select id, coalesce(nullif(full_name, ''), email) as name, lower(email) as email,
+      lower(coalesce(full_name, '')) as full_name
+    from org_members where org_id = ${orgId} and status = 'active'`)) as unknown as {
+    id: string;
+    name: string;
+    email: string;
+    full_name: string;
+  }[];
+  const exact = rows.filter((r) => r.email === want || (r.full_name && r.full_name === want));
+  const pick =
+    exact.length === 1
+      ? exact
+      : rows.filter((r) => r.full_name && r.full_name.split(/\s+/)[0] === want.split(/\s+/)[0]);
+  return pick.length === 1 ? { memberId: pick[0]!.id, name: pick[0]!.name } : null;
+}
+
+/** Merge newly extracted details over the known ones; empty values never erase. */
+export function mergeSlots(prev: DeskSlots, next: DeskSlots): DeskSlots {
+  const out: DeskSlots = { ...prev };
+  for (const [k, v] of Object.entries(next) as [keyof DeskSlots, unknown][]) {
+    if (v === undefined || v === null) continue;
+    if (Array.isArray(v) && !v.length) continue;
+    (out as Record<string, unknown>)[k] = v;
+  }
+  if (
+    out.experienceMin !== undefined &&
+    out.experienceMax !== undefined &&
+    out.experienceMax < out.experienceMin
+  ) {
+    [out.experienceMin, out.experienceMax] = [out.experienceMax, out.experienceMin];
+  }
+  return out;
+}
+
+/** The JD-relevant details as the requisition's responsibilities text (the JD generator builds on it). */
+export function jdBrief(s: DeskSlots): string | null {
+  const parts = [
+    s.responsibilities ? `Key responsibilities:\n${s.responsibilities}` : "",
+    s.reportingTo ? `Reports to: ${s.reportingTo}` : "",
+    s.successMeasures ? `Success after 12 months: ${s.successMeasures}` : "",
+    s.researchRole && (!s.responsibilities || !s.successMeasures)
+      ? `Draft the key responsibilities${s.successMeasures ? "" : " and the 6- and 12-month success measures"} from typical market practice for a ${s.roleTitle ?? "role"} at this seniority.`
+      : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join("\n\n") : null;
+}
+
+export function describeNeed(s: DeskSlots): string {
+  const exp =
+    s.experienceMin === undefined
+      ? ""
+      : s.experienceMax !== undefined && s.experienceMax !== s.experienceMin
+        ? `${s.experienceMin}–${s.experienceMax} years`
+        : `${s.experienceMin}+ years`;
+  return [
+    `${s.openings ?? 1} × ${s.roleTitle ?? "role"}`,
+    s.location || s.workMode ? `in ${placeLabel(s.location, s.workMode)}` : "",
+    exp ? `· ${exp}` : "",
+    s.mustHaveSkills?.length ? `· must have ${s.mustHaveSkills.join(", ")}` : "",
+    s.goodToHaveSkills?.length ? `· good to have ${s.goodToHaveSkills.join(", ")}` : "",
+    s.budgetLpaMax !== undefined ? `· budget up to ${s.budgetLpaMax} LPA` : "",
+    s.bandLpaMin !== undefined && s.bandLpaMax !== undefined
+      ? `· pay band ${s.bandLpaMin}–${s.bandLpaMax} LPA`
+      : "",
+    s.maxNoticeDays !== undefined ? `· notice up to ${s.maxNoticeDays} days` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/* --------------------------------------------------------------- threads */
+
+type Conversation = typeof hiringConversations.$inferSelect;
+export type DeskCard = Record<string, unknown> & { type: string };
+
+/** Longest message body kept; the thread folds long text behind "Show more". */
+const MESSAGE_MAX = 12_000;
+
+/** Cut long text at a paragraph (never mid-sentence) and say where the rest is. */
+export function clipText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const at = text.lastIndexOf("\n\n", max - 80);
+  const cut = at > max / 2 ? at : text.lastIndexOf(". ", max - 80) + 1 || max - 80;
+  return `${text.slice(0, cut).trimEnd()}\n\n… The full text is in Agent activity.`;
+}
+
+/** "1 candidate", "3 candidates". */
+export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+export async function postMessage(
+  conv: { id: string; orgId: string },
+  m: { role: "user" | "desk" | "agent"; body: string; agentType?: string | null; card?: DeskCard },
+): Promise<void> {
+  await db.insert(hiringMessages).values({
+    conversationId: conv.id,
+    orgId: conv.orgId,
+    role: m.role,
+    agentType: m.agentType ?? null,
+    body: clipText(m.body, MESSAGE_MAX),
+    card: (m.card ?? null) as never,
+  });
+  await db
+    .update(hiringConversations)
+    .set({ updatedAt: new Date() })
+    .where(eq(hiringConversations.id, conv.id));
+}
+
+export async function loadConversation(
+  orgId: string,
+  id: string,
+  opts: { includeDeleted?: boolean } = {},
+): Promise<Conversation> {
+  const [c] = await db
+    .select()
+    .from(hiringConversations)
+    .where(
+      and(
+        eq(hiringConversations.id, id),
+        eq(hiringConversations.orgId, orgId),
+        // A deleted chat is gone for everyone but its restore.
+        opts.includeDeleted ? undefined : isNull(hiringConversations.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!c) throw new Error("Conversation not found.");
+  return c;
+}
+
+/** The thread a requisition belongs to (newest first), if any. */
+export async function conversationForRequisition(
+  orgId: string,
+  requisitionId: string,
+): Promise<Conversation | null> {
+  const [c] = await db
+    .select()
+    .from(hiringConversations)
+    .where(
+      and(
+        eq(hiringConversations.orgId, orgId),
+        eq(hiringConversations.kind, "hiring"),
+        eq(hiringConversations.requisitionId, requisitionId),
+        notInArray(hiringConversations.status, ["closed"]),
+        isNull(hiringConversations.deletedAt),
+      ),
+    )
+    .orderBy(desc(hiringConversations.createdAt))
+    .limit(1);
+  return c ?? null;
+}
+
+/** Thread for a run's subject: a requisition directly, an application through its requisition. */
+export async function conversationForSubject(
+  orgId: string,
+  subjectType: string | null | undefined,
+  subjectId: string | null | undefined,
+): Promise<string | null> {
+  if (!subjectId) return null;
+  let requisitionId: string | null = null;
+  if (subjectType === "requisition") requisitionId = subjectId;
+  else if (subjectType === "application") {
+    const [a] = await db
+      .select({ requisitionId: applications.requisitionId })
+      .from(applications)
+      .where(and(eq(applications.id, subjectId), eq(applications.orgId, orgId)))
+      .limit(1);
+    requisitionId = a?.requisitionId ?? null;
+  }
+  if (!requisitionId) return null;
+  return (await conversationForRequisition(orgId, requisitionId))?.id ?? null;
+}
+
+/* ---------------------------------------------------------- model turn */
+
+const Command = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("split_needs") }),
+  z.object({ type: z.literal("none") }),
+  z.object({
+    type: z.literal("screen"),
+    /** "the first 5" → top: 5; "candidates 1, 3 and 4" → ranks: [1,3,4]. */
+    top: z.number().int().min(1).max(20).optional(),
+    ranks: z.array(z.number().int().min(1).max(50)).max(20).optional(),
+  }),
+  z.object({
+    // "call again", "do the screening call again", "phone Meera": an AI phone screening call.
+    type: z.literal("call_candidate"),
+    name: z.string().trim().max(120).optional(),
+    ranks: z.array(z.number().int().min(1).max(50)).max(1).optional(),
+    /** Why, in their words — needed to repeat a completed call. */
+    reason: z.string().trim().max(500).optional(),
+  }),
+  z.object({
+    // An AI screening call already arranged: when it rings, move it, cancel it.
+    type: z.literal("manage_call"),
+    action: z.enum(["when", "move", "cancel"]),
+    name: z.string().trim().max(120).optional(),
+    ranks: z.array(z.number().int().min(1).max(50)).max(1).optional(),
+    /** "now", or the organisation's local time "YYYY-MM-DD HH:mm". */
+    when: z.string().trim().max(40).optional(),
+    reason: z.string().trim().max(500).optional(),
+  }),
+  z.object({
+    // Going back a step (the organisation's rule: only for a reason the desk judges).
+    type: z.literal("go_back"),
+    step: z.enum(["rescore", "move_candidate"]),
+    name: z.string().trim().max(120).optional(),
+    ranks: z.array(z.number().int().min(1).max(50)).max(1).optional(),
+    toStage: z
+      .enum(["sourced", "applied", "ai_screened", "shortlisted", "l1", "l2", "l3", "reserve"])
+      .optional(),
+    reason: z.string().trim().max(500).optional(),
+  }),
+  z.object({ type: z.literal("new_role") }),
+  z.object({ type: z.literal("use_existing"), code: z.string().max(40).optional() }),
+  z.object({ type: z.literal("close_role") }),
+  /** "Show me the JD": post the role's latest job description into the thread. */
+  z.object({ type: z.literal("show_jd") }),
+  /** "Show the interview plan / rounds / panel size": post the role's plan, editable in place. */
+  z.object({ type: z.literal("show_interview_plan") }),
+  /** The person delegated details to market research ("as per market", "you decide"). */
+  z.object({
+    type: z.literal("research"),
+    fields: z
+      .array(z.enum(["skills", "experience", "budget"]))
+      .max(3)
+      .optional(),
+  }),
+  /** The person agreed to the latest proposal ("ok", "yes", "use these"). */
+  z.object({ type: z.literal("accept") }),
+  /** The person wants a pending agent request changed, or answers an agent's question. */
+  z.object({
+    type: z.literal("feedback"),
+    text: z.string().min(1).max(1000),
+    /** The OPEN REQUEST it is about, by its title — the desk never guesses which. */
+    request: z.string().min(1).max(300).optional(),
+    /** A template the person asked for by name ("use the Yavar template"). */
+    template: z.string().min(1).max(200).optional(),
+  }),
+]);
+
+const NeedSeed = z.object({
+  /** The role as the person named it (the thread's starting title). */
+  title: z.string().min(2).max(120),
+  /** The details said for THIS need (all optional — the thread asks for the rest). */
+  slots: DeskSlots.partial().default({}),
+});
+
+const TurnOutput = z.object({
+  slots: DeskSlots.default({}),
+  command: Command.default({ type: "none" }),
+  reply: z.string().max(600).default(""),
+  /**
+   * One short line on what the LATEST message adds or asks — even when no
+   * slot could be filled yet (three roles named and one asked about, a
+   * question about the process). The "How I read that" card shows it; an
+   * empty line means the message truly added nothing.
+   */
+  understood: z.string().max(300).default(""),
+  /**
+   * 2–3 distinct hiring needs named together: one entry each, with the details
+   * said per need. The desk fans them out into parallel threads. Empty unless
+   * the command is split_needs.
+   */
+  needs: z.array(NeedSeed).max(3).default([]),
+});
+export type DeskTurn = z.infer<typeof TurnOutput>;
+
+const SYSTEM = [
+  INJECTION_RULES,
+  "",
+  "You are the hiring desk of an applicant tracking system. A recruiter describes a hiring need in a chat.",
+  "Each turn, return JSON with:",
+  '- "slots": only the hiring details the LATEST message states or changes (omit the rest). Fields: roleTitle, location, workMode (onsite|hybrid|remote — "office"/"WFO" means onsite, "WFH"/"work from home" means remote; a message that says "hybrid" sets hybrid even next to a city), experienceMin, experienceMax (years), openings, mustHaveSkills, goodToHaveSkills (short skill names), budgetLpaMax (lakhs per annum — the budget; when a band is given as well, the budget is the figure called budget, not the top of the band), bandLpaMin and bandLpaMax (a pay band the person gives, lakhs per annum; only when stated), maxNoticeDays, employmentType (full_time|contract|internship), urgency (immediate|within_a_month|flexible), hiringManager (the person who manages this hire, exactly as named — a name or an e-mail; never guess one, and never set hiringManagerMemberId). "a candidate" means openings 1. Expand obvious role shorthands (e.g. "Full stack" → "Full Stack Developer"). Never invent values that were not said.',
+  '- JD details (only when the person gives them): responsibilities (their key responsibilities, as text), reportingTo, successMeasures (what success looks like), education. If they ask you to fill these from the market / research / "you decide", set researchRole true.',
+  '- "command": {"type":"none"} unless the person asks to act: "talk to / screen / call the first 5" → {"type":"screen","top":5}; "screen 1, 3 and 4" → {"type":"screen","ranks":[1,3,4]}; "create a new role" → {"type":"new_role"}; "use REQ-2026-014" → {"type":"use_existing","code":"REQ-2026-014"}.',
+  '- "command" also: "close / cancel / delete / withdraw this role" → {"type":"close_role"}.',
+  '- Going back a step: "re-score the candidates" → {"type":"go_back","step":"rescore"}; "send Meera back to screening", "move candidate 2 back to shortlisted", "undo the rejection of Ravi", "bring her back to L1" → {"type":"go_back","step":"move_candidate"} with "name" or "ranks":[n] and "toStage" (one of sourced, applied, ai_screened, shortlisted, l1, l2, l3, reserve — "screening" is "applied", undoing a rejection is "shortlisted" unless they say otherwise). Add "reason":"<their words>" when they say why; when the desk has just asked why and they answer, it is the same go_back command with "reason" and the details from the conversation. Never feedback.',
+  '- An AI screening call that FACTS shows is already arranged: "when is the call?" → {"type":"manage_call","action":"when"}; "call now", "call her now", "move the call to Friday 3 pm", "she is unavailable tomorrow, call on Thursday" → {"type":"manage_call","action":"move","when":"now" or "YYYY-MM-DD HH:mm" in the organisation\'s time (NOW gives today)}; "cancel the call" → {"type":"manage_call","action":"cancel"}. Add "name" when they name the candidate and "reason" with their words. With no call arranged, calling is call_candidate.',
+  '- "call again", "do the screening call again", "redo the AI call", "phone Meera", "call candidate 2" → {"type":"call_candidate"} with "name" when they name the candidate (as they said it) or "ranks":[n] for a rank — never feedback, even when OPEN REQUESTS lists something: the system arranges an AI phone screening call. Add "reason":"<their words>" when they say why. When the desk has just asked why a call should be repeated and they answer, that is the same command with "reason" (and the name from the conversation).',
+  '- When the person delegates a detail to you or to the market ("as per market needs", "you decide", "what does the market say?", "pick it up from research") → {"type":"research","fields":[...]} with the fields they delegated: "skills", "experience" and/or "budget". (JD details are not a research command — for those set researchRole true as above.) When OPEN PROPOSAL is yes and they agree ("ok", "yes", "use these", "go ahead") → {"type":"accept"}.',
+  '- "show / see / open / read the JD (job description)" → {"type":"show_jd"}; the system posts the full text. Never summarise the JD instead or send the person elsewhere to read it.',
+  '- "show / change the interview plan, the rounds, the panel size, what a round rates, or who the hiring manager is" → {"type":"show_interview_plan"}; the system posts the plan, which the person edits right in the card. Never describe or change the plan yourself.',
+  '- Templates: whenever the person names or asks about a template ("use the Yavar template", "which template did you use?"), return {"type":"feedback","text":"<their words>","template":"<the name as they said it>"} — even when no request is open. The system checks the templates (by name and by content) and answers. Never state from memory or from earlier messages which templates exist; FACTS lists them.',
+  '- When OPEN REQUESTS lists a request and the person comments on it, objects to it or asks for a change ("give more weight to experience", "budget is too high", "use Pune instead") — or answers an agent\'s question — → {"type":"feedback","text":"<what they want, faithfully, in their words>","request":"<the title of the OPEN REQUEST it is about, copied exactly>"}. Only when the message is clearly about that request; otherwise use another command or none. The system sends it to the agent, which revises and asks again. This includes a job description waiting for approval: "use the X template", "make it shorter", "add a section on Y" are feedback (changes to the JD), not an approval decision; when they name a template add "template":"<the name as they said it>".',
+  '- The reply must never promise an action ("I\'ll benchmark…", "I\'ll check…"): the desk acts only through commands, and the system reports what it did. With a research command the reply can be empty.',
+  '- When the LATEST message names 2–3 distinct hiring needs, each with its own role ("I have 3 requirements: Head of AI, Intern, Data Scientist"), the desk runs them in PARALLEL: return needs: [{title, slots}] — one entry per need, its title and the details said for it in slots — and command {"type":"split_needs"}. Each need becomes its own thread with its own questions and its own approvals. Only for genuinely distinct needs in the LATEST message; one role with extra context is not a split. The first need\'s details also go in "slots" as usual.',
+  '- "understood": one short line stating what the LATEST message adds or asks, in the person\'s terms ("Three roles named — Head of AI, Intern, Data Scientist; asking which to start with"). Fill it even when no slot could be set yet; leave it empty only when the message truly added nothing.',
+  '- "reply": one short, friendly message. If MISSING lists details, ask for the FIRST missing one only, in one sentence, offering a typical example. Otherwise acknowledge briefly. Never claim that anything was created, approved or sent.',
+  "- Questions about the role, its status, the candidates or how to do something: answer ONLY from FACTS and APP RULES below. Never describe screens, menus, statuses or abilities that are not listed there; if the facts do not answer the question, say you do not know and where to look.",
+  "- ORGANISATION CONTEXT is the employer's approved profile: use it to word questions for this organisation's domain (its products, tech stacks and regulators), suggest the role families that fit, and ask domain-specific details. Never state a pay figure from it — pay is asked only through the app's own flow.",
+].join("\n");
+
+/** How the app really works — the only how-to the desk may describe. */
+export const APP_RULES = [
+  "Requisition statuses: draft → pending department head → pending HR head → pending CBO → approved; also rejected, on hold, closed. There is no 'archived' or 'open' status.",
+  "Delete: only a draft with no applications, by the HR head, CBO or owner (Requisitions list → the requisition's menu). Everything else is rejected or closed so the trail is kept.",
+  "Reject: while in the approval chain, by the approver of the current step (requisition page → Reject, with a reason).",
+  "Close: an approved or on-hold requisition, by the HR head or CBO (requisition page → Close requisition, with a reason). Job-board postings come down with it.",
+  "Reopen: a closed or rejected requisition cannot be reopened. Start a new hiring need; the new role can reuse the closed role's approved job description.",
+  "On hold: the HR head or CBO can put a requisition on hold; from on hold it can be resubmitted or closed.",
+  "In this chat the person can say 'close this role' to get a Close (or Delete for an unused draft) button.",
+].join("\n");
+
+export async function runTurn(
+  orgId: string,
+  conv: Conversation,
+  history: { role: string; body: string }[],
+): Promise<{ ok: true; turn: DeskTurn } | { ok: false; message: string }> {
+  const slots = conv.slots as DeskSlots;
+  const open = await latestProposal(conv);
+  const requests = await openRequests(conv);
+  const prompt = [
+    `CURRENT DETAILS: ${JSON.stringify(slots)}`,
+    `MISSING (ask in this order): ${missingSlots(slots).join(", ") || "none"}`,
+    `HIRING MANAGERS ON THE TEAM (offer these by name when asking for the hiring manager): ${
+      (await hiringManagerOptions(orgId)).map((m) => m.name).join(", ") || "none registered yet"
+    }`,
+    `STAGE: ${conv.status}`,
+    `NOW (organisation's time): ${localWhen(new Date(), await orgTimeZone(orgId))}`,
+    `OPEN PROPOSAL: ${open ? `yes — ${JSON.stringify({ ...open.proposal, sources: undefined, reasoning: undefined })} (if the person asks for changes to it, put the changed full lists in "slots")` : "no"}`,
+    `OPEN REQUESTS (from agents in this thread): ${
+      requests.length
+        ? requests
+            .map(
+              (r) => `"${r.title}" by the ${AGENT_TITLE[r.agentType] ?? r.agentType} (${r.kind})`,
+            )
+            .join("; ")
+        : "none"
+    }`,
+    `FACTS (live from the system):\n${await deskFacts(conv)}`,
+    `ORGANISATION CONTEXT:\n${untrusted(
+      "organisation_profile",
+      (
+        await (
+          await import("@/lib/org-context.server")
+        ).orgContextFor({ orgId, audience: "internal", purpose: "desk" })
+      ).blocks,
+    )}`,
+    `APP RULES:\n${APP_RULES}`,
+    "CONVERSATION (oldest first):",
+    untrusted(
+      "conversation",
+      history
+        .slice(-12)
+        .map((m) => `${m.role === "user" ? "Recruiter" : "Desk"}: ${m.body}`)
+        .join("\n"),
+    ),
+  ].join("\n");
+  const res = await aiJson({
+    system: SYSTEM,
+    prompt,
+    orgId,
+    feature: "hiring_desk",
+    schema: TurnOutput,
+  });
+  if (!res.ok) return { ok: false, message: res.message };
+  return { ok: true, turn: res.data };
+}
+
+/* ------------------------------------------------------------ similar roles */
+
+export type SimilarRole = {
+  requisitionId: string;
+  code: string;
+  title: string;
+  location: string;
+  status: string;
+  openings: number;
+  jdApproved: boolean;
+  /** An open role the person can continue with. */
+  usable: boolean;
+};
+
+const OPEN = ["draft", "pending_dh", "pending_hr", "pending_cbo", "approved", "on_hold"];
+
+export async function findSimilarRoles(orgId: string, s: DeskSlots): Promise<SimilarRole[]> {
+  const words = (s.roleTitle ?? "")
+    .split(/\s+/)
+    .map((w) => w.replace(/[^\p{L}\p{N}+#.-]/gu, ""))
+    .filter((w) => w.length >= 3 && !/^(developer|engineer|senior|junior|lead)$/i.test(w))
+    .slice(0, 4);
+  if (!words.length) return [];
+  const rows = await db
+    .select({
+      id: requisitions.id,
+      code: requisitions.code,
+      title: requisitions.title,
+      location: requisitions.location,
+      status: requisitions.status,
+      openings: requisitions.openings,
+      jdApproved: sql<boolean>`exists (
+        select 1 from ${jobDescriptions} j
+        where j.requisition_id = ${requisitions.id} and j.org_id = ${orgId} and j.status = 'approved')`,
+    })
+    .from(requisitions)
+    .where(
+      and(
+        eq(requisitions.orgId, orgId),
+        or(...words.map((w) => ilike(requisitions.title, `%${w}%`))),
+        notInArray(requisitions.status, ["rejected"]),
+      ),
+    )
+    .orderBy(desc(requisitions.createdAt))
+    .limit(12);
+  const loc = (s.location ?? "").toLowerCase();
+  return rows
+    .map((r) => ({
+      requisitionId: r.id,
+      code: r.code,
+      title: r.title,
+      location: r.location ?? "",
+      status: r.status,
+      openings: r.openings,
+      jdApproved: Boolean(r.jdApproved),
+      usable: OPEN.includes(r.status),
+    }))
+    .filter((r) => r.usable || r.jdApproved)
+    .sort(
+      (a, b) =>
+        Number(b.location.toLowerCase().includes(loc)) -
+          Number(a.location.toLowerCase().includes(loc)) || Number(b.usable) - Number(a.usable),
+    )
+    .slice(0, 5);
+}
+
+/* ---------------------------------------------------------------- actions */
+
+async function agentOn(orgId: string, type: AgentType): Promise<boolean> {
+  const { loadPolicy } = await import("../agents/policy");
+  return (await loadPolicy(orgId, type)).enabled;
+}
+
+const AGENT_NAME: Record<string, string> = {
+  expert_interview: "Role expert interview agent",
+  publishing: "Publishing agent",
+  requisition: "Requisition agent",
+  jd: "JD agent",
+  intake: "Intake & matching agent",
+  screening: "Screening agent",
+  sourcing: "Sourcing agent",
+  org_context: "Organisation context agent",
+};
+
+/** Start an agent for the thread, or tell the person why it cannot start. */
+async function startForThread(
+  conv: Conversation,
+  agentType: AgentType,
+  principalUserId: string,
+  goal: string,
+  requisitionId: string,
+  announce: string,
+): Promise<string | null> {
+  if (!(await agentOn(conv.orgId, agentType))) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `The ${AGENT_NAME[agentType] ?? agentType} is switched off, so I can't continue automatically. Switch it on in Agent settings, or carry on from the requisition page.`,
+    });
+    return null;
+  }
+  const { startRun } = await import("../agents/runtime.server");
+  const { activeRunFor } = await import("../agents/tools");
+  // One run per requisition per agent: the desk path used to bypass the
+  // dispatch dedupe, so a re-ask could stack a second active run.
+  if (await activeRunFor(conv.orgId, agentType, requisitionId)) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `The ${AGENT_NAME[agentType] ?? agentType} is already working on this role — its requests will appear here as they come.`,
+      agentType,
+    });
+    return null;
+  }
+  const { runId } = await startRun({
+    orgId: conv.orgId,
+    agentType,
+    principalUserId,
+    goal: `${goal}\n\nRequisition id: ${requisitionId}`,
+    subjectType: "requisition",
+    subjectId: requisitionId,
+    conversationId: conv.id,
+  });
+  await postMessage(conv, { role: "desk", body: announce, agentType });
+  const { kickAgents } = await import("../agents/orchestrator.server");
+  kickAgents(conv.orgId);
+  return runId;
+}
+
+async function latestJdStatus(orgId: string, requisitionId: string) {
+  const [jd] = await db
+    .select({ status: jobDescriptions.status })
+    .from(jobDescriptions)
+    .where(and(eq(jobDescriptions.requisitionId, requisitionId), eq(jobDescriptions.orgId, orgId)))
+    .orderBy(desc(jobDescriptions.version))
+    .limit(1);
+  return jd?.status ?? null;
+}
+
+export const INTAKE_GOAL = (code: string, title: string) =>
+  `Find and rank candidates for ${code} "${title}": score any unscored applications, search the talent pool and add the strongest matches (up to 15) to the pipeline, score them, and finish with a short summary of the top candidates. Do not reject anyone.`;
+
+/** Continue with an existing requisition. */
+export async function continueWithRole(
+  conv: Conversation,
+  userId: string,
+  requisitionId: string,
+): Promise<void> {
+  const [req] = await db
+    .select()
+    .from(requisitions)
+    .where(and(eq(requisitions.id, requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (!req) throw new Error("Requisition not found.");
+  if (!OPEN.includes(req.status))
+    throw new Error(`${req.code} is ${req.status} and cannot be reused.`);
+  await db
+    .update(hiringConversations)
+    .set({ requisitionId: req.id, status: "active", title: `${req.title} · ${req.location}` })
+    .where(eq(hiringConversations.id, conv.id));
+  conv = { ...conv, requisitionId: req.id, status: "active" };
+  await postMessage(conv, {
+    role: "desk",
+    body: `Continuing with ${req.code} "${req.title}" (${req.location}, ${req.status.replace(/_/g, " ")}).`,
+  });
+
+  if (req.status !== "approved") {
+    await postMessage(conv, {
+      role: "desk",
+      body: `${req.code} is still waiting for approval (${req.status.replace(/_/g, " ")}). I'll carry on here once it is approved.`,
+    });
+    return;
+  }
+  const jd = await latestJdStatus(conv.orgId, req.id);
+  if (jd === "approved") {
+    await startForThread(
+      conv,
+      "intake",
+      userId,
+      INTAKE_GOAL(req.code, req.title),
+      req.id,
+      "The job description is already approved, so I've asked the Intake & matching agent to search the talent pool and rank the best matches. The ranked list will appear here.",
+    );
+  } else if (jd === "pending_dh") {
+    await postMessage(conv, {
+      role: "desk",
+      body: "Its job description is waiting for the department head's approval. I'll search the talent pool as soon as it is approved.",
+    });
+  } else {
+    await startForThread(
+      conv,
+      "jd",
+      userId,
+      `Requisition ${req.code} "${req.title}" is approved. Draft its job description and get it approved by the department head.`,
+      req.id,
+      "I've asked the JD agent to draft the job description; it will come back here for approval.",
+    );
+  }
+}
+
+/**
+ * Create a new role from the gathered details, as the person (their own
+ * action), optionally reusing an earlier role's approved JD, and hand the
+ * draft to the Requisition agent to complete and submit for approval.
+ */
+export async function createNewRole(
+  conv: Conversation,
+  userId: string,
+  opts: { reuseJdFrom?: string | null } = {},
+): Promise<{ requisitionId: string; code: string }> {
+  const s = conv.slots as DeskSlots;
+  const missing = missingSlots(s);
+  if (missing.length) throw new Error(`Still missing: ${missing.join(", ")}.`);
+  if (conv.requisitionId) throw new Error("This conversation already has a requisition.");
+
+  let reuse: { id: string; code: string } | null = null;
+  if (opts.reuseJdFrom) {
+    const [src] = await db
+      .select({ id: requisitions.id, code: requisitions.code })
+      .from(requisitions)
+      .where(and(eq(requisitions.id, opts.reuseJdFrom), eq(requisitions.orgId, conv.orgId)))
+      .limit(1);
+    if (!src || (await latestApprovedJd(conv.orgId, src.id)) === null)
+      throw new Error("That role has no approved job description to reuse.");
+    reuse = src;
+  }
+
+  const { activeOrgOf } = await import("@/lib/auth.middleware");
+  const org = await activeOrgOf(userId);
+  if (!org || org.orgId !== conv.orgId)
+    throw new Error("You are not a member of this organisation.");
+  const { createRequisitionCore } = await import("@/lib/requisitions.server");
+  const created = await createRequisitionCore(
+    { orgId: conv.orgId, userId, memberEmail: org.memberEmail },
+    {
+      title: s.roleTitle!,
+      departmentId: null,
+      location: s.location!,
+      workMode: s.workMode ?? null,
+      openings: s.openings ?? 1,
+      experienceMin: s.experienceMin ?? 0,
+      experienceMax: s.experienceMax ?? s.experienceMin ?? 0,
+      budgetCtc: s.budgetLpaMax ? s.budgetLpaMax * 100_000 : 0,
+      // A band the person gave is the organisation's own figure; the
+      // Requisition agent keeps it and only researches what is missing.
+      ctcBandMin:
+        s.bandLpaMin !== undefined && s.bandLpaMax !== undefined ? s.bandLpaMin * 100_000 : null,
+      ctcBandMax:
+        s.bandLpaMin !== undefined && s.bandLpaMax !== undefined ? s.bandLpaMax * 100_000 : null,
+      maxNoticePeriodDays: s.maxNoticeDays ?? null,
+      workAuthorizationRequired: null,
+      hiringManager: s.hiringManager ?? null,
+      mustHaveSkills: s.mustHaveSkills ?? [],
+      goodToHaveSkills: s.goodToHaveSkills ?? [],
+      responsibilities: jdBrief(s),
+      educationRequirement: s.education ?? null,
+      billingType: "Non-billable",
+      engagementType: s.employmentType === "contract" ? "Contract" : "Internal / Corporate",
+      clientName: null,
+      costCenter: null,
+    },
+    "draft",
+  );
+  // The hiring manager as a member (resolved when the person named them).
+  if (s.hiringManagerMemberId)
+    await db
+      .update(requisitions)
+      .set({ hiringManagerMemberId: s.hiringManagerMemberId })
+      .where(and(eq(requisitions.id, created.id), eq(requisitions.orgId, conv.orgId)));
+  await db
+    .update(hiringConversations)
+    .set({
+      requisitionId: created.id,
+      reuseJdFrom: reuse?.id ?? null,
+      status: "active",
+      title: `${s.roleTitle} · ${s.location}`,
+    })
+    .where(eq(hiringConversations.id, conv.id));
+  conv = { ...conv, requisitionId: created.id, reuseJdFrom: reuse?.id ?? null, status: "active" };
+  await writeAudit({
+    actor: `user:${userId}`,
+    actorUserId: userId,
+    orgId: conv.orgId,
+    action: "desk.requisition_created",
+    entityType: "requisition",
+    entityId: created.id,
+    detail: { conversation_id: conv.id, reuse_jd_from: reuse?.code ?? null },
+  });
+  await postMessage(conv, {
+    role: "desk",
+    body: `Created draft ${created.code} for ${describeNeed(s)}.${reuse ? ` Once it is approved, the approved job description of ${reuse.code} will be reused — no new JD approval needed.` : ""}`,
+    card: { type: "requisition", requisitionId: created.id, code: created.code },
+  });
+  await showInterviewPlan(conv, true);
+  await startForThread(
+    conv,
+    "requisition",
+    userId,
+    [
+      `Complete draft requisition ${created.code} "${s.roleTitle}" (${s.location}) raised from the hiring desk: ${describeNeed(s)}.`,
+      // The desk showed the person any similar roles first; this is their choice.
+      "The person reviewed the similar roles on the hiring desk and chose to open this new requisition — complete it; do not hand it off as a duplicate.",
+      "Find the department, research the market pay band for this role and location (keep any budget or band the person gave), set the scoring weights, then submit it for approval and prepare the approval brief.",
+      reuse
+        ? `Mention in the approval brief that the approved job description of ${reuse.code} will be reused for this role.`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
+    created.id,
+    "I've asked the Requisition agent to add the pay band and scoring weights and send it for approval. Approval requests will show up here.",
+  );
+  return { requisitionId: created.id, code: created.code };
+}
+
+async function latestApprovedJd(orgId: string, requisitionId: string) {
+  const [jd] = await db
+    .select()
+    .from(jobDescriptions)
+    .where(
+      and(
+        eq(jobDescriptions.requisitionId, requisitionId),
+        eq(jobDescriptions.orgId, orgId),
+        eq(jobDescriptions.status, "approved"),
+      ),
+    )
+    .orderBy(desc(jobDescriptions.version))
+    .limit(1);
+  return jd ?? null;
+}
+
+/**
+ * On approval of a requisition whose thread chose to reuse an earlier JD:
+ * file that approved JD as this requisition's approved version (audited as
+ * the person's choice) instead of drafting a new one. Returns true when done.
+ */
+export async function reuseJdIfChosen(orgId: string, requisitionId: string): Promise<boolean> {
+  const conv = await conversationForRequisition(orgId, requisitionId);
+  if (!conv?.reuseJdFrom) return false;
+  if ((await latestApprovedJd(orgId, requisitionId)) !== null) return true;
+  const src = await latestApprovedJd(orgId, conv.reuseJdFrom);
+  if (!src) return false;
+  const [latest] = await db
+    .select({ version: jobDescriptions.version })
+    .from(jobDescriptions)
+    .where(and(eq(jobDescriptions.requisitionId, requisitionId), eq(jobDescriptions.orgId, orgId)))
+    .orderBy(desc(jobDescriptions.version))
+    .limit(1);
+  const [row] = await db
+    .insert(jobDescriptions)
+    .values({
+      requisitionId,
+      orgId,
+      version: (latest?.version ?? 0) + 1,
+      status: "approved",
+      purpose: src.purpose,
+      responsibilities: src.responsibilities,
+      mustHave: src.mustHave,
+      goodToHave: src.goodToHave,
+      qualifications: src.qualifications,
+      successFactors: src.successFactors,
+      reportingTo: src.reportingTo,
+      fullText: src.fullText,
+      templateId: src.templateId,
+      templateName: src.templateName,
+    })
+    .returning({ id: jobDescriptions.id });
+  const [srcReq] = await db
+    .select({ code: requisitions.code })
+    .from(requisitions)
+    .where(eq(requisitions.id, conv.reuseJdFrom))
+    .limit(1);
+  await writeAudit({
+    actor: `user:${conv.createdBy}`,
+    actorUserId: conv.createdBy,
+    orgId,
+    action: "jd.reused",
+    entityType: "job_description",
+    entityId: row!.id,
+    detail: {
+      requisition_id: requisitionId,
+      source_requisition: srcReq?.code ?? conv.reuseJdFrom,
+      source_jd_id: src.id,
+      chosen_in_conversation: conv.id,
+    },
+  });
+  const { emitAgentEvent } = await import("../agents/events");
+  await emitAgentEvent({
+    orgId,
+    type: "jd.approved",
+    subjectType: "jd",
+    subjectId: row!.id,
+    actorUserId: conv.createdBy,
+    payload: { requisitionId, reusedFrom: conv.reuseJdFrom },
+  });
+  await postMessage(conv, {
+    role: "desk",
+    body: `The requisition is approved and the approved job description of ${srcReq?.code ?? "the earlier role"} has been reused.`,
+  });
+  return true;
+}
+
+/** After a thread's JD is approved: say what happens next, then rank candidates for it. */
+export async function onJdApproved(
+  orgId: string,
+  requisitionId: string,
+  jdId: string | null = null,
+): Promise<void> {
+  const conv = await conversationForRequisition(orgId, requisitionId);
+  if (!conv) return;
+  await explainAfterJd(conv, jdId);
+  const [req] = await db
+    .select({ code: requisitions.code, title: requisitions.title, status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, requisitionId), eq(requisitions.orgId, orgId)))
+    .limit(1);
+  if (!req || req.status !== "approved") return;
+  const [active] = await db
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, orgId),
+        eq(agentRuns.agentType, "intake"),
+        eq(agentRuns.subjectId, requisitionId),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+      ),
+    )
+    .limit(1);
+  if (active) return;
+  await startForThread(
+    conv,
+    "intake",
+    conv.createdBy,
+    INTAKE_GOAL(req.code, req.title),
+    requisitionId,
+    "The job description is approved. I've asked the Intake & matching agent to search the talent pool and rank the best matches.",
+  );
+}
+
+/* --------------------------------------------------------- ranked list */
+
+export type RankedItem = {
+  rank: number;
+  applicationId: string;
+  name: string;
+  score: number | null;
+  recommendation: string | null;
+  stage: string;
+  experienceYears: number;
+  location: string | null;
+  matched: string[];
+  missing: string[];
+  risks: number;
+};
+
+const CLOSED_STAGES = ["rejected", "withdrawn", "no_show", "offer_declined"];
+
+export async function rankedCandidates(
+  orgId: string,
+  requisitionId: string,
+  limit = 15,
+): Promise<RankedItem[]> {
+  const rows = await db
+    .select({
+      applicationId: applications.id,
+      name: candidates.fullName,
+      stage: applications.stage,
+      experienceYears: candidates.experienceYears,
+      location: candidates.location,
+      score: matchScores.overallScore,
+      recommendation: matchScores.recommendation,
+      matched: matchScores.matchedSkills,
+      missing: matchScores.missingSkills,
+      riskFlags: matchScores.riskFlags,
+    })
+    .from(applications)
+    .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+    .leftJoin(matchScores, eq(matchScores.applicationId, applications.id))
+    .where(
+      and(
+        eq(applications.orgId, orgId),
+        eq(applications.requisitionId, requisitionId),
+        notInArray(applications.stage, CLOSED_STAGES as never),
+      ),
+    )
+    .orderBy(desc(sql`coalesce(${matchScores.overallScore}, -1)`), asc(candidates.fullName))
+    .limit(limit);
+  return rows.map((r, i) => ({
+    rank: i + 1,
+    applicationId: r.applicationId,
+    name: r.name,
+    score: r.score ?? null,
+    recommendation: r.recommendation ?? null,
+    stage: r.stage,
+    experienceYears: Number(r.experienceYears ?? 0),
+    location: r.location,
+    matched: (r.matched ?? []).slice(0, 4),
+    missing: (r.missing ?? []).slice(0, 3),
+    risks: (r.riskFlags ?? []).length,
+  }));
+}
+
+export async function postRankedList(conv: Conversation): Promise<void> {
+  if (!conv.requisitionId) return;
+  const items = await rankedCandidates(conv.orgId, conv.requisitionId);
+  if (items.length < 3) {
+    // Too few to choose from: ask for candidates instead of stopping quietly.
+    if (items.length)
+      await postMessage(conv, {
+        role: "agent",
+        agentType: "intake",
+        body: `Only ${plural(items.length, "candidate")} so far, best first.`,
+        card: { type: "ranked_candidates", requisitionId: conv.requisitionId, items },
+      });
+    await postMessage(conv, {
+      role: "desk",
+      body: items.length
+        ? "That is too few to choose from. Let's bring more candidates in:"
+        : "No matching candidates are in this role's pipeline or your talent pool yet. Let's bring candidates in:",
+      card: { type: "bring_candidates", requisitionId: conv.requisitionId, found: items.length },
+    });
+    return;
+  }
+  await postMessage(conv, {
+    role: "agent",
+    agentType: "intake",
+    body: `Here are the top ${items.length} matches, best first. Pick the ones to screen, or say for example "talk to the first 5".`,
+    card: { type: "ranked_candidates", requisitionId: conv.requisitionId, items },
+  });
+}
+
+/** Resolve "the first 5" / ranks against the latest ranked list in the thread. */
+export async function resolveRanks(
+  conv: Conversation,
+  sel: { top?: number | undefined; ranks?: number[] | undefined },
+): Promise<string[]> {
+  const [m] = await db
+    .select({ card: hiringMessages.card })
+    .from(hiringMessages)
+    .where(
+      and(
+        eq(hiringMessages.conversationId, conv.id),
+        sql`${hiringMessages.card} ->> 'type' = 'ranked_candidates'`,
+      ),
+    )
+    .orderBy(desc(hiringMessages.createdAt))
+    .limit(1);
+  const items = ((m?.card as { items?: RankedItem[] } | null)?.items ?? []) as RankedItem[];
+  if (sel.ranks?.length)
+    return items.filter((i) => sel.ranks!.includes(i.rank)).map((i) => i.applicationId);
+  return items.slice(0, sel.top ?? 5).map((i) => i.applicationId);
+}
+
+/**
+ * The person picked candidates to screen. Their pick is the decision; the
+ * Screening agent prepares a kit per candidate (calls come with the voice
+ * agent in Phase 6b) under its own autonomy rules.
+ */
+export async function screenCandidates(
+  conv: Conversation,
+  userId: string,
+  applicationIds: string[],
+): Promise<number> {
+  if (!conv.requisitionId) throw new Error("Choose or create the role first.");
+  const ids = [...new Set(applicationIds)].slice(0, 20);
+  if (!ids.length) throw new Error("No candidates selected.");
+  const rows = await db
+    .select({ id: applications.id, name: candidates.fullName })
+    .from(applications)
+    .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+    .where(
+      and(
+        eq(applications.orgId, conv.orgId),
+        eq(applications.requisitionId, conv.requisitionId),
+        inArray(applications.id, ids),
+      ),
+    );
+  if (!rows.length) throw new Error("Those candidates are not in this role's pipeline.");
+  // Keep the order the person chose (rank order for "the first N").
+  rows.sort((x, y) => ids.indexOf(x.id) - ids.indexOf(y.id));
+  const [req] = await db
+    .select({ code: requisitions.code, title: requisitions.title })
+    .from(requisitions)
+    .where(eq(requisitions.id, conv.requisitionId))
+    .limit(1);
+  await writeAudit({
+    actor: `user:${userId}`,
+    actorUserId: userId,
+    orgId: conv.orgId,
+    action: "desk.candidates_selected",
+    entityType: "requisition",
+    entityId: conv.requisitionId,
+    detail: { conversation_id: conv.id, applications: rows.map((r) => r.id) },
+  });
+  // Screening already under way (a phone call arranged or held, or the written
+  // assessment sent) is not started again — another run would only rebuild the
+  // kit. Everyone else goes to the Screening agent, which arranges the call.
+  const underWay = new Set(
+    (
+      (await db.execute(sql`
+        select a.id from ${applications} a
+        where a.org_id = ${conv.orgId}
+          and a.id in (${sql.join(
+            rows.map((r) => sql`${r.id}`),
+            sql`, `,
+          )})
+          and (
+            exists (
+              select 1 from ${screeningCalls} c
+              where c.org_id = ${conv.orgId} and c.application_id = a.id
+                and c.status not in ('cancelled', 'consent_declined')
+            )
+            or exists (
+              select 1 from ${candidateAssessments} x
+              where x.org_id = ${conv.orgId} and x.candidate_id = a.candidate_id
+                and x.requisition_id = a.requisition_id
+            )
+          )`)) as unknown as { id: string }[]
+    ).map((r) => r.id),
+  );
+  const busy = rows.filter((r) => underWay.has(r.id));
+  const fresh = rows.filter((r) => !underWay.has(r.id));
+  if (busy.length) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `${busy.map((r) => r.name).join(", ")} ${busy.length === 1 ? "is" : "are"} already being screened for this role (a call is arranged or the assessment was sent), so I haven't started again. Their progress shows on the candidate page.`,
+    });
+  }
+  if (fresh.length) {
+    await startForThread(
+      conv,
+      "screening",
+      userId,
+      [
+        `The recruiter chose these candidates for screening for ${req?.code} "${req?.title}":`,
+        ...fresh.map((r) => `- application ${r.id}`),
+        "Shortlist any that are not shortlisted yet, prepare a screening kit for each that has none (reuse an existing kit), arrange their screening as your instructions say, and summarise who should proceed.",
+      ].join("\n"),
+      conv.requisitionId,
+      `Screening ${plural(fresh.length, "candidate")}: ${fresh.map((r) => r.name).join(", ")}. The Screening agent is preparing their screening.`,
+    );
+  }
+  return rows.length;
+}
+
+/* ----------------------------------------------------------- the turn */
+
+/** Handle one message from the person. */
+export async function handleUserMessage(
+  conv: Conversation,
+  userId: string,
+  text: string,
+): Promise<void> {
+  // The desk's AI work for a role counts towards that role's hiring cost.
+  const { withAiSubject } = await import("../agents/context");
+  return withAiSubject({ requisitionId: conv.requisitionId }, () =>
+    handleUserMessageInner(conv, userId, text),
+  );
+}
+
+async function handleUserMessageInner(
+  conv: Conversation,
+  userId: string,
+  text: string,
+): Promise<void> {
+  await postMessage(conv, { role: "user", body: text });
+  const history = await db
+    .select({ role: hiringMessages.role, body: hiringMessages.body })
+    .from(hiringMessages)
+    .where(eq(hiringMessages.conversationId, conv.id))
+    .orderBy(asc(hiringMessages.createdAt));
+  const res = await runTurn(conv.orgId, conv, history);
+  if (!res.ok) {
+    log.warn("desk.turn_failed", { org_id: conv.orgId, error: res.message });
+    await postMessage(conv, {
+      role: "desk",
+      body: /key/i.test(res.message)
+        ? "I can't reach the AI model — add your organisation's AI key on the Integrations page."
+        : "I couldn't process that just now. Please try again in a moment.",
+    });
+    return;
+  }
+  const { turn } = res;
+  const before = conv.slots as DeskSlots;
+  delete turn.slots.hiringManagerMemberId; // set only by the system, below
+  let slots = mergeSlots(before, turn.slots);
+  // The hiring manager must be a registered member: resolve the name they gave.
+  let hiringManagerNote: string | null = null;
+  if (turn.slots.hiringManager) {
+    const hm = await resolveHiringManager(conv.orgId, turn.slots.hiringManager);
+    if (hm) slots = { ...slots, hiringManager: hm.name, hiringManagerMemberId: hm.memberId };
+    else {
+      const { hiringManager: _drop, hiringManagerMemberId: _id, ...rest } = slots;
+      slots = rest;
+      const options = (await hiringManagerOptions(conv.orgId)).map((m) => m.name);
+      hiringManagerNote = `I couldn't find "${turn.slots.hiringManager}" on your team — the hiring manager has to be a registered member (the admin adds people on the Team page).${options.length ? ` Hiring managers on your team: ${options.join(", ")}.` : ""}`;
+    }
+  }
+  await db
+    .update(hiringConversations)
+    .set({
+      slots: slots as never,
+      ...(slots.roleTitle && !conv.requisitionId
+        ? { title: `${slots.roleTitle}${slots.location ? ` · ${slots.location}` : ""}` }
+        : {}),
+    })
+    .where(eq(hiringConversations.id, conv.id));
+  conv = { ...conv, slots: slots as never };
+  if (hiringManagerNote) await postMessage(conv, { role: "desk", body: hiringManagerNote });
+  const changed = changedSlots(before, slots);
+  // The card says what the message added even when no slot could be filled
+  // yet (three roles named and one asked about, a process question) — the
+  // model's own one-line reading covers those; "Nothing new" then means it.
+  const understood = changed.length
+    ? changed
+    : turn.understood.trim()
+      ? [{ label: "Read", value: turn.understood.trim() }]
+      : [];
+  // The person edited the proposed details themselves: the open proposal is superseded,
+  // so a later "ok" cannot overwrite their edits with it.
+  if (
+    turn.command.type !== "accept" &&
+    changed.some((u) => /skills|Experience|Budget/.test(u.label))
+  )
+    await supersedeProposal(conv);
+
+  // 2–3 hiring needs named together: fan out into parallel threads, one per
+  // need — the first stays in this thread, the rest get their own, each with
+  // its own questions and its own approvals.
+  if (turn.command.type === "split_needs" && turn.needs.length >= 2) {
+    await splitNeeds(conv, userId, turn.needs);
+    return;
+  }
+
+  // Commands the person gave in words.
+  const cmd = turn.command;
+  if (conv.status === "closed" && cmd.type !== "none") {
+    await postMessage(conv, {
+      role: "desk",
+      body: "This role is closed, so nothing more can be done on it here. Start a new hiring need to hire for it again — I can reuse this role's approved job description.",
+    });
+    return;
+  }
+  if (cmd.type === "screen") {
+    if (!conv.requisitionId) {
+      await postMessage(conv, {
+        role: "desk",
+        body: "Let's settle the role first, then I'll line up candidates.",
+      });
+      return;
+    }
+    const ids = await resolveRanks(conv, cmd);
+    if (!ids.length) {
+      await postMessage(conv, {
+        role: "desk",
+        body: "There is no ranked list yet — I'll post one as soon as the matching is done.",
+      });
+      return;
+    }
+    await screenCandidates(conv, userId, ids);
+    return;
+  }
+  if (cmd.type === "manage_call") {
+    await manageCallFromDesk(conv, userId, cmd);
+    return;
+  }
+  if (cmd.type === "go_back") {
+    await goBackFromDesk(conv, userId, cmd);
+    return;
+  }
+  if (cmd.type === "call_candidate") {
+    await callCandidateFromDesk(conv, userId, cmd);
+    return;
+  }
+  if (cmd.type === "show_jd") {
+    await showJd(conv, understood);
+    return;
+  }
+  if (cmd.type === "show_interview_plan") {
+    await showInterviewPlan(conv);
+    return;
+  }
+  if (cmd.type === "close_role") {
+    await offerCloseRole(conv);
+    return;
+  }
+  if (cmd.type === "research") {
+    await researchRole(conv, cmd.fields?.length ? cmd.fields : ["skills"], understood);
+    return;
+  }
+  if (cmd.type === "feedback") {
+    await sendFeedback(conv, userId, cmd.text, understood, cmd.template, cmd.request);
+    return;
+  }
+  if (cmd.type === "accept" && (await latestProposal(conv))) {
+    await applyProposal(conv);
+    return;
+  }
+  if (conv.status === "confirming" && cmd.type === "new_role") {
+    await createNewRole(conv, userId);
+    return;
+  }
+  if (conv.status === "confirming" && cmd.type === "use_existing" && cmd.code) {
+    const [r] = await db
+      .select({ id: requisitions.id })
+      .from(requisitions)
+      .where(and(eq(requisitions.orgId, conv.orgId), eq(requisitions.code, cmd.code.toUpperCase())))
+      .limit(1);
+    if (r) {
+      await continueWithRole(conv, userId, r.id);
+      return;
+    }
+  }
+
+  if (conv.status === "gathering") {
+    await advanceGathering(conv, turn.reply, understood);
+    return;
+  }
+
+  // No command: the desk only answered. While agents wait on the person, say
+  // plainly that nothing was passed on, so a reply never reads as an action.
+  const waiting = await openRequests(conv);
+  await postMessage(conv, {
+    role: "desk",
+    body:
+      turn.reply.trim() ||
+      (conv.status === "confirming"
+        ? "Choose one of the options above, or tell me what to change."
+        : "Noted."),
+    ...(waiting.length
+      ? {
+          card: {
+            type: "reasoning",
+            understood,
+            missing: [],
+            next: `Nothing was sent to the agents. To change "${waiting[0]!.title}", tell me what to change and I'll send it back to the ${AGENT_TITLE[waiting[0]!.agentType] ?? waiting[0]!.agentType}.`,
+          },
+        }
+      : {}),
+  });
+}
+
+/* ---------------------------------------------------- runtime hooks */
+
+const SAFE_ERRORS = new Set([
+  LEG_LIMIT_MESSAGE,
+  CEILING_MESSAGE,
+  "The run reached its step or token budget.",
+  "The worker stopped before finishing this step.",
+  "No AI model key saved. Add one on the Integrations page.",
+]);
+
+/**
+ * Why a run stopped, in plain words. Provider text never reaches the browser
+ * (it can name the vendor); known runtime messages pass through.
+ */
+export function failureReason(error: string | null): string {
+  if (error && SAFE_ERRORS.has(error)) return error;
+  const e = error ?? "";
+  if (/api[ _-]?key|unauthori[sz]ed|permission denied|\b40[13]\b/i.test(e))
+    return "the AI model rejected the key. Check Integrations → AI model, then try again.";
+  if (/quota|rate.?limit|resource.?exhausted|\b429\b|overloaded/i.test(e))
+    return "the AI model is busy or out of quota. Try again in a few minutes.";
+  if (/timeout|timed out|ECONN|network|fetch failed/i.test(e))
+    return "the AI model could not be reached. Try again.";
+  if (e)
+    return "the AI model or one of its tools returned an error. Try again; if it repeats, export the run trail from Agent activity.";
+  return "it could not complete this step. Try again.";
+}
+
+/** A run working for a thread finished: post its result (and the ranked list after matching). */
+export async function onRunFinished(run: {
+  id?: string;
+  conversationId: string | null;
+  orgId: string;
+  agentType: string;
+  mode?: string;
+  status: "done" | "failed";
+  result: string | null;
+  error: string | null;
+}): Promise<void> {
+  if (!run.conversationId || run.mode === "replay") return;
+  const conv = await loadConversation(run.orgId, run.conversationId).catch(() => null);
+  if (!conv) return;
+  const name = AGENT_NAME[run.agentType] ?? `${run.agentType} agent`;
+  if (run.status === "done" && (await recapAlreadyPosted(conv, run))) return;
+  await postMessage(conv, {
+    role: "agent",
+    agentType: run.agentType,
+    body:
+      run.status === "done"
+        ? readableAgentText(run.result ?? "Done.")
+        : `The ${name} stopped: ${failureReason(run.error)}`,
+    ...(run.status === "failed" && run.id
+      ? { card: { type: "run_failed", runId: run.id, agentType: run.agentType } }
+      : {}),
+  });
+  if (run.status === "done" && run.agentType === "intake") await postRankedList(conv);
+}
+
+/**
+ * A JD run ends only after its approval, by which time the desk has already
+ * said "the job description is approved — here is what happens next"; the
+ * agent's recap would arrive late and out of order, so it is not posted.
+ */
+async function recapAlreadyPosted(
+  conv: { id: string },
+  run: { id?: string; agentType: string },
+): Promise<boolean> {
+  if (run.agentType !== "jd" || !run.id) return false;
+  const [r] = await db
+    .select({ at: agentRuns.createdAt })
+    .from(agentRuns)
+    .where(eq(agentRuns.id, run.id))
+    .limit(1);
+  if (!r) return false;
+  const [m] = await db
+    .select({ id: hiringMessages.id })
+    .from(hiringMessages)
+    .where(
+      and(
+        eq(hiringMessages.conversationId, conv.id),
+        sql`${hiringMessages.card} ->> 'type' = 'next_steps'`,
+        sql`${hiringMessages.createdAt} >= ${r.at.toISOString()}::timestamptz`,
+      ),
+    )
+    .limit(1);
+  return Boolean(m);
+}
+
+/** A run working for a thread needs a person: show the request in the thread. */
+const ROLE_NAME: Record<string, string> = {
+  recruiter: "Recruiter",
+  hiring_manager: "Hiring manager",
+  department_head: "Department head",
+  hr_head: "HR head",
+  president_cbo: "CBO",
+};
+
+/** Multi-step approval chains: which step a gate is, so repeated cards read as progress. */
+const CHAIN_STEP: Record<string, Record<string, [number, number]>> = {
+  requisition: { pending_dh: [1, 3], pending_hr: [2, 3], pending_cbo: [3, 3] },
+  offer: { pending_hr: [1, 2], pending_cbo: [2, 2] },
+};
+
+/** "Approval 2 of 3 · HR head" for a chain step, "Decision · Hiring manager" otherwise. */
+export function taskStep(task: {
+  kind: string;
+  assigneeRole?: string | null;
+  proposedAction?: unknown;
+}): string | null {
+  if (task.kind !== "gate") return null;
+  const subject = (
+    task.proposedAction as { args?: { subject?: { type?: string; expects?: string } } } | null
+  )?.args?.subject;
+  const who = task.assigneeRole ? (ROLE_NAME[task.assigneeRole] ?? task.assigneeRole) : null;
+  const step =
+    subject?.type && subject.expects ? CHAIN_STEP[subject.type]?.[subject.expects] : undefined;
+  if (step) return `Approval ${step[0]} of ${step[1]}${who ? ` · ${who}` : ""}`;
+  return who ? `Decision · ${who}` : null;
+}
+
+export async function onTaskOpened(
+  run: { conversationId: string | null; orgId: string; agentType: string },
+  task: {
+    id: string;
+    kind: string;
+    title: string;
+    body: string;
+    assigneeRole?: string | null;
+    proposedAction?: unknown;
+  },
+): Promise<void> {
+  if (!run.conversationId) return;
+  const conv = await loadConversation(run.orgId, run.conversationId).catch(() => null);
+  if (!conv) return;
+  const step = taskStep(task);
+  const tz = await orgTimeZone(conv.orgId);
+  // The same brief again for the next approver: show it collapsed, not twice.
+  const [prev] = await db
+    .select({ card: hiringMessages.card })
+    .from(hiringMessages)
+    .where(
+      and(
+        eq(hiringMessages.conversationId, conv.id),
+        sql`${hiringMessages.card} ->> 'type' = 'task'`,
+      ),
+    )
+    .orderBy(desc(hiringMessages.createdAt))
+    .limit(1);
+  const body = clipText(readableAgentText(task.body), 6000);
+  const revision = task.kind === "approval" ? await revisionOf(conv, task) : null;
+  const repeated = (prev?.card as { body?: string } | null)?.body === body && body.length > 0;
+  await postMessage(conv, {
+    role: "agent",
+    agentType: run.agentType,
+    body:
+      task.kind === "clarification"
+        ? run.agentType === "expert_interview"
+          ? "A few questions for the hiring manager about what this role really needs."
+          : "I have a question before I continue."
+        : task.kind === "gate"
+          ? step
+            ? `${step.replace(" · ", " — waiting for the ")}.`
+            : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
+                  ?.subject?.type === "screening_decision"
+              ? "Screening is done for this candidate — who moves on is your decision."
+              : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
+                    ?.subject?.type === "panel_approval"
+                ? "Who interviews for this round is your decision — approve the panel or change the people."
+                : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
+                      ?.subject?.type === "panel_substitute"
+                  ? "A panellist can't make an interview — approve the stand-in, or decline and say who instead."
+                  : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)?.args
+                        ?.subject?.type === "new_panelist"
+                    ? "Nobody in the panel directory fits this round — type who should interview (inside or outside the organisation) and approve."
+                    : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)
+                          ?.args?.subject?.type === "expert_brief"
+                      ? "The role's expert brief, written from the hiring manager's answers — the hiring manager approves it or says what to change."
+                      : (task.proposedAction as { args?: { subject?: { type?: string } } } | null)
+                            ?.args?.subject?.type === "panel_review"
+                        ? "The panel and the round's panel agent see this candidate differently — both views are below; the decision is yours."
+                        : "This needs a decision."
+          : revision
+            ? `Revised as you asked ("${revision.reason}")${
+                revision.changes.length
+                  ? `: ${revision.changes.map((c) => `${c.label} ${c.from} → ${c.to}`).join(", ")}`
+                  : " — but nothing in the proposal changed; tell me what to change, or decline it"
+              }. May I go ahead with this?`
+            : task.assigneeRole
+              ? `This needs ${ROLE_TITLE[task.assigneeRole] ?? task.assigneeRole}'s approval.`
+              : "May I go ahead with this?",
+    card: {
+      type: "task",
+      taskId: task.id,
+      kind: task.kind,
+      title: task.title,
+      body,
+      ...(() => {
+        const subj = (
+          task.proposedAction as {
+            args?: {
+              subject?: {
+                type?: string;
+                applicationId?: string;
+                recommendation?: string;
+                requisitionId?: string;
+                level?: number;
+                memberIds?: string[];
+                needed?: string;
+              };
+            };
+          } | null
+        )?.args?.subject;
+        if (!subj?.type) return {};
+        // A screening decision shows the graded result (and "Why this score") on its card.
+        if (subj.type === "panel_approval")
+          return {
+            subjectType: subj.type,
+            requisitionId: subj.requisitionId,
+            level: subj.level,
+            memberIds: subj.memberIds,
+          };
+        if (subj.type === "new_panelist")
+          return { subjectType: subj.type, level: subj.level, needed: subj.needed };
+        return subj.type === "screening_decision"
+          ? {
+              subjectType: subj.type,
+              applicationId: subj.applicationId,
+              recommendation: subj.recommendation,
+            }
+          : { subjectType: subj.type };
+      })(),
+      ...(step ? { step } : {}),
+      ...(repeated ? { repeated: true } : {}),
+      ...(revision ? { revision } : {}),
+      ...(task.kind === "approval"
+        ? (() => {
+            const a = task.proposedAction as { name?: string; args?: unknown } | null;
+            const details = argDetails(a?.name ?? null, a?.args, tz);
+            return details.length ? { details } : {};
+          })()
+        : {}),
+    },
+  });
+}
+
+async function getToolDescription(name: string): Promise<string | null> {
+  const { ensureAgentsRegistered } = await import("../agents");
+  ensureAgentsRegistered();
+  return getTool(name)?.description ?? null;
+}
+
+/** Readable details of the action each approval card asks about (old cards included). */
+export async function taskDetails(
+  orgId: string,
+  ids: string[],
+): Promise<Record<string, { label: string; value: string }[]>> {
+  if (!ids.length) return {};
+  const rows = await db
+    .select({ id: agentTasks.id, kind: agentTasks.kind, action: agentTasks.proposedAction })
+    .from(agentTasks)
+    .where(and(eq(agentTasks.orgId, orgId), inArray(agentTasks.id, ids)));
+  const out: Record<string, { label: string; value: string }[]> = {};
+  const tz = await orgTimeZone(orgId);
+  for (const r of rows) {
+    if (r.kind !== "approval") continue;
+    const a = r.action as { name?: string; args?: unknown } | null;
+    const d = argDetails(a?.name ?? null, a?.args, tz);
+    // Nothing to show (the tool works it out itself): say what it does instead.
+    const what = a?.name ? await getToolDescription(a.name) : null;
+    if (d.length) out[r.id] = d;
+    // First sentence only: the rest is guidance written for the model.
+    else if (what) out[r.id] = [{ label: "What it does", value: what.split(/(?<=\.)\s/)[0]! }];
+  }
+  return out;
+}
+
+const ROLE_TITLE: Record<string, string> = {
+  recruiter: "a recruiter",
+  hiring_manager: "the hiring manager",
+  department_head: "the department head",
+  hr_head: "the HR head",
+  president_cbo: "the CBO",
+};
+
+/**
+ * For each open request: whether this person may decide it (same rule as the
+ * runtime: the named assignee, a holder of the assigned role, or the owner),
+ * and who it is waiting for when they may not.
+ */
+export async function taskDeciders(
+  orgId: string,
+  userId: string,
+  isOwner: boolean,
+  ids: string[],
+): Promise<Record<string, { canDecide: boolean; waitingFor: string | null }>> {
+  if (!ids.length) return {};
+  const rows = await db
+    .select({
+      id: agentTasks.id,
+      role: agentTasks.assigneeRole,
+      user: agentTasks.assigneeUserId,
+    })
+    .from(agentTasks)
+    .where(and(eq(agentTasks.orgId, orgId), inArray(agentTasks.id, ids)));
+  const { userRoles } = await import("@db/schema");
+  const mine = (
+    await db
+      .select({ role: userRoles.role })
+      .from(userRoles)
+      .where(and(eq(userRoles.userId, userId), eq(userRoles.orgId, orgId)))
+  ).map((r) => r.role as string);
+  return Object.fromEntries(
+    rows.map((t) => {
+      const canDecide =
+        isOwner || ((!t.user || t.user === userId) && (!t.role || mine.includes(t.role)));
+      return [
+        t.id,
+        {
+          canDecide,
+          waitingFor: canDecide
+            ? null
+            : t.role
+              ? (ROLE_TITLE[t.role] ?? t.role)
+              : "the person it is assigned to",
+        },
+      ];
+    }),
+  );
+}
+
+/** Current status of the tasks shown in a thread (for the cards' buttons). */
+export async function taskStatuses(orgId: string, ids: string[]): Promise<Record<string, string>> {
+  if (!ids.length) return {};
+  const rows = await db
+    .select({ id: agentTasks.id, status: agentTasks.status, response: agentTasks.response })
+    .from(agentTasks)
+    .where(and(eq(agentTasks.orgId, orgId), inArray(agentTasks.id, ids)));
+  return Object.fromEntries(
+    rows.map((r) => [
+      r.id,
+      r.status === "rejected" && (r.response as { changes?: boolean } | null)?.changes
+        ? "changes_requested"
+        : r.status === "cancelled" &&
+            /moved from/.test(String((r.response as { reason?: string } | null)?.reason ?? ""))
+          ? "stale"
+          : r.status,
+    ]),
+  );
+}
+
+/* ------------------------------------------------------------- progress */
+
+export type StageKey =
+  | "need"
+  | "requisition"
+  | "jd"
+  | "candidates"
+  | "screening"
+  | "interviews"
+  | "decision"
+  | "offer"
+  | "joining";
+
+/** One candidate on the screening board (the hiring journey's Screening step). */
+export type ScreeningBoardRow = {
+  applicationId: string;
+  name: string;
+  /** Where they are, in plain words ("Call booked Sat 24 Oct, 16:13", "Your decision"). */
+  status: string;
+  /** decide = waiting for a person; working = an agent or the candidate is on it; done; stopped. */
+  tone: "decide" | "working" | "done" | "stopped";
+  score: number | null;
+  /** "Proceed", "Probe further", "Hold". */
+  recommendation: string | null;
+  /** "2 asked of 4 planned · both answered". */
+  coverage: string | null;
+  runId: string | null;
+  /** The open screening decision, when one waits for a person. */
+  taskId: string | null;
+};
+
+export type DeskProgress = {
+  /** Each screened (or shortlisted) candidate's screening, live. */
+  screening?: ScreeningBoardRow[];
+  /** The requisition was closed, rejected or deleted — the journey has ended. */
+  ended?: { status: "closed" | "rejected" | "deleted"; reason: string | null; by: string | null };
+  stages: { key: StageKey; label: string; state: "done" | "current" | "todo" }[];
+  next: {
+    stage: StageKey;
+    /** What happens next, in plain words. */
+    text: string;
+    agentType: string | null;
+    agentName: string | null;
+    /** on = switched on; off = switched off (nothing will happen until it is). */
+    agentEnabled: boolean | null;
+    /** The responsible agent's latest run on this role (`paused` = at its monthly token budget). */
+    run: {
+      id: string;
+      status: string;
+      paused?: boolean;
+      /** Month-to-date tokens against the monthly budget, when paused on it. */
+      budget?: { used: number; limit: number; suggested: number };
+    } | null;
+    /** Open requests from this thread's agents waiting for a person. */
+    waitingForYou: number;
+  } | null;
+};
+
+const STAGES: { key: StageKey; label: string; agent: AgentType | null }[] = [
+  { key: "need", label: "Need", agent: null },
+  { key: "requisition", label: "Requisition approval", agent: "requisition" },
+  { key: "jd", label: "Job description", agent: "jd" },
+  { key: "candidates", label: "Candidates", agent: "intake" },
+  { key: "screening", label: "Screening", agent: "screening" },
+  { key: "interviews", label: "Interviews", agent: "interview" },
+  { key: "decision", label: "Hiring decision", agent: "evaluation" },
+  { key: "offer", label: "Offer", agent: "offer" },
+  { key: "joining", label: "Pre-onboarding & joining", agent: "onboarding" },
+];
+
+const AGENT_TITLE: Record<string, string> = {
+  requisition: "Requisition agent",
+  jd: "JD agent",
+  intake: "Intake & matching agent",
+  screening: "Screening agent",
+  screening_call: "Screening call agent",
+  scheduling_call: "Scheduling call agent",
+  interview: "Interview coordinator",
+  evaluation: "Evaluation agent",
+  offer: "Offer agent",
+  onboarding: "Pre-onboarding & release agent",
+  publishing: "Publishing agent",
+  followup: "Follow-up agent",
+  sourcing: "Sourcing agent",
+  distribution: "Distribution agent",
+  org_context: "Organisation context agent",
+  copilot: "Aditi",
+};
+
+/** Agents that work alongside the journey rather than being a step of it. */
+const SIDE_STEP: Record<string, string> = {
+  publishing:
+    "The Publishing agent is switched off, so this role will not be posted internally or to job boards automatically. Switch it on in Agent settings, or post it yourself in Manual mode.",
+  followup:
+    "The Follow-up agent is switched off, so overdue approvals and interviews will not be chased automatically.",
+  sourcing:
+    "The Sourcing agent is switched off, so nobody watches whether this role gets enough applicants or tops it up from past candidates. Switch it on in Agent settings.",
+};
+
+const APPROVER: Record<string, string> = {
+  pending_dh: "the department head",
+  pending_hr: "the HR head",
+  pending_cbo: "the CBO",
+};
+
+/** Where this hire stands, and what happens next (the thread's progress tracker). */
+export async function deskProgress(conv: Conversation): Promise<DeskProgress> {
+  const done = new Set<StageKey>();
+  const slotsComplete = !missingSlots(conv.slots as DeskSlots).length;
+  if (conv.requisitionId || slotsComplete) done.add("need");
+
+  let detail: Partial<Record<StageKey, string>> = {};
+  if (conv.requisitionId) {
+    const orgId = conv.orgId;
+    const [req] = await db
+      .select({
+        code: requisitions.code,
+        status: requisitions.status,
+        approvalTrail: requisitions.approvalTrail,
+      })
+      .from(requisitions)
+      .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, orgId)))
+      .limit(1);
+    const jd = await latestJdStatus(orgId, conv.requisitionId);
+    const [c] = (await db.execute(sql`
+      select
+        count(*) filter (where m.id is not null)::int scored,
+        count(*) filter (where a.stage in ('l1','l2','l3','offer','offer_pending','offer_released','offer_accepted','hired','joined','joining_deferred'))::int interviewing,
+        count(*) filter (where a.stage = 'joined')::int joined,
+        (select count(*) from evaluations e join applications a2 on a2.id = e.application_id
+          where a2.requisition_id = ${conv.requisitionId} and e.org_id = ${orgId})::int evaluations,
+        (select count(*) from offers o join applications a3 on a3.id = o.application_id
+          where a3.requisition_id = ${conv.requisitionId} and o.org_id = ${orgId})::int offers,
+        (select count(*) from offers o join applications a4 on a4.id = o.application_id
+          where a4.requisition_id = ${conv.requisitionId} and o.org_id = ${orgId}
+            and o.status in ('released','accepted'))::int released
+      from applications a left join match_scores m on m.application_id = a.id
+      where a.requisition_id = ${conv.requisitionId} and a.org_id = ${orgId}`)) as unknown as {
+      scored: number;
+      interviewing: number;
+      joined: number;
+      evaluations: number;
+      offers: number;
+      released: number;
+    }[];
+    if (!req || req.status === "closed" || req.status === "rejected") {
+      const trail = Array.isArray(req?.approvalTrail)
+        ? (req!.approvalTrail as { actor?: string; comment?: string | null }[])
+        : [];
+      const stages = STAGES.map((st) => ({
+        key: st.key,
+        label: st.label,
+        state: (st.key === "need" || (st.key === "requisition" && req?.status === "closed")
+          ? "done"
+          : "todo") as "done" | "todo",
+      }));
+      return {
+        stages,
+        next: null,
+        ended: {
+          status: !req ? "deleted" : (req.status as "closed" | "rejected"),
+          reason: trail.at(-1)?.comment ?? null,
+          by: trail.at(-1)?.actor ?? null,
+        },
+      };
+    }
+    if (req?.status === "approved") done.add("requisition");
+    if (jd === "approved") done.add("jd");
+    if ((c?.scored ?? 0) > 0) done.add("candidates");
+    if ((c?.interviewing ?? 0) > 0) done.add("screening");
+    if ((c?.evaluations ?? 0) > 0) done.add("interviews");
+    if ((c?.offers ?? 0) > 0) done.add("decision");
+    if ((c?.released ?? 0) > 0) done.add("offer");
+    if ((c?.joined ?? 0) > 0) done.add("joining");
+    detail = {
+      requisition:
+        req && APPROVER[req.status]
+          ? `${req.code} is waiting for ${APPROVER[req.status]} to approve it — from this thread, Waiting for you, or the requisition page.`
+          : `The Requisition agent completes draft ${req?.code ?? ""} (pay band, scoring weights) and sends it for approval.`,
+      jd:
+        jd === "pending_dh"
+          ? "The job description is waiting for the department head's approval."
+          : "The JD agent drafts the job description; the department head approves it.",
+    };
+  }
+  // Later stages only count once the earlier ones are done (no skipping ahead).
+  let current: StageKey | null = null;
+  const stages = STAGES.map((s) => {
+    if (current === null && !done.has(s.key)) current = s.key;
+    const state: "done" | "current" | "todo" =
+      current === s.key ? "current" : current === null ? "done" : "todo";
+    return { key: s.key, label: s.label, state };
+  });
+  // The screening board stays with the Screening step after the first candidate moves on.
+  const screening = conv.requisitionId ? await screeningBoard(conv.orgId, conv.requisitionId) : [];
+  const board = screening.length ? { screening } : {};
+  if (current === null) return { stages, next: null, ...board };
+  const cur: StageKey = current;
+
+  const TEXT: Record<StageKey, string> = {
+    need: "Answer the desk's questions until the role, location, work mode, experience, openings and must-have skills are known.",
+    requisition: detail.requisition ?? "",
+    jd: detail.jd ?? "",
+    candidates:
+      "The Intake & matching agent searches the talent pool and posts a ranked list here.",
+    screening:
+      'Pick candidates from the ranked list (or type "talk to the first 5"); the Screening agent prepares their screening — an AI screening call when your organisation screens by phone, otherwise the written assessment. When a candidate is graded it asks you here who moves on: approving moves them to an interview round.',
+    interviews:
+      "The Interview coordinator books the rounds. After each interview the interviewer submits a scorecard (My interviews).",
+    decision:
+      "Once scorecards are in, the Evaluation agent writes the debrief and sends the hiring decision to the hiring manager — it appears here and in Waiting for you.",
+    offer:
+      "The Offer agent drafts the offer within the band; the HR head and then the CBO approve it.",
+    joining:
+      "The Pre-onboarding agent collects and cross-checks documents; HR validates them and releases the offer.",
+  };
+
+  const agentType = STAGES.find((s) => s.key === cur)!.agent;
+  let agentEnabled: boolean | null = null;
+  let run: NonNullable<DeskProgress["next"]>["run"] = null;
+  if (agentType) {
+    agentEnabled = await agentOn(conv.orgId, agentType);
+    if (conv.requisitionId) {
+      const [r] = await db
+        .select({ id: agentRuns.id, status: agentRuns.status, lastError: agentRuns.lastError })
+        .from(agentRuns)
+        .where(
+          and(
+            eq(agentRuns.orgId, conv.orgId),
+            eq(agentRuns.agentType, agentType),
+            eq(agentRuns.mode, "live"),
+            or(eq(agentRuns.conversationId, conv.id), eq(agentRuns.subjectId, conv.requisitionId)),
+          ),
+        )
+        .orderBy(desc(agentRuns.createdAt))
+        .limit(1);
+      const paused = r?.status === "queued" && r.lastError === BUDGET_PAUSED;
+      run = r
+        ? {
+            id: r.id,
+            status: r.status,
+            ...(paused ? { paused: true, budget: await budgetOf(conv.orgId, agentType) } : {}),
+          }
+        : null;
+    }
+  }
+  const [w] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(agentTasks)
+    .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
+    .where(
+      and(
+        eq(agentTasks.orgId, conv.orgId),
+        eq(agentTasks.status, "open"),
+        eq(agentRuns.conversationId, conv.id),
+        taskIsLive(),
+      ),
+    );
+  // The responsible agent already ran for this step and it is still not done:
+  // say what came of it instead of "not started yet".
+  if (
+    cur === "candidates" &&
+    run?.status === "done" &&
+    conv.requisitionId &&
+    !(await pipelineSize(conv.orgId, conv.requisitionId))
+  ) {
+    TEXT.candidates =
+      "The Intake & matching agent searched the pipeline and the talent pool and found no matching candidates yet. Add candidates (Manual mode → Talent pool or Careers inbox), then search again.";
+  }
+  // Screening: say what is happening — AI phone screening calls (live, booked,
+  // retrying, done) and the written assessments — instead of the generic instruction.
+  if (cur === "screening" && conv.requisitionId) {
+    const calls = await phoneCallWait(conv.orgId, conv.requisitionId);
+    const waiting =
+      run?.status === "done" ? await assessmentWait(conv.orgId, conv.requisitionId) : null;
+    const said = [calls, waiting].filter(Boolean).join(" ");
+    if (said) TEXT.screening = said;
+  }
+  return {
+    stages,
+    ...board,
+    next: {
+      stage: cur,
+      text: TEXT[cur],
+      agentType,
+      agentName: agentType ? (AGENT_TITLE[agentType] ?? agentType) : null,
+      agentEnabled,
+      run,
+      waitingForYou: Number(w?.n ?? 0),
+    },
+  };
+}
+
+type BoardFacts = {
+  stage: string;
+  call: string | null;
+  endReason: string | null;
+  dueAt: string | null;
+  assessment: string | null;
+  graded: boolean;
+  decisionOpen: boolean;
+};
+
+const ROUND_STAGES = new Set(["l1", "l2", "l3"]);
+const LATER_STAGES = new Set([
+  "offer",
+  "offer_pending",
+  "offer_released",
+  "offer_accepted",
+  "hired",
+  "joined",
+  "joining_deferred",
+]);
+
+/** Where one candidate's screening stands, in plain words (pure; unit-tested). */
+export function boardStatus(
+  f: BoardFacts,
+  at: (iso: string | null) => string,
+): { status: string; tone: ScreeningBoardRow["tone"] } {
+  if (ROUND_STAGES.has(f.stage))
+    return { status: `Moved to interview (${f.stage.toUpperCase()})`, tone: "done" };
+  if (LATER_STAGES.has(f.stage)) return { status: "Past interviews", tone: "done" };
+  if (f.stage === "rejected") return { status: "Not moving on", tone: "stopped" };
+  if (f.stage === "withdrawn") return { status: "Withdrew", tone: "stopped" };
+  if (f.decisionOpen) return { status: "Your decision", tone: "decide" };
+  if (f.stage === "on_hold") return { status: "On hold", tone: "stopped" };
+  switch (f.call) {
+    case "dialling":
+    case "in_progress":
+      return { status: "On the AI screening call now", tone: "working" };
+    case "requested":
+      return { status: "Call waiting for approval", tone: "decide" };
+    case "approved":
+      return { status: `Call arranged (from ${at(f.dueAt)})`, tone: "working" };
+    case "callback":
+      return { status: `Call booked for ${at(f.dueAt)}`, tone: "working" };
+    case "no_answer":
+    case "failed":
+      return { status: `Not reached — trying again ${at(f.dueAt)}`, tone: "working" };
+    case "completed":
+      if (f.endReason === "not_interested")
+        return { status: "Not interested in the role", tone: "stopped" };
+      return f.graded
+        ? { status: "Screened — the Screening agent is reviewing", tone: "working" }
+        : { status: "Called — nothing to grade", tone: "stopped" };
+    case "fell_back":
+      if (f.endReason === "prefers_human")
+        return { status: "Asked for a person to call", tone: "decide" };
+      break;
+  }
+  if (f.assessment === "completed")
+    return f.graded
+      ? { status: "Assessment done — the Screening agent is reviewing", tone: "working" }
+      : { status: "Assessment done", tone: "working" };
+  if (f.assessment === "sent") return { status: "Written assessment sent", tone: "working" };
+  if (f.assessment === "expired") return { status: "Assessment link closed", tone: "stopped" };
+  return { status: "Preparing screening", tone: "working" };
+}
+
+/**
+ * The role's screening board: everyone shortlisted or screened, with where
+ * their screening stands, the graded result and any decision waiting — so a
+ * team screening five people sees all five at a glance.
+ */
+async function screeningBoard(orgId: string, requisitionId: string): Promise<ScreeningBoardRow[]> {
+  const rows = (await db.execute(sql`
+    select a.id, c.full_name as name, a.stage,
+      sc.status as call, sc.end_reason, sc.due_at,
+      ca.status as assessment,
+      sr.id as run_id, sr.screening_score as score, sr.recommendation as rec,
+      sr.input_kind as kind, sr.coverage,
+      t.id as task_id
+    from applications a
+    join candidates c on c.id = a.candidate_id
+    left join lateral (
+      select status, end_reason, due_at from screening_calls
+      where application_id = a.id and org_id = ${orgId} and status <> 'cancelled'
+        and purpose = 'screening'
+      order by created_at desc limit 1) sc on true
+    left join lateral (
+      select status from candidate_assessments
+      where candidate_id = a.candidate_id and requisition_id = a.requisition_id and org_id = ${orgId}
+      order by created_at desc limit 1) ca on true
+    left join lateral (
+      select id, screening_score, recommendation, input_kind, coverage from screening_runs
+      where application_id = a.id and org_id = ${orgId}
+      order by created_at desc limit 1) sr on true
+    left join lateral (
+      select id from agent_tasks
+      where org_id = ${orgId} and status = 'open' and kind = 'gate'
+        and proposed_action -> 'args' -> 'subject' ->> 'type' = 'screening_decision'
+        and proposed_action -> 'args' -> 'subject' ->> 'applicationId' = a.id::text
+      limit 1) t on true
+    where a.requisition_id = ${requisitionId} and a.org_id = ${orgId}
+      and (a.stage = 'shortlisted' or sc.status is not null or ca.status is not null or sr.id is not null)
+    order by c.full_name
+    limit 50`)) as unknown as {
+    id: string;
+    name: string;
+    stage: string;
+    call: string | null;
+    end_reason: string | null;
+    due_at: string | null;
+    assessment: string | null;
+    run_id: string | null;
+    score: number | null;
+    rec: string | null;
+    kind: string | null;
+    coverage: ScreeningCoverage | null;
+    task_id: string | null;
+  }[];
+  if (!rows.length) return [];
+  const tz = await orgTimeZone(orgId);
+  const at = (d: string | null) =>
+    d
+      ? new Date(d).toLocaleString("en-IN", {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: tz,
+        })
+      : "soon";
+  const { coverageWords } = await import("@/lib/screening-coverage");
+  return rows.map((r) => {
+    const { status, tone } = boardStatus(
+      {
+        stage: r.stage,
+        call: r.call,
+        endReason: r.end_reason,
+        dueAt: r.due_at,
+        assessment: r.assessment,
+        graded: Boolean(r.run_id),
+        decisionOpen: Boolean(r.task_id),
+      },
+      at,
+    );
+    return {
+      applicationId: r.id,
+      name: r.name,
+      status,
+      tone,
+      score: r.run_id ? r.score : null,
+      recommendation: !r.rec
+        ? null
+        : r.kind === "phone_ai" && r.rec === "hold"
+          ? "Probe further"
+          : r.rec === "proceed"
+            ? "Proceed"
+            : r.rec === "hold"
+              ? "Hold"
+              : "Not recommended",
+      coverage: r.coverage ? coverageWords(r.coverage) : null,
+      runId: r.run_id,
+      taskId: r.task_id,
+    };
+  });
+}
+
+/**
+ * Where a role's AI phone screening calls stand, in words — the latest call
+ * per candidate: on the call now, arranged, booked with them, being retried,
+ * screened (with the score), or how it ended. Null when no call was asked for.
+ */
+async function phoneCallWait(orgId: string, requisitionId: string): Promise<string | null> {
+  const rows = (await db.execute(sql`
+    select distinct on (sc.application_id)
+      c.full_name as name, sc.status, sc.end_reason, sc.due_at, sc.booked_by_candidate as booked,
+      sc.reschedules,
+      sr.screening_score as score
+    from screening_calls sc
+    join candidates c on c.id = sc.candidate_id
+    left join screening_runs sr on sr.id = sc.screening_run_id
+    where sc.org_id = ${orgId} and sc.requisition_id = ${requisitionId} and sc.status <> 'cancelled'
+      and sc.purpose = 'screening'
+    order by sc.application_id, sc.created_at desc`)) as unknown as {
+    name: string;
+    status: string;
+    end_reason: string | null;
+    due_at: string | null;
+    booked: boolean;
+    reschedules: number;
+    score: number | null;
+  }[];
+  if (!rows.length) return null;
+  const tz = await orgTimeZone(orgId);
+  const at = (d: string | null) =>
+    d
+      ? new Date(d).toLocaleString("en-IN", {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: tz,
+        })
+      : "soon";
+  const group = (pred: (r: (typeof rows)[number]) => boolean) => rows.filter(pred);
+  const names = (rs: typeof rows, f: (r: (typeof rows)[number]) => string = (r) => r.name) =>
+    rs.map(f).join(", ");
+  const live = group((r) => r.status === "dialling" || r.status === "in_progress");
+  const arranged = group((r) => r.status === "requested" || r.status === "approved");
+  const booked = group((r) => r.status === "callback");
+  const retrying = group((r) => r.status === "no_answer" || r.status === "failed");
+  const screened = group((r) => r.status === "completed" && r.end_reason !== "not_interested");
+  const notInterested = group((r) => r.status === "completed" && r.end_reason === "not_interested");
+  const human = group((r) => r.status === "fell_back" && r.end_reason === "prefers_human");
+  const written = group(
+    (r) =>
+      (r.status === "fell_back" && r.end_reason !== "prefers_human") ||
+      r.status === "consent_declined",
+  );
+  const parts: string[] = [];
+  if (live.length) parts.push(`On an AI screening call now: ${names(live)}.`);
+  if (arranged.length)
+    parts.push(
+      `AI screening call arranged: ${names(arranged, (r) => `${r.name} (from ${at(r.due_at)})`)}.`,
+    );
+  if (booked.length)
+    parts.push(
+      `Call time agreed with the candidate: ${names(booked, (r) => `${r.name} (${at(r.due_at)}${r.reschedules > 1 ? `, moved ${r.reschedules} times` : ""})`)}.`,
+    );
+  if (retrying.length)
+    parts.push(
+      `Not reached yet, trying again: ${names(retrying, (r) => `${r.name} (next ${at(r.due_at)})`)}.`,
+    );
+  if (screened.length)
+    parts.push(
+      `Screened by phone: ${names(screened, (r) => `${r.name}${r.score != null ? ` (${r.score}/100)` : ""}`)} — the Screening agent asks you here who moves on to an interview.`,
+    );
+  if (human.length) parts.push(`Asked for a person to call them: ${names(human)}.`);
+  if (notInterested.length) parts.push(`Not interested in the role: ${names(notInterested)}.`);
+  if (written.length) parts.push(`Written assessment instead of a call: ${names(written)}.`);
+  return parts.join(" ");
+}
+
+/**
+ * Where a role's written assessments stand, in words: who has not answered yet
+ * (and until when the link is open), who has, and whose link closed. Null when
+ * no assessment was sent for the role.
+ */
+async function assessmentWait(orgId: string, requisitionId: string): Promise<string | null> {
+  const rows = (await db.execute(sql`
+    select c.full_name as name, ca.status, ca.created_at, ca.mindset_score as score
+    from candidate_assessments ca join candidates c on c.id = ca.candidate_id
+    where ca.org_id = ${orgId} and ca.requisition_id = ${requisitionId}
+    order by ca.created_at`)) as unknown as {
+    name: string;
+    status: string;
+    created_at: string;
+    score: number | null;
+  }[];
+  if (!rows.length) return null;
+  const tz = await orgTimeZone(orgId);
+  const day = (d: Date) =>
+    d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: tz });
+  const open = rows.filter((r) => r.status === "sent");
+  const done = rows.filter((r) => r.status === "completed");
+  const closed = rows.filter((r) => r.status === "expired");
+  const parts: string[] = [];
+  if (open.length)
+    parts.push(
+      `Waiting for ${plural(open.length, "candidate")} to complete the written assessment: ${open
+        .map((r) => {
+          const sent = new Date(r.created_at);
+          return `${r.name} (sent ${day(sent)}, link open until ${day(new Date(sent.getTime() + 14 * 864e5))})`;
+        })
+        .join(", ")}. Nothing is stuck — the next step starts when they submit.`,
+    );
+  if (done.length)
+    parts.push(
+      `Completed: ${done.map((r) => `${r.name}${r.score != null ? ` (${r.score}/100)` : ""}`).join(", ")} — move those who pass to an interview round.`,
+    );
+  if (closed.length)
+    parts.push(
+      `Link closed without an answer: ${closed.map((r) => r.name).join(", ")} — send a new one, screen by phone, or decide without it.`,
+    );
+  return parts.join(" ");
+}
+
+/** Run a stopped agent again for the thread (same goal, same role). */
+export async function retryRun(conv: Conversation, userId: string, runId: string): Promise<string> {
+  const [r] = await db
+    .select()
+    .from(agentRuns)
+    .where(and(eq(agentRuns.id, runId), eq(agentRuns.orgId, conv.orgId)))
+    .limit(1);
+  if (!r) throw new Error("Run not found.");
+  if (r.status !== "failed" || r.mode !== "live")
+    throw new Error("Only a stopped run can be tried again.");
+  if (r.conversationId !== conv.id && r.subjectId !== conv.requisitionId)
+    throw new Error("That run does not belong to this conversation.");
+  if (!(await agentOn(conv.orgId, r.agentType))) {
+    throw new Error(
+      `The ${AGENT_TITLE[r.agentType] ?? r.agentType} is switched off — switch it on in Agent settings first.`,
+    );
+  }
+  // One run per agent per piece of work: a second click (or a colleague's)
+  // must not start a parallel run that asks for the same approvals again.
+  const [busy] = await db
+    .select({ id: agentRuns.id, createdAt: agentRuns.createdAt, status: agentRuns.status })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, conv.orgId),
+        eq(agentRuns.agentType, r.agentType),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+        r.subjectId
+          ? or(eq(agentRuns.subjectId, r.subjectId), eq(agentRuns.conversationId, conv.id))
+          : eq(agentRuns.conversationId, conv.id),
+      ),
+    )
+    .orderBy(desc(agentRuns.createdAt))
+    .limit(1);
+  if (busy) {
+    const at = localWhen(busy.createdAt, await orgTimeZone(conv.orgId));
+    throw new Error(
+      `The ${AGENT_TITLE[r.agentType] ?? r.agentType} is already working on this — it started ${at}${busy.status === "awaiting_human" ? " and is waiting for a person" : ""}. Nothing new was started.`,
+    );
+  }
+  const { startRun } = await import("../agents/runtime.server");
+  const { runId: next } = await startRun({
+    orgId: conv.orgId,
+    agentType: r.agentType,
+    principalUserId: userId,
+    goal: r.goal,
+    subjectType: r.subjectType,
+    subjectId: r.subjectId,
+    conversationId: conv.id,
+  });
+  await writeAudit({
+    actor: `user:${userId}`,
+    actorUserId: userId,
+    orgId: conv.orgId,
+    action: "desk.run_retried",
+    entityType: "agent_run",
+    entityId: next,
+    detail: { retry_of: r.id, conversation_id: conv.id },
+  });
+  await postMessage(conv, {
+    role: "desk",
+    body: `Trying the ${AGENT_TITLE[r.agentType] ?? r.agentType} again.`,
+    agentType: r.agentType,
+  });
+  const { kickAgents } = await import("../agents/orchestrator.server");
+  kickAgents(conv.orgId);
+  return next;
+}
+
+/**
+ * The orchestrator wanted to start an agent for a thread's role but it is
+ * switched off: say so in the thread (once) instead of stalling silently.
+ */
+export async function notifyAgentOff(
+  orgId: string,
+  requisitionId: string,
+  agentType: string,
+): Promise<void> {
+  const conv = await conversationForRequisition(orgId, requisitionId);
+  if (!conv) return;
+  const body =
+    SIDE_STEP[agentType] ??
+    `The next step needs the ${AGENT_TITLE[agentType] ?? agentType}, which is switched off. Switch it on in Agent settings and I'll continue — or do this step yourself in Manual mode.`;
+  const [last] = await db
+    .select({ body: hiringMessages.body })
+    .from(hiringMessages)
+    .where(eq(hiringMessages.conversationId, conv.id))
+    .orderBy(desc(hiringMessages.createdAt))
+    .limit(1);
+  if (last?.body === body) return;
+  await postMessage(conv, { role: "desk", body, agentType });
+}
+
+/* ------------------------------------------- live activity and details */
+
+/** What an agent step means, in plain words (for the live activity list). */
+const STEP_LABEL: Record<string, string> = {
+  get_requisition: "Read the requisition",
+  find_similar_requisitions: "Checked similar roles",
+  list_requisitions: "Looked through open roles",
+  list_departments: "Looked up departments",
+  research_compensation: "Researched market pay",
+  set_compensation: "Set the pay band",
+  suggest_weights: "Worked out scoring weights",
+  save_weights: "Saved scoring weights",
+  draft_requisition: "Drafted the requisition",
+  update_requisition_draft: "Updated the draft",
+  submit_requisition_for_approval: "Submitted for approval",
+  request_approval: "Asked for a decision",
+  ask_human: "Asked you a question",
+  submit_jd_version: "Filed the job description",
+  pipeline_summary: "Reviewed the pipeline",
+  list_applications: "Read the applications",
+  score_new_applications: "Scored applications",
+  search_talent_pool: "Searched the talent pool",
+  add_to_pipeline: "Added candidates to the pipeline",
+  move_candidate: "Moved a candidate",
+  prepare_screening_kit: "Prepared a screening kit",
+  get_screening_status: "Checked screening status",
+  send_assessment: "Sent an assessment",
+  schedule_interview: "Booked an interview",
+  draft_offer: "Drafted the offer",
+  generate_offer_letter: "Wrote the offer letter",
+  request_documents: "Requested documents",
+};
+
+export function stepLabel(tool: string | null): string {
+  if (!tool) return "Thinking";
+  if (STEP_LABEL[tool]) return STEP_LABEL[tool]!;
+  const words = tool.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+const HIDDEN_ARG = /(^|_)id$|Id$|^subject$/;
+const MONEY_ARG = /ctc|budget|band|salary|compensation/i;
+
+const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+/** An ISO date-time as a person reads it, in the organisation's time zone. */
+function fmtWhen(v: string, timeZone?: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+      ...(timeZone ? { timeZone } : {}),
+    }).format(new Date(v));
+  } catch {
+    return v;
+  }
+}
+
+const fmtValue = (k: string, v: unknown, timeZone?: string): string => {
+  if (typeof v === "number" && MONEY_ARG.test(k))
+    return `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+  if (typeof v === "string" && ISO_DATETIME.test(v)) return fmtWhen(v, timeZone);
+  if (Array.isArray(v))
+    return v
+      .map((x) =>
+        typeof x === "string" && ISO_DATETIME.test(x) ? fmtWhen(x, timeZone) : String(x),
+      )
+      .join(
+        timeZone && v.some((x) => typeof x === "string" && ISO_DATETIME.test(x)) ? " · " : ", ",
+      );
+  if (v && typeof v === "object") return JSON.stringify(v);
+  return String(v);
+};
+
+/** A proposed tool call's arguments as label/value lines a person can read. */
+export function argDetails(
+  tool: string | null,
+  args: unknown,
+  timeZone?: string,
+): { label: string; value: string }[] {
+  if (!args || typeof args !== "object") return [];
+  const entries = Object.entries(args as Record<string, unknown>).filter(
+    ([k, v]) => !HIDDEN_ARG.test(k) && v !== null && v !== undefined && v !== "",
+  );
+  // Scoring weights read best as one line of percentages.
+  if (tool === "save_weights") {
+    const line = entries
+      .map(([k, v]) => `${k.charAt(0).toUpperCase()}${k.slice(1)} ${v}%`)
+      .join(" · ");
+    return line ? [{ label: "Weights", value: line }] : [];
+  }
+  return entries.slice(0, 12).map(([k, v]) => ({
+    label: k
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/_/g, " ")
+      .replace(/^./, (c) => c.toUpperCase()),
+    // The message a person approves is shown whole.
+    value: fmtValue(k, v, timeZone).slice(0, k === "message" || k === "talkTrack" ? 3000 : 400),
+  }));
+}
+
+/** Mirrors the runtime's budget-pause message (runtime.server BUDGET_PAUSE_MESSAGE). */
+const BUDGET_PAUSED = "Paused: this agent reached its monthly token budget.";
+
+export type DeskActivity = {
+  agentType: string;
+  agentName: string;
+  status: string;
+  steps: { label: string; state: "done" | "error" | "waiting" | "working" }[];
+} | null;
+
+/** The thread's agent working right now (or most recently), with its latest steps. */
+export async function deskActivity(conv: Conversation): Promise<DeskActivity> {
+  const [run] = await db
+    .select({
+      id: agentRuns.id,
+      agentType: agentRuns.agentType,
+      status: agentRuns.status,
+      lastError: agentRuns.lastError,
+    })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, conv.orgId),
+        eq(agentRuns.conversationId, conv.id),
+        eq(agentRuns.mode, "live"),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+      ),
+    )
+    .orderBy(desc(agentRuns.updatedAt))
+    .limit(1);
+  if (!run) return null;
+  const { agentSteps } = await import("@db/schema");
+  const rows = await db
+    .select({
+      kind: agentSteps.kind,
+      tool: agentSteps.toolName,
+      status: agentSteps.status,
+      input: agentSteps.input,
+    })
+    .from(agentSteps)
+    .where(and(eq(agentSteps.runId, run.id), eq(agentSteps.orgId, conv.orgId)))
+    .orderBy(desc(agentSteps.seq))
+    .limit(30);
+  // Tool steps only (model turns are "thinking"). An approved call appears
+  // twice — "awaiting", then "ok" later — so drop the waiting entry once the
+  // same tool has a later result. Rows are newest first.
+  const resolved = new Set<string>();
+  const steps = rows
+    .filter(
+      (s) => (s.kind === "tool" && s.tool) || (s.kind === "decision" && s.status !== "approved"),
+    )
+    .filter((s) => {
+      if (s.kind === "decision") return true;
+      if (s.status === "awaiting") return !resolved.has(s.tool!);
+      resolved.add(s.tool!);
+      return true;
+    })
+    .slice(0, 6)
+    .reverse()
+    .map((s) => ({
+      label: s.kind === "decision" ? decisionLabel(s.status, s.input) : stepLabel(s.tool),
+      state: (s.status === "error" ? "error" : s.status === "awaiting" ? "waiting" : "done") as
+        "done" | "error" | "waiting",
+    }));
+  const paused = run.status === "queued" && run.lastError === BUDGET_PAUSED;
+  const working = !paused && (run.status === "running" || run.status === "queued");
+  return {
+    agentType: run.agentType,
+    agentName: AGENT_TITLE[run.agentType] ?? run.agentType,
+    status: paused ? "paused" : run.status,
+    steps: working
+      ? [...steps, { label: run.status === "queued" ? "Starting" : "Thinking", state: "working" }]
+      : steps,
+  };
+}
+
+/** Stages an agent can start on its own once reached (the others wait for a person or an event). */
+const STARTABLE: Partial<Record<StageKey, AgentType>> = {
+  requisition: "requisition",
+  jd: "jd",
+  candidates: "intake",
+};
+
+/**
+ * Start the agent for the thread's current stage when the stage is reached,
+ * the agent is on, and nothing is running for it. Returns the run id or null.
+ */
+export async function startStage(
+  conv: Conversation,
+  userId: string,
+  opts: { dryRun?: boolean } = {},
+): Promise<string | null> {
+  if (!conv.requisitionId) return null;
+  const progress = await deskProgress(conv);
+  const next = progress.next;
+  const agentType = next ? STARTABLE[next.stage] : undefined;
+  if (!next || !agentType || next.agentEnabled !== true) return null;
+  if (next.run && ["queued", "running", "awaiting_human"].includes(next.run.status)) return null;
+  const [req] = await db
+    .select({ code: requisitions.code, title: requisitions.title, status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (!req) return null;
+  if (next.stage === "requisition") {
+    if (req.status !== "draft") return null; // waiting for an approver, not for the agent
+    if (opts.dryRun) return "requisition";
+    return startForThread(
+      conv,
+      "requisition",
+      userId,
+      `Complete draft requisition ${req.code} "${req.title}": find the department, research the market pay band, set the scoring weights, then submit it for approval and prepare the approval brief.`,
+      conv.requisitionId,
+      "I've asked the Requisition agent to complete the draft and send it for approval.",
+    );
+  }
+  if (next.stage === "jd") {
+    const jd = await latestJdStatus(conv.orgId, conv.requisitionId);
+    if (jd === "pending_dh") return null; // waiting for the department head
+    if (opts.dryRun) return "jd";
+    if (await reuseJdIfChosen(conv.orgId, conv.requisitionId)) return null;
+    return startForThread(
+      conv,
+      "jd",
+      userId,
+      `Requisition ${req.code} "${req.title}" is approved. Draft its job description and get it approved by the department head.`,
+      conv.requisitionId,
+      "I've asked the JD agent to draft the job description; it will come back here for approval.",
+    );
+  }
+  if (opts.dryRun) return "intake";
+  return startForThread(
+    conv,
+    "intake",
+    userId,
+    INTAKE_GOAL(req.code, req.title),
+    conv.requisitionId,
+    "I've asked the Intake & matching agent to search the talent pool and rank the best matches.",
+  );
+}
+
+/**
+ * Ask the role's hiring manager what the role really needs (the Role expert
+ * interview agent): its questions go to that hiring manager's inbox, and the
+ * brief it writes comes back to them for approval.
+ */
+export async function startExpertInterview(
+  conv: Conversation,
+  userId: string,
+): Promise<string | null> {
+  if (!conv.requisitionId) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "There is no role yet to interview the hiring manager about — create the requisition first.",
+    });
+    return null;
+  }
+  const [req] = await db
+    .select({
+      code: requisitions.code,
+      title: requisitions.title,
+      hm: requisitions.hiringManagerMemberId,
+    })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (!req) return null;
+  if (!req.hm) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "Set the role's hiring manager first (in the interview plan card) — they are the one the questions go to.",
+    });
+    return null;
+  }
+  return startForThread(
+    conv,
+    "expert_interview",
+    userId,
+    `Interview the hiring manager of ${req.code} "${req.title}" about what the role really needs, and propose its expert brief for their approval.`,
+    conv.requisitionId,
+    "I've asked the Role expert interview agent to put a few questions to the hiring manager. Their answers become the role's expert brief, which they approve.",
+  );
+}
+
+/** An agent was switched on: continue every thread that was waiting for it. */
+export async function resumeThreadsForAgent(
+  orgId: string,
+  agentType: string | "*",
+): Promise<number> {
+  const threads = await db
+    .select()
+    .from(hiringConversations)
+    .where(
+      and(
+        eq(hiringConversations.orgId, orgId),
+        eq(hiringConversations.status, "active"),
+        // Hiring threads only — org-desk threads (kind = 'org_profile') never carry a requisition.
+        eq(hiringConversations.kind, "hiring"),
+        sql`${hiringConversations.requisitionId} is not null`,
+        isNull(hiringConversations.deletedAt),
+      ),
+    )
+    .limit(200);
+  let started = 0;
+  for (const conv of threads) {
+    const p = await deskProgress(conv);
+    if (!p.next?.agentType || (agentType !== "*" && p.next.agentType !== agentType)) continue;
+    if (await startStage(conv, conv.createdBy)) started++;
+  }
+  return started;
+}
+
+/* ------------------------------------------------------- the reasoning */
+
+export type CandidateReasoning = {
+  rationale: string | null;
+  recommendation: string | null;
+  overall: number | null;
+  /** Score per dimension (0-100) with the requisition's weight, highest weight first. */
+  breakdown: { label: string; score: number; weight: number | null }[];
+  matched: string[];
+  missing: string[];
+  risks: string[];
+  highlights: string[];
+};
+
+/** Why each ranked candidate scored as they did — read live from their match score. */
+export async function candidateReasoning(
+  orgId: string,
+  applicationIds: string[],
+): Promise<Record<string, CandidateReasoning>> {
+  if (!applicationIds.length) return {};
+  const rows = await db
+    .select({
+      applicationId: matchScores.applicationId,
+      overall: matchScores.overallScore,
+      rationale: matchScores.rationale,
+      recommendation: matchScores.recommendation,
+      skills: matchScores.skillsScore,
+      experience: matchScores.experienceScore,
+      career: matchScores.careerScore,
+      impact: matchScores.impactScore,
+      education: matchScores.educationScore,
+      social: matchScores.socialScore,
+      weights: matchScores.weights,
+      matched: matchScores.matchedSkills,
+      missing: matchScores.missingSkills,
+      risks: matchScores.riskFlags,
+      highlights: matchScores.impactHighlights,
+    })
+    .from(matchScores)
+    .innerJoin(applications, eq(applications.id, matchScores.applicationId))
+    .where(and(eq(applications.orgId, orgId), inArray(matchScores.applicationId, applicationIds)));
+  const out: Record<string, CandidateReasoning> = {};
+  for (const r of rows) {
+    const w = (r.weights ?? {}) as Record<string, number>;
+    const dims: [string, string, number][] = [
+      ["skills", "Skills", r.skills],
+      ["experience", "Experience", r.experience],
+      ["career", "Career", r.career],
+      ["impact", "Impact", r.impact],
+      ["education", "Education", r.education],
+      ["social", "Profile & signals", r.social],
+    ];
+    out[r.applicationId] = {
+      rationale: r.rationale,
+      recommendation: r.recommendation,
+      overall: r.overall,
+      breakdown: dims
+        .map(([k, label, score]) => ({
+          label,
+          score,
+          weight: typeof w[k] === "number" ? w[k]! : null,
+        }))
+        .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0)),
+      matched: r.matched ?? [],
+      missing: r.missing ?? [],
+      risks: r.risks ?? [],
+      highlights: (r.highlights ?? []).slice(0, 4),
+    };
+  }
+  return out;
+}
+
+/* ----------------------------------------------------- bring candidates in */
+
+/** Score the role's new applications (e.g. CVs uploaded in the thread) and post the ranked list. */
+export async function scoreAndRank(conv: Conversation, userId: string): Promise<number> {
+  if (!conv.requisitionId) throw new Error("Choose or create the role first.");
+  const { scoreUnscored } = await import("@/lib/autoscore.server");
+  const r = await scoreUnscored({
+    orgId: conv.orgId,
+    requisitionId: conv.requisitionId,
+    limit: 25,
+  });
+  await writeAudit({
+    actor: `user:${userId}`,
+    actorUserId: userId,
+    orgId: conv.orgId,
+    action: "desk.candidates_scored",
+    entityType: "requisition",
+    entityId: conv.requisitionId,
+    detail: { conversation_id: conv.id, scored: r.scored, errors: r.errors },
+  });
+  await postRankedList(conv);
+  return r.scored;
+}
+
+/** Ask the Publishing agent to post the role (internal posting and job boards, reviewed). */
+export async function publishRole(conv: Conversation, userId: string): Promise<string | null> {
+  if (!conv.requisitionId) throw new Error("Choose or create the role first.");
+  const [req] = await db
+    .select({ code: requisitions.code, title: requisitions.title, status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (req?.status !== "approved") throw new Error("Only an approved role can be published.");
+  return startForThread(
+    conv,
+    "publishing",
+    userId,
+    `Requisition ${req.code} "${req.title}" needs candidates. Publish it internally and prepare the external posts (LinkedIn and job boards) for review.`,
+    conv.requisitionId,
+    "I've asked the Publishing agent to post the role internally and prepare the LinkedIn and job-board posts. Each job-board post goes to the HR head for approval and is published as them — unless your organisation pre-approved that board for an Autonomous agent.",
+  );
+}
+
+/** After the JD agent files a draft: say in the thread which template shaped it. */
+export async function noteJdTemplate(
+  orgId: string,
+  runId: string,
+  version: number,
+  template: { name: string; reason: string } | null,
+): Promise<void> {
+  const [run] = await db
+    .select({ conversationId: agentRuns.conversationId })
+    .from(agentRuns)
+    .where(and(eq(agentRuns.id, runId), eq(agentRuns.orgId, orgId)))
+    .limit(1);
+  if (!run?.conversationId) return;
+  const conv = await loadConversation(orgId, run.conversationId).catch(() => null);
+  if (!conv) return;
+  await postMessage(conv, {
+    role: "agent",
+    agentType: "jd",
+    body: template
+      ? `Drafted JD version ${version} with the template "${template.name}" (${template.reason}).`
+      : `Drafted JD version ${version} in the built-in format — you have no JD template yet. Add one under Content templates (and mark it default) to control sections and wording.`,
+  });
+}
+
+/* ----------------------------------------- grounding and the role's end */
+
+const STATUS_WORDS: Record<string, string> = {
+  draft: "draft (not yet submitted)",
+  pending_dh: "waiting for the department head's approval",
+  pending_hr: "waiting for the HR head's approval",
+  pending_cbo: "waiting for the CBO's approval",
+  approved: "approved and open",
+  rejected: "rejected",
+  on_hold: "on hold",
+  closed: "closed",
+};
+
+/** One line on the approved organisation profile (or its absence), for FACTS. */
+async function organisationFact(orgId: string): Promise<string> {
+  const { orgContextFor } = await import("@/lib/org-context.server");
+  const org = await orgContextFor({ orgId, audience: "internal", purpose: "desk" });
+  const first = org.blocks.split("\n").find((l) => l.startsWith("• "));
+  return `Organisation: ${
+    org.versionId
+      ? first
+        ? first.replace(/^• /, "").slice(0, 200)
+        : "approved profile on file"
+      : "no approved profile yet — agents are working without the organisation's context"
+  }`;
+}
+
+/** What is actually true for this thread right now, for the desk's answers. */
+export async function deskFacts(conv: Conversation): Promise<string> {
+  if (!conv.requisitionId)
+    return `No requisition yet — the role is still being described.\n${await organisationFact(
+      conv.orgId,
+    )}\n${await jdTemplateFacts(conv.orgId, null)}`;
+  const [req] = await db
+    .select({
+      code: requisitions.code,
+      title: requisitions.title,
+      status: requisitions.status,
+      location: requisitions.location,
+      openings: requisitions.openings,
+      trail: requisitions.approvalTrail,
+    })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (!req) return "The requisition this thread was for no longer exists (it was deleted).";
+  const jd = await latestJdStatus(conv.orgId, conv.requisitionId);
+  const [c] = (await db.execute(sql`
+    select count(*)::int total,
+      count(*) filter (where m.id is not null)::int scored,
+      count(*) filter (where a.stage = 'shortlisted')::int shortlisted
+    from applications a left join match_scores m on m.application_id = a.id
+    where a.requisition_id = ${conv.requisitionId} and a.org_id = ${conv.orgId}`)) as unknown as {
+    total: number;
+    scored: number;
+    shortlisted: number;
+  }[];
+  const trail = Array.isArray(req.trail)
+    ? (req.trail as { to?: string; comment?: string | null; at?: string }[])
+    : [];
+  const last = trail.at(-1);
+  const progress = await deskProgress(conv);
+  return [
+    `${req.code} "${req.title}" (${req.location ?? "—"}, ${plural(req.openings ?? 0, "opening")}) is ${STATUS_WORDS[req.status] ?? req.status}.`,
+    await organisationFact(conv.orgId),
+    last?.to && ["closed", "rejected", "on_hold"].includes(last.to)
+      ? `It became ${last.to.replace("_", " ")}${last.at ? ` on ${last.at.slice(0, 10)}` : ""}${last.comment ? ` — reason: "${last.comment}"` : ""}.`
+      : "",
+    `Job description: ${jd ? jd.replace("_", " ") : "none yet"}.`,
+    await jdTemplateFacts(conv.orgId, conv.requisitionId),
+    `Candidates in its pipeline: ${c?.total ?? 0} (${c?.scored ?? 0} scored, ${c?.shortlisted ?? 0} shortlisted).`,
+    await arrangedCallsFact(conv),
+    progress.next ? `Current journey step: ${progress.next.stage} — ${progress.next.text}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** "Close this role": the right action for its status, as a card with a button. */
+export async function offerCloseRole(conv: Conversation): Promise<void> {
+  if (!conv.requisitionId) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "There is no requisition yet, so there is nothing to close. You can simply leave this conversation.",
+    });
+    return;
+  }
+  const [req] = await db
+    .select({ code: requisitions.code, status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (!req) return;
+  const [apps] = (await db.execute(sql`
+    select count(*)::int n from applications
+    where requisition_id = ${conv.requisitionId} and org_id = ${conv.orgId}`)) as unknown as {
+    n: number;
+  }[];
+  const action: "delete" | "reject" | "close" | null =
+    req.status === "draft" && !(apps?.n ?? 0)
+      ? "delete"
+      : ["pending_dh", "pending_hr", "pending_cbo"].includes(req.status)
+        ? "reject"
+        : ["approved", "on_hold"].includes(req.status)
+          ? "close"
+          : null;
+  if (!action) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `${req.code} is already ${STATUS_WORDS[req.status] ?? req.status}. A closed or rejected requisition cannot be reopened — start a new hiring need instead (it can reuse this role's approved job description).`,
+    });
+    return;
+  }
+  const who =
+    action === "reject" ? "the approver of the current step" : "the HR head, CBO or owner";
+  await postMessage(conv, {
+    role: "desk",
+    body:
+      action === "delete"
+        ? `${req.code} is an unused draft, so it can be deleted. Give a reason and confirm below (${who}).`
+        : action === "reject"
+          ? `${req.code} is still in the approval chain, so it is rejected rather than closed. Give a reason and confirm below (${who}).`
+          : `${req.code} will be closed: agents stop working on it and its job-board postings come down. It cannot be reopened. Give a reason and confirm below (${who}).`,
+    card: { type: "close_role", requisitionId: conv.requisitionId, code: req.code, action },
+  });
+}
+
+/** Perform the close / reject / delete from the thread, as the person (role-checked, audited). */
+export async function closeRole(
+  conv: Conversation,
+  userId: string,
+  reason: string,
+): Promise<{ action: "delete" | "reject" | "close" }> {
+  if (!conv.requisitionId) throw new Error("There is no requisition to close.");
+  const [req] = await db
+    .select({ id: requisitions.id, code: requisitions.code, status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (!req) throw new Error("Requisition not found.");
+  const { activeOrgOf, assertRole } = await import("@/lib/auth.middleware");
+  const org = await activeOrgOf(userId);
+  if (!org || org.orgId !== conv.orgId)
+    throw new Error("You are not a member of this organisation.");
+  const actor = { orgId: conv.orgId, userId, memberEmail: org.memberEmail };
+  const { advanceRequisitionCore } = await import("@/lib/requisitions.server");
+  if (req.status === "draft") {
+    // The same rule as the Requisitions list: unused drafts only, HR leadership.
+    await assertRole(userId, conv.orgId, ["hr_head", "president_cbo"]);
+    const [apps] = (await db.execute(sql`
+      select count(*)::int n from applications where requisition_id = ${req.id} and org_id = ${conv.orgId}`)) as unknown as {
+      n: number;
+    }[];
+    if ((apps?.n ?? 0) > 0)
+      throw new Error(
+        "This draft already has applications — it can be closed only after approval.",
+      );
+    await db
+      .delete(requisitions)
+      .where(and(eq(requisitions.id, req.id), eq(requisitions.orgId, conv.orgId)));
+    await writeAudit({
+      actor: org.memberEmail,
+      actorUserId: userId,
+      orgId: conv.orgId,
+      action: "requisition.delete",
+      entityType: "requisition",
+      entityId: req.id,
+      detail: { code: req.code, reason, via: "hiring_desk", conversation_id: conv.id },
+    });
+    const { afterSubjectsDeleted } = await import("../agents/runtime.server");
+    await afterSubjectsDeleted(conv.orgId);
+    await endThread(conv, `${req.code} was deleted. Reason: ${reason}`);
+    return { action: "delete" };
+  }
+  const to = ["pending_dh", "pending_hr", "pending_cbo"].includes(req.status)
+    ? "rejected"
+    : "closed";
+  // Role checks and the trail live in the lifecycle core (same as the requisition page);
+  // the requisition.status_changed event then ends the thread.
+  await advanceRequisitionCore(actor, { id: req.id, status: to, comment: reason });
+  await onRequisitionEnded(conv.orgId, req.id, to, userId, reason);
+  return { action: to === "rejected" ? "reject" : "close" };
+}
+
+/** Mark the thread closed and say why (once). */
+async function endThread(conv: Conversation, body: string): Promise<void> {
+  await db
+    .update(hiringConversations)
+    .set({ status: "closed", updatedAt: new Date() })
+    .where(eq(hiringConversations.id, conv.id));
+  const [last] = await db
+    .select({ body: hiringMessages.body })
+    .from(hiringMessages)
+    .where(eq(hiringMessages.conversationId, conv.id))
+    .orderBy(desc(hiringMessages.createdAt))
+    .limit(1);
+  if (last?.body !== body)
+    await postMessage(conv, { role: "desk", body, card: { type: "role_ended" } });
+}
+
+/**
+ * A requisition was closed or rejected (anywhere — this thread, the requisition
+ * page, an approver): stop its agents, cancel their open requests, and end the
+ * thread with who and why. Idempotent.
+ */
+export async function onRequisitionEnded(
+  orgId: string,
+  requisitionId: string,
+  to: string,
+  actorUserId: string | null,
+  comment?: string | null,
+): Promise<void> {
+  if (!["closed", "rejected", "on_hold"].includes(to)) return;
+  const conv = await conversationForRequisition(orgId, requisitionId);
+  const [req] = await db
+    .select({
+      code: requisitions.code,
+      trail: requisitions.approvalTrail,
+      createdBy: requisitions.createdBy,
+    })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, requisitionId), eq(requisitions.orgId, orgId)))
+    .limit(1);
+  const stopper = actorUserId ?? req?.createdBy ?? conv?.createdBy ?? null;
+  // Stop the agents still working on this role (the role and its candidates).
+  const active = await db
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, orgId),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+        or(
+          eq(agentRuns.subjectId, requisitionId),
+          sql`${agentRuns.subjectId} in (select id from applications where requisition_id = ${requisitionId} and org_id = ${orgId})`,
+        ),
+      ),
+    );
+  if (active.length && stopper) {
+    const { cancelRun } = await import("../agents/runtime.server");
+    for (const r of active) await cancelRun({ orgId, runId: r.id, userId: stopper });
+  }
+  // Interview-time links still open for this role's candidates are withdrawn.
+  const withdrawn = (await db.execute(sql`
+    update interview_slot_offers set status = 'cancelled'
+    where org_id = ${orgId} and status = 'offered'
+      and application_id in (select id from applications where requisition_id = ${requisitionId} and org_id = ${orgId})
+    returning id`)) as unknown as { id: string }[];
+  // What still needs a person: rounds booked ahead, offers out, people in play.
+  const [open] = (await db.execute(sql`
+    select
+      (select count(*) from interviews i join applications a on a.id = i.application_id
+        where a.requisition_id = ${requisitionId} and i.org_id = ${orgId}
+          and i.status = 'scheduled' and i.scheduled_at > now())::int as rounds,
+      (select count(*) from offers o join applications a on a.id = o.application_id
+        where a.requisition_id = ${requisitionId} and o.org_id = ${orgId}
+          and o.status in ('draft','pending_hr','pending_cbo','approved','released','countered'))::int as offers,
+      (select count(*) from applications a where a.requisition_id = ${requisitionId} and a.org_id = ${orgId}
+          and a.stage not in ('rejected','withdrawn','offer_declined','offer_accepted','hired','joined'))::int as people
+  `)) as unknown as { rounds: number; offers: number; people: number }[];
+  if (!conv) return;
+  const trail = Array.isArray(req?.trail)
+    ? (req!.trail as { actor?: string; comment?: string | null }[])
+    : [];
+  const last = trail.at(-1);
+  const reason = comment ?? last?.comment ?? null;
+  const loose = [
+    open?.rounds ? `${plural(open.rounds, "interview round")} still booked` : "",
+    open?.offers ? `${plural(open.offers, "offer")} still open` : "",
+    open?.people ? `${plural(open.people, "candidate")} still in the pipeline` : "",
+  ].filter(Boolean);
+  const head = `${req?.code ?? "The requisition"} was ${to === "on_hold" ? "put on hold" : to}${last?.actor ? ` by ${last.actor}` : ""}${reason ? ` — reason: "${reason}"` : ""}. ${active.length ? `${plural(active.length, "agent run")} working on it ${active.length === 1 ? "was" : "were"} stopped. ` : ""}${withdrawn.length ? `${plural(withdrawn.length, "open interview-time link")} ${withdrawn.length === 1 ? "was" : "were"} withdrawn. ` : ""}${loose.length ? `Still to settle by a person: ${loose.join(", ")} — tell the candidates and cancel or keep them on the Interviews and Offers pages. ` : ""}`;
+  if (to === "on_hold") {
+    // Paused, not ended: agents start again once the role is approved again.
+    await postMessage(conv, {
+      role: "desk",
+      body: `${head}No agent works on it while it is on hold.`,
+    });
+    return;
+  }
+  await endThread(
+    conv,
+    `${head}${
+      to === "rejected"
+        ? "It can be revised and resubmitted from the requisition page; this thread ends here."
+        : "A closed requisition stays closed; start a new hiring need to hire for this again."
+    }`,
+  );
+}
+
+/* ---------------------------------------- thinking, research, proposals */
+
+const SLOT_LABEL: Record<string, string> = {
+  roleTitle: "Role",
+  location: "Location",
+  workMode: "Work mode",
+  experienceMin: "Experience from",
+  experienceMax: "Experience up to",
+  openings: "Openings",
+  mustHaveSkills: "Must-have skills",
+  goodToHaveSkills: "Good-to-have skills",
+  budgetLpaMax: "Budget (LPA, up to)",
+  bandLpaMin: "Pay band from (LPA)",
+  bandLpaMax: "Pay band to (LPA)",
+  maxNoticeDays: "Notice period (days, max)",
+  employmentType: "Employment type",
+  urgency: "Urgency",
+  responsibilities: "Responsibilities",
+  reportingTo: "Reports to",
+  successMeasures: "Success after 12 months",
+  education: "Education",
+  hiringManager: "Hiring manager",
+};
+const REQUIRED_LABEL: Record<RequiredSlot, string> = {
+  roleTitle: "role",
+  location: "location",
+  workMode: "work mode (onsite / hybrid / remote)",
+  experience: "experience",
+  openings: "number of openings",
+  mustHaveSkills: "must-have skills",
+  hiringManager: "hiring manager",
+};
+
+/** What the latest message changed, as label / value lines (the desk's "understood"). */
+export function changedSlots(
+  before: DeskSlots,
+  after: DeskSlots,
+): { label: string; value: string }[] {
+  return (Object.keys(SLOT_LABEL) as (keyof DeskSlots)[])
+    .filter((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]) && after[k] !== undefined)
+    .map((k) => {
+      const v = after[k];
+      return { label: SLOT_LABEL[k]!, value: Array.isArray(v) ? v.join(", ") : String(v) };
+    });
+}
+
+/** "How I read that": what was understood, what is still missing, what happens next. */
+function thinking(
+  understood: { label: string; value: string }[],
+  slots: DeskSlots,
+  next: string,
+): DeskCard {
+  return {
+    type: "reasoning",
+    understood,
+    missing: missingSlots(slots).map((m) => REQUIRED_LABEL[m]),
+    next,
+  };
+}
+
+/**
+ * What happens next, per missing detail — honest about what research can
+ * and cannot fill. Market research applies to skills and experience only;
+ * a hiring manager comes from the registered team, never from the market.
+ */
+export function nextStepText(missing: RequiredSlot): string {
+  if (missing === "hiringManager")
+    return "Presenting your team — pick who manages this hire; they approve the role's interview panels and must be a registered member.";
+  if (missing === "mustHaveSkills" || missing === "experience")
+    return `Asking for the ${REQUIRED_LABEL[missing]}. You can also say "as per market" and I'll research it.`;
+  return `Asking for the ${REQUIRED_LABEL[missing]}.`;
+}
+
+/** Continue gathering: ask the next missing detail, the JD question once, then similar roles. */
+export async function advanceGathering(
+  conv: Conversation,
+  reply: string,
+  understood: { label: string; value: string }[],
+): Promise<void> {
+  const slots = conv.slots as DeskSlots;
+  const missing = missingSlots(slots);
+  if (missing.length) {
+    // The hiring manager must be a registered member: present the team as
+    // tappable options instead of a free-text question with examples.
+    if (missing[0] === "hiringManager") {
+      const options = await hiringManagerOptions(conv.orgId);
+      await postMessage(conv, {
+        role: "desk",
+        body:
+          reply.trim() ||
+          `Who manages this hire? They approve the role's interview panels. Pick from your team${options.length ? " below" : " (the admin adds people on the Team page)"}:`,
+        card: {
+          type: "hiring_manager_options",
+          options,
+          why: {
+            understood,
+            missing: missingSlots(slots).map((m) => REQUIRED_LABEL[m]),
+            next: nextStepText("hiringManager"),
+          },
+        },
+      });
+      return;
+    }
+    await postMessage(conv, {
+      role: "desk",
+      body: reply.trim() || FALLBACK_QUESTION[missing[0]!],
+      card: thinking(understood, slots, nextStepText(missing[0]!)),
+    });
+    return;
+  }
+  // One question for a deeper JD, asked once; any answer (or "research it") moves on.
+  if (!slots.jdDetailsAsked) {
+    const asked = { ...slots, jdDetailsAsked: true };
+    await db
+      .update(hiringConversations)
+      .set({ slots: asked as never })
+      .where(eq(hiringConversations.id, conv.id));
+    await postMessage(conv, {
+      role: "desk",
+      body: `To write a strong job description for ${slots.roleTitle}: what are the 3–5 key responsibilities, who does this role report to, and what does success look like after 12 months? Any education requirement? Answer in your own words — or say "research it" and I'll draft these from typical market practice for this role.`,
+      card: {
+        ...thinking(
+          understood,
+          slots,
+          "All required details are in. One optional question for a deeper job description.",
+        ),
+        // The optional JD details can be drafted from market practice: the
+        // person presses the button instead of typing "research it".
+        jdResearch: true,
+      },
+    });
+    return;
+  }
+  await db
+    .update(hiringConversations)
+    .set({ status: "confirming" })
+    .where(eq(hiringConversations.id, conv.id));
+  const similar = await findSimilarRoles(conv.orgId, slots);
+  // "Research it" for the JD details is done when the JD is written (jdBrief
+  // hands it to the JD agent) — say so, or the ask looks silently dropped.
+  const jdNote =
+    slots.researchRole && (!slots.responsibilities || !slots.successMeasures)
+      ? " The responsibilities and success measures will be drafted from market practice when the job description is written."
+      : "";
+  await postMessage(conv, {
+    role: "desk",
+    body: similar.length
+      ? `Got it: ${describeNeed(slots)}.${jdNote} I found ${plural(similar.length, "similar role")}. Continue with one of them, reuse an approved JD for a new role, or create a new role.`
+      : `Got it: ${describeNeed(slots)}.${jdNote} There is no similar role yet — shall I create a new one?`,
+    card: {
+      type: "similar_roles",
+      slots,
+      items: similar,
+      why: {
+        understood,
+        missing: [],
+        next: `Checked your requisitions for roles similar to "${slots.roleTitle}": ${similar.length} found.`,
+      },
+    },
+  });
+}
+
+// The research model answers in its own shape: numbers may arrive as strings,
+// reasoning can run long, lists can overshoot. Accept the reasonable forms and
+// normalise here — a strict parse turned usable research into "incomplete".
+const researchNumLpa = z.preprocess(
+  (v) => (typeof v === "string" ? (v.trim() === "" ? null : Number(v)) : v),
+  z.number().min(0).max(1000).nullable().default(null),
+);
+const researchSkillList = z.preprocess(
+  (v) =>
+    Array.isArray(v)
+      ? v
+          .map((s) => String(s).trim().slice(0, 60))
+          .filter(Boolean)
+          .slice(0, 10)
+      : [],
+  z.array(z.string().min(1).max(60)).max(10).default([]),
+);
+const Proposal = z.object({
+  mustHaveSkills: researchSkillList.default([]),
+  goodToHaveSkills: researchSkillList.default([]),
+  experienceMin: researchNumLpa,
+  experienceMax: researchNumLpa,
+  budgetLpaMin: researchNumLpa,
+  budgetLpaMax: researchNumLpa,
+  reasoning: z.preprocess(
+    (v) => (typeof v === "string" ? v.slice(0, 1200) : ""),
+    z.string().max(1200).default(""),
+  ),
+  sources: z
+    .array(z.object({ title: z.string().max(200), url: z.string().max(500) }))
+    .max(8)
+    .default([]),
+});
+export type RoleProposal = z.infer<typeof Proposal>;
+
+/**
+ * The person delegated details to the market: research them (live web research
+ * when the organisation's AI model supports it, else the model's knowledge —
+ * labelled as such) and post a proposal they can accept or change.
+ */
+export async function researchRole(
+  conv: Conversation,
+  fields: ("skills" | "experience" | "budget")[],
+  understood: { label: string; value: string }[] = [],
+): Promise<void> {
+  const s = conv.slots as DeskSlots;
+  if (!s.roleTitle) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "Which role should I research? Tell me the role first.",
+    });
+    return;
+  }
+  const { aiResearchJson } = await import("@/lib/ai-gateway.server");
+  const res = await aiResearchJson<RoleProposal>({
+    orgId: conv.orgId,
+    feature: "role_research",
+    system:
+      "You research current hiring-market expectations for a role, for a recruiter in India unless the location says otherwise. " +
+      "Use live web sources when available (job postings, salary surveys, skills reports) and cite them. Be concrete and current: " +
+      "skills as short names (tools, frameworks, methods), experience as a year range, budget as annual CTC in lakhs (LPA) for the location. " +
+      "Only fill the fields asked for; leave the others empty / null. " +
+      'Return ONLY JSON: {"mustHaveSkills":[],"goodToHaveSkills":[],"experienceMin":null,"experienceMax":null,' +
+      '"budgetLpaMin":null,"budgetLpaMax":null,"reasoning":"2-4 sentences: why these, what the market shows","sources":[{"title","url"}]}',
+    prompt: JSON.stringify({
+      role: s.roleTitle,
+      location: s.location ?? null,
+      experience: s.experienceMin !== undefined ? [s.experienceMin, s.experienceMax ?? null] : null,
+      known: { mustHaveSkills: s.mustHaveSkills ?? [], goodToHaveSkills: s.goodToHaveSkills ?? [] },
+      research: fields,
+    }),
+  });
+  if (!res.ok) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "I couldn't research that just now. Tell me the details yourself, or try again in a moment.",
+    });
+    return;
+  }
+  const parsed = Proposal.safeParse(res.data);
+  if (!parsed.success) {
+    // Diagnoseable: which fields the model got wrong stays server-side.
+    log.warn("desk.research_parse_failed", {
+      org_id: conv.orgId,
+      issues: parsed.error.issues.slice(0, 5).map((i) => `${i.path.join(".")}: ${i.message}`),
+    });
+    await postMessage(conv, {
+      role: "desk",
+      body: "The research came back incomplete. Tell me the details yourself, or ask again.",
+    });
+    return;
+  }
+  const p = parsed.data;
+  // Keep only http(s) links; never render anything else as a link.
+  p.sources = p.sources.filter((x) => /^https?:\/\//i.test(x.url));
+  await postMessage(conv, {
+    role: "desk",
+    body: `Here is what the market expects for a ${s.roleTitle}${s.location ? ` (${s.location})` : ""}. Use these, or tell me what to change.`,
+    card: {
+      type: "proposal",
+      fields,
+      proposal: p as never,
+      grounded: res.grounded,
+      accepted: false,
+      why: {
+        understood,
+        missing: missingSlots(s).map((m) => REQUIRED_LABEL[m]),
+        next: res.grounded
+          ? `Researched ${fields.join(", ")} from live web sources (${p.sources.length}).`
+          : `Estimated ${fields.join(", ")} from the AI model's knowledge — no live web sources were available.`,
+      },
+    },
+  });
+}
+
+/** The newest proposal in the thread that has not been accepted yet. */
+export async function latestProposal(
+  conv: Conversation,
+): Promise<{ messageId: string; proposal: RoleProposal; fields: string[] } | null> {
+  const [m] = await db
+    .select({ id: hiringMessages.id, card: hiringMessages.card })
+    .from(hiringMessages)
+    .where(
+      and(
+        eq(hiringMessages.conversationId, conv.id),
+        sql`${hiringMessages.card} ->> 'type' = 'proposal'`,
+      ),
+    )
+    .orderBy(desc(hiringMessages.createdAt))
+    .limit(1);
+  const card = m?.card as {
+    proposal?: RoleProposal;
+    fields?: string[];
+    accepted?: boolean;
+    superseded?: boolean;
+  } | null;
+  if (!m || !card?.proposal || card.accepted || card.superseded) return null;
+  return { messageId: m.id, proposal: card.proposal, fields: card.fields ?? [] };
+}
+
+/** Accept the latest proposal: fill the details it covers, then carry on. */
+export async function applyProposal(conv: Conversation): Promise<void> {
+  const open = await latestProposal(conv);
+  if (!open) throw new Error("There is no proposal to accept.");
+  const p = open.proposal;
+  const before = conv.slots as DeskSlots;
+  const patch: DeskSlots = {
+    ...(p.mustHaveSkills.length ? { mustHaveSkills: p.mustHaveSkills } : {}),
+    ...(p.goodToHaveSkills.length ? { goodToHaveSkills: p.goodToHaveSkills } : {}),
+    ...(p.experienceMin != null ? { experienceMin: p.experienceMin } : {}),
+    ...(p.experienceMax != null ? { experienceMax: p.experienceMax } : {}),
+    ...(p.budgetLpaMax != null ? { budgetLpaMax: p.budgetLpaMax } : {}),
+  };
+  const slots = mergeSlots(before, patch);
+  await db
+    .update(hiringConversations)
+    .set({ slots: slots as never })
+    .where(eq(hiringConversations.id, conv.id));
+  const [msg] = await db
+    .select({ card: hiringMessages.card })
+    .from(hiringMessages)
+    .where(eq(hiringMessages.id, open.messageId))
+    .limit(1);
+  await db
+    .update(hiringMessages)
+    .set({ card: { ...(msg?.card as object), accepted: true } as never })
+    .where(eq(hiringMessages.id, open.messageId));
+  conv = { ...conv, slots: slots as never };
+  if (conv.status === "gathering") {
+    await advanceGathering(conv, "", changedSlots(before, slots));
+    return;
+  }
+  await postMessage(conv, {
+    role: "desk",
+    body: `Updated: ${describeNeed(slots)}.`,
+    card: thinking(changedSlots(before, slots), slots, "Applied the researched details."),
+  });
+}
+
+async function supersedeProposal(conv: Conversation): Promise<void> {
+  const open = await latestProposal(conv);
+  if (!open) return;
+  await db
+    .update(hiringMessages)
+    .set({
+      card: sql`${hiringMessages.card} || '{"superseded":true}'::jsonb`,
+    })
+    .where(eq(hiringMessages.id, open.messageId));
+}
+
+/* ------------------------------------------- person → agent feedback */
+
+export type OpenRequest = {
+  id: string;
+  kind: string;
+  title: string;
+  agentType: string;
+  /** For gates: what the approval is about (requisition, jd, offer…). */
+  subjectType: string | null;
+  subjectId: string | null;
+};
+
+/** Requests from this thread's agents still waiting on a person, newest first. */
+export async function openRequests(conv: Conversation): Promise<OpenRequest[]> {
+  const rows = await db
+    .select({
+      id: agentTasks.id,
+      kind: agentTasks.kind,
+      title: agentTasks.title,
+      agentType: agentRuns.agentType,
+      action: agentTasks.proposedAction,
+    })
+    .from(agentTasks)
+    .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
+    .where(
+      and(
+        eq(agentTasks.orgId, conv.orgId),
+        eq(agentTasks.status, "open"),
+        eq(agentRuns.conversationId, conv.id),
+        taskIsLive(),
+      ),
+    )
+    .orderBy(desc(agentTasks.createdAt))
+    .limit(5);
+  return rows.map(({ action, ...r }) => {
+    const subject = (action as { args?: { subject?: { type?: string; id?: string } } } | null)?.args
+      ?.subject;
+    return { ...r, subjectType: subject?.type ?? null, subjectId: subject?.id ?? null };
+  });
+}
+
+/**
+ * The person asked, in the chat, for a pending agent request to change (or
+ * answered an agent's question). Hand it to that agent as a decision on its
+ * request — "changes requested" with their words — so the agent revises and
+ * asks again. A job description under review can be sent back for changes
+ * too (the real "request changes" step, role-checked); other approval steps
+ * (requisition, offer) are never decided from chat — Decline there is final.
+ */
+export async function sendFeedback(
+  conv: Conversation,
+  userId: string,
+  text: string,
+  understood: { label: string; value: string }[] = [],
+  template?: string,
+  /** The open request it is about, by title (the desk's reading of the message). */
+  requestTitle?: string,
+): Promise<void> {
+  // "the Yavar template" → "Yavar", so replies don't read "Yavar template template".
+  template =
+    template
+      ?.replace(/\b(the|templates?)\b/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim() || undefined;
+  understood = [...understood, { label: "Your change", value: text }];
+  const allRequests = await openRequests(conv);
+  const asksTemplate = Boolean(template?.trim());
+  // Which request it is about is never guessed: a real thread sent "call again" to a
+  // waiting job-feed listing because it was the first open request.
+  const named = requestTitle?.trim().toLowerCase();
+  const requests =
+    named && !asksTemplate
+      ? allRequests.filter((r) => r.title.trim().toLowerCase() === named)
+      : allRequests;
+  if (!asksTemplate && allRequests.length > 1 && requests.length !== 1) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `Which request is that about — ${allRequests
+        .slice(0, 5)
+        .map((r) => `"${r.title}" (${AGENT_TITLE[r.agentType] ?? r.agentType})`)
+        .join(", ")} — or something else? Nothing was sent yet.`,
+    });
+    return;
+  }
+  const target =
+    requests.find((r) =>
+      // A template request is about the job description: only the JD agent's
+      // requests can take it, never another agent's.
+      asksTemplate
+        ? r.agentType === "jd" && (r.kind !== "gate" || r.subjectType === "jd")
+        : r.kind === "approval" ||
+          r.kind === "clarification" ||
+          (r.kind === "gate" && (r.subjectType === "jd" || r.subjectType === "requisition")),
+    ) ?? null;
+  const agent = (r: OpenRequest) => AGENT_TITLE[r.agentType] ?? `${r.agentType} agent`;
+  if (!target && template?.trim() && conv.requisitionId) {
+    // Nothing to send back, but the question deserves an answer: which
+    // template shaped the current job description?
+    const { findTemplateByName } = await import("@/lib/templates.server");
+    const { match } = await findTemplateByName(conv.orgId, "jd", template);
+    const [jd] = await db
+      .select({
+        version: jobDescriptions.version,
+        status: jobDescriptions.status,
+        templateId: jobDescriptions.templateId,
+        templateName: jobDescriptions.templateName,
+      })
+      .from(jobDescriptions)
+      .where(
+        and(
+          eq(jobDescriptions.requisitionId, conv.requisitionId),
+          eq(jobDescriptions.orgId, conv.orgId),
+        ),
+      )
+      .orderBy(desc(jobDescriptions.version))
+      .limit(1);
+    const already = jd && match && jd.templateId === match.id;
+    await postMessage(conv, {
+      role: "desk",
+      body: already
+        ? `The job description (version ${jd.version}, ${jd.status.replace("_", " ")}) was already drafted with "${match.name}" — your ${template} template${match.evidence ? ` (${match.evidence})` : ""}.`
+        : jd
+          ? `The job description (version ${jd.version}, ${jd.status.replace("_", " ")}) used ${jd.templateName ? `"${jd.templateName}"` : "the built-in format"}${match ? `, not "${match.name}"` : ""}. To use ${match ? `"${match.name}"` : "another template"}, open the requisition, pick the template and press Redraft with AI — that makes version ${jd.version + 1}, which goes to the department head for approval.`
+          : "There is no job description for this role yet; the JD agent will pick the template when it drafts one.",
+      card: {
+        type: "reasoning",
+        understood,
+        missing: [],
+        next: "Answered from the job description's record; nothing was sent.",
+      },
+    });
+    return;
+  }
+  if (!target) {
+    await postMessage(conv, {
+      role: "desk",
+      body: requests.length
+        ? `"${requests[0]!.title}" is an approval step where Decline is final, so it is decided on its card (Approve, or Decline with a reason), not from the chat.`
+        : "No agent is waiting on you in this thread, so there is nothing to send back. Tell me what you want done and I'll start the right agent.",
+      card: { type: "reasoning", understood, missing: [], next: "Nothing was sent to the agents." },
+    });
+    return;
+  }
+  // A template asked for by name must exist — say so instead of sending a
+  // request the agent cannot carry out.
+  let reason = text;
+  if (template?.trim()) {
+    const { findTemplateByName } = await import("@/lib/templates.server");
+    const { match, names, ambiguous } = await findTemplateByName(conv.orgId, "jd", template);
+    const nothingSent = (next: string, body: string) =>
+      postMessage(conv, {
+        role: "desk",
+        body,
+        card: {
+          type: "reasoning",
+          understood: [...understood, { label: "Template asked for", value: template }],
+          missing: [],
+          next,
+        },
+      });
+    if (!match) {
+      await nothingSent(
+        `Nothing was sent: ${ambiguous.length ? "several" : "no"} JD templates match "${template}". "${target.title}" is still waiting for you.`,
+        ambiguous.length
+          ? `More than one JD template mentions "${template}": ${ambiguous.map((n) => `"${n}"`).join(", ")}. Which one should I use?`
+          : names.length
+            ? `I checked your JD templates — names and content — and none mentions "${template}". Your JD templates: ${names.map((n) => `"${n}"`).join(", ")}. Tell me which one to use, or add a "${template}" template under Content templates (Manual mode) and ask again.`
+            : `There are no job-description templates yet, so I can't use "${template}". Add one under Content templates (Manual mode) and ask again.`,
+      );
+      return;
+    }
+    const found =
+      match.by === "content"
+        ? `"${match.name}" — your ${template} template (${match.evidence})`
+        : `"${match.name}"`;
+    // Already drafted with it: say so instead of sending the JD back for nothing.
+    if (target.subjectType === "jd" && target.subjectId) {
+      const [jd] = await db
+        .select({ templateId: jobDescriptions.templateId, version: jobDescriptions.version })
+        .from(jobDescriptions)
+        .where(and(eq(jobDescriptions.id, target.subjectId), eq(jobDescriptions.orgId, conv.orgId)))
+        .limit(1);
+      if (jd?.templateId === match.id) {
+        await nothingSent(
+          `Nothing was sent: version ${jd.version} already uses "${match.name}".`,
+          `This job description (version ${jd.version}) was already drafted with ${found}. Approve it, or tell me what else to change.`,
+        );
+        return;
+      }
+    }
+    reason = `${text}\nUse the JD template "${match.name}".`;
+    understood = [...understood, { label: "Template", value: found }];
+  }
+  if (target.kind === "gate" && target.subjectType === "requisition" && target.subjectId) {
+    await sendRequisitionBack(conv, userId, target.subjectId, target, text, understood);
+    return;
+  }
+  const { resolveTask } = await import("../agents/runtime.server");
+  try {
+    const result = await resolveTask({
+      orgId: conv.orgId,
+      taskId: target.id,
+      userId,
+      decision:
+        target.kind === "clarification"
+          ? { status: "answered", answer: reason }
+          : { status: "rejected", reason, changes: true },
+    });
+    if (result.outcome === "no_longer_relevant") {
+      await postMessage(conv, { role: "desk", body: result.message });
+      return;
+    }
+  } catch (e) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `I couldn't pass that on: ${e instanceof Error ? e.message : "the request could not be updated."}`,
+    });
+    return;
+  }
+  const { kickAgents } = await import("../agents/orchestrator.server");
+  kickAgents(conv.orgId);
+  const isJd = target.kind === "gate";
+  await postMessage(conv, {
+    role: "desk",
+    body:
+      target.kind === "clarification"
+        ? `Sent your answer to the ${agent(target)}. It continues from here.`
+        : isJd
+          ? `Sent the job description back to the ${agent(target)} for changes: "${text}". It will redraft${template ? " with that template" : ""} and send the new version for approval.`
+          : `Sent back to the ${agent(target)}: "${text}". It will revise "${target.title}" and ask you again.`,
+    card: {
+      type: "reasoning",
+      understood,
+      missing: [],
+      next:
+        target.kind === "clarification"
+          ? `Answered "${target.title}" for you.`
+          : isJd
+            ? `Requested changes on the job description (it is now "changes requested", not rejected) and returned it to the ${agent(target)}.`
+            : `Returned "${target.title}" to the ${agent(target)} with your change. The old request is closed, so it cannot be approved by mistake.`,
+    },
+  });
+}
+
+/**
+ * A change asked for in the chat while the requisition is in approval: send it
+ * back to draft with those words (the current approver, the person who raised
+ * it, or the HR head / CBO — checked in the lifecycle core), close the waiting
+ * approval with the change so the Requisition agent applies it and resubmits.
+ */
+async function sendRequisitionBack(
+  conv: Conversation,
+  userId: string,
+  requisitionId: string,
+  target: { title: string; agentType: string },
+  text: string,
+  understood: { label: string; value: string }[],
+): Promise<void> {
+  const { activeOrgOf } = await import("@/lib/auth.middleware");
+  const org = await activeOrgOf(userId);
+  if (!org || org.orgId !== conv.orgId) return;
+  const { sendBackRequisitionCore } = await import("@/lib/requisitions.server");
+  let sent: { from: string; code: string };
+  try {
+    sent = await sendBackRequisitionCore(
+      { orgId: conv.orgId, userId, memberEmail: org.memberEmail },
+      { id: requisitionId, reason: text },
+    );
+  } catch (e) {
+    await postMessage(conv, {
+      role: "desk",
+      body: `I couldn't send it back: ${e instanceof Error ? e.message : "the requisition could not be updated."}`,
+      card: { type: "reasoning", understood, missing: [], next: "Nothing was changed." },
+    });
+    return;
+  }
+  const { syncGateTasks } = await import("../agents/runtime.server");
+  await syncGateTasks(conv.orgId, { type: "requisition", id: requisitionId }, userId, sent.from);
+  const { kickAgents } = await import("../agents/orchestrator.server");
+  kickAgents(conv.orgId);
+  await postMessage(conv, {
+    role: "desk",
+    body: `Sent ${sent.code} back to draft with your change: "${text}". The Requisition agent applies it and asks for approval again — the approvals start over at the department head.`,
+    card: {
+      type: "reasoning",
+      understood,
+      missing: [],
+      next: `Sent back for changes (not declined): "${target.title}" is closed and the change is on the approval trail.`,
+    },
+  });
+}
+
+/** Live-activity wording for a person's decision handed back to an agent. */
+function decisionLabel(status: string, input: unknown): string {
+  const i = (input ?? {}) as { changes?: boolean; reason?: string };
+  if (status === "rejected" && i.changes)
+    return `You asked for changes${i.reason ? `: "${i.reason.slice(0, 80)}"` : ""}`;
+  if (status === "rejected") return "You declined";
+  if (status === "answered") return "You answered its question";
+  return "Request cancelled";
+}
+
+export type Revision = {
+  reason: string;
+  changes: { label: string; from: string; to: string }[];
+};
+
+/**
+ * A request the agent re-proposed after the person asked for changes: the
+ * reason and what actually changed, so the person sees the effect of their
+ * words (and sees it plainly when nothing changed).
+ */
+export async function revisionOf(
+  conv: Conversation,
+  task: { title: string; proposedAction?: unknown },
+): Promise<Revision | null> {
+  const [prev] = await db
+    .select({ action: agentTasks.proposedAction, response: agentTasks.response })
+    .from(agentTasks)
+    .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
+    .where(
+      and(
+        eq(agentTasks.orgId, conv.orgId),
+        eq(agentRuns.conversationId, conv.id),
+        eq(agentTasks.title, task.title),
+        eq(agentTasks.status, "rejected"),
+        sql`(${agentTasks.response} ->> 'changes')::boolean is true`,
+      ),
+    )
+    .orderBy(desc(agentTasks.decidedAt))
+    .limit(1);
+  if (!prev) return null;
+  const before = (prev.action as { name?: string; args?: Record<string, unknown> } | null) ?? {};
+  const after = (task.proposedAction as { args?: Record<string, unknown> } | null) ?? {};
+  const a = before.args ?? {};
+  const b = after.args ?? {};
+  const pct = before.name === "save_weights";
+  const show = (k: string, v: unknown) =>
+    v === undefined || v === null ? "—" : pct ? `${String(v)}%` : fmtValue(k, v).slice(0, 80);
+  const changes = [...new Set([...Object.keys(a), ...Object.keys(b)])]
+    .filter((k) => !HIDDEN_ARG.test(k) && JSON.stringify(a[k]) !== JSON.stringify(b[k]))
+    .slice(0, 8)
+    .map((k) => ({
+      label: k
+        .replace(/([a-z])([A-Z])/g, "$1 $2")
+        .replace(/_/g, " ")
+        .replace(/^./, (c) => c.toUpperCase()),
+      from: show(k, a[k]),
+      to: show(k, b[k]),
+    }));
+  return {
+    reason: String((prev.response as { reason?: string } | null)?.reason ?? "").slice(0, 200),
+    changes,
+  };
+}
+
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+/** Agent text shown to people: drop "… ID: <uuid>" lines and any stray internal ids. */
+export function readableAgentText(text: string): string {
+  // Links are kept whole — an id inside a URL (/apply/<id>) is the link itself.
+  const links: string[] = [];
+  const shielded = text.replace(/https?:\/\/[^\s<>()`'"]+/g, (url) => {
+    links.push(url);
+    return `\uE000${links.length - 1}\uE000`;
+  });
+  return humanizeInternals(stripIds(shielded)).replace(
+    /\uE000(\d+)\uE000/g,
+    (_, i) => links[Number(i)]!,
+  );
+}
+
+/**
+ * Internal names an agent may echo: tool names (list_departments) become
+ * words, "finalComplete: true"-style flags go. Code spans and links are kept.
+ */
+export function humanizeInternals(text: string): string {
+  return text
+    .split(/(```[\s\S]*?```)/)
+    .map((part, i) =>
+      i % 2
+        ? part
+        : part
+            // "(finalComplete: true)", "; isFinal=false"
+            .replace(/\s*\(\s*[a-z]+[A-Z]\w*\s*[:=]\s*(?:true|false)\s*\)/g, "")
+            .replace(/(?:[;,]\s*)?\b[a-z]+[A-Z]\w*\s*[:=]\s*(?:true|false)\b/g, "")
+            // `list_departments` / list_departments → "list departments" (not emails or file names)
+            .replace(/`?(?<![\w@.])([a-z]+(?:_[a-z]+)+)(?![\w@]|\.\w)`?/g, (_m, w: string) =>
+              w.replace(/_/g, " "),
+            )
+            // What a removed flag leaves behind: "(``)", "``".
+            .replace(/\s*\(\s*`\s*`\s*\)/g, "")
+            .replace(/`\s*`/g, "")
+            .replace(/\(\s*\)/g, ""),
+    )
+    .join("");
+}
+
+/**
+ * One-paragraph preview of agent text for lists (Agent activity): ids and
+ * internal names out, markdown marks removed, cut at a word (pure; tested).
+ */
+export function plainPreview(text: string | null, max: number): string | null {
+  if (!text) return text;
+  const plain = readableAgentText(text)
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/^\s*#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*•]\s+/gm, "")
+    .replace(/^\s*\|?\s*:?-{2,}.*$/gm, "")
+    .replace(/\*\*|__|`/g, "")
+    .replace(/\s*\|\s*/g, " · ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (plain.length <= max) return plain;
+  const cut = plain.lastIndexOf(" ", max);
+  return `${plain.slice(0, cut > max / 2 ? cut : max)}…`;
+}
+
+const MONTHS =
+  "January|February|March|April|May|June|July|August|September|October|November|December";
+const WEEKDAY = "(?:(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day,?\\s+)?";
+
+/**
+ * Times an agent wrote in UTC, shown in the organisation's time zone (pure;
+ * unit-tested): "2026-10-14 08:30:00 UTC", "Wednesday, October 14, 2026 at
+ * 08:30 UTC (14:00 IST)" → "Wed 14 Oct, 14:00 IST"; "Offered Times (UTC):"
+ * loses its "(UTC)".
+ */
+export function localizeUtc(text: string, timeZone: string): string {
+  const at = (iso: string) => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? null : localWhen(d, timeZone);
+  };
+  return text
+    .replace(
+      /\b(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::\d{2})?(?:\.\d+)?\s*(?:UTC|Z)\b(?:\s*\(\d{1,2}:\d{2}\s*[A-Z]{2,5}\))?/g,
+      (m, d: string, h: string, min: string) => at(`${d}T${h}:${min}:00Z`) ?? m,
+    )
+    .replace(
+      new RegExp(
+        `${WEEKDAY}(${MONTHS}) (\\d{1,2}),? (\\d{4}),?(?: at)? (\\d{1,2}):(\\d{2}) UTC(?:\\s*\\(\\d{1,2}:\\d{2}\\s*[A-Z]{2,5}\\))?`,
+        "g",
+      ),
+      (m, mon: string, day: string, y: string, h: string, min: string) =>
+        at(`${mon} ${day}, ${y} ${h}:${min} UTC`) ?? m,
+    )
+    .replace(/\s*\(UTC\)/g, "");
+}
+
+/** "1 candidate(s)" → "1 candidate"; "Interviewer(s): one name" → "Interviewer: one name". */
+export function fixPlurals(text: string): string {
+  return text
+    .replace(/\b(\d+) ([A-Za-z-]+)\(s\)/g, (_m, n: string, w: string) =>
+      Number(n) === 1 ? `${n} ${w}` : `${n} ${w}s`,
+    )
+    .replace(
+      /\b([A-Za-z]+)\(s\)([*_]*\s*:[*_]*\s+)([^\n]*)/g,
+      (m, w: string, sep: string, rest: string) =>
+        w.toLowerCase() === "http"
+          ? m
+          : /,| and /.test(rest)
+            ? `${w}s${sep}${rest}`
+            : `${w}${sep}${rest}`,
+    );
+}
+
+/**
+ * Agent and desk text as people see it, applied when a thread is read so
+ * older messages read the same as new ones: ids and internal names out,
+ * plurals, times in the organisation's time zone.
+ */
+export function tidyForPeople(text: string, timeZone: string): string {
+  return fixPlurals(localizeUtc(readableAgentText(text), timeZone));
+}
+
+export const deskTimeZone = (orgId: string) => orgTimeZone(orgId);
+
+const ENTITY = "Application|Candidate|Requisition|Offer|Run|Task|Assessment|Interview";
+
+function stripIds(text: string): string {
+  const id = `\`?${UUID.source}\`?`;
+  const hadId = new RegExp(UUID.source, "i");
+  // A line that was "Application ID: <id>" in any markdown dress, now empty.
+  const emptyLabel = /^[\s>*_\-•#]*[A-Za-z][\w ./&-]{0,40}[*_]*\s*[:=]?\s*[*_`]*\s*$/;
+  return (
+    text
+      .split("\n")
+      .map((line) => {
+        if (!hadId.test(line)) return line;
+        const left = line.replace(new RegExp(`\\s*${id}`, "gi"), "");
+        return /[:=]/.test(line) && emptyLabel.test(left) ? null : line;
+      })
+      .filter((line): line is string => line !== null)
+      // "Application ID:" left empty when an earlier pass removed its id.
+      .filter((line) => !/^[\s>*_\-•]*[A-Za-z ]{0,30}\bID\b[*_]*\s*[:=]?\s*[*_`]*\s*$/.test(line))
+      // A line that is only "<label> id: <id>" says nothing to a person.
+      .filter(
+        (line) => !new RegExp(`^[\\s*\\-•]*[\\w ]{0,30}:?\\s*${id}[\\s.,)]*$`, "i").test(line),
+      )
+      .join("\n")
+      // "Application ID: <id>", "(ID: <id>)", "Requisition: <id>": the label goes with the id.
+      .replace(new RegExp(`,?\\s*\\b[A-Za-z]+(?:\\s(?:ID|Id|id))?\\s*[:=]\\s*${id}`, "g"), "")
+      .replace(new RegExp(`\\s*${id}`, "gi"), "")
+      // …and what an earlier pass left of it: "(Application, Requisition)".
+      .replace(new RegExp(`\\s*\\((?:\\s*(?:${ENTITY})(?:\\s+ID)?\\s*,?)+\\s*\\)`, "gi"), "")
+      // "(<id>)" leaves "()" behind; "(<id>, x)" leaves "(, x)".
+      .replace(/\s*\(\s*\)/g, "")
+      .replace(/\(\s*,\s*/g, "(")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  );
+}
+
+/** Where an agent stands against its monthly token budget, with a suggested new budget. */
+export async function budgetOf(
+  orgId: string,
+  agentType: string,
+): Promise<{ used: number; limit: number; suggested: number }> {
+  const { monthTokens } = await import("../agents/runtime.server");
+  const [p] = await db
+    .select({ limit: agentPolicies.monthlyTokenBudget })
+    .from(agentPolicies)
+    .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.agentType, agentType as never)))
+    .limit(1);
+  const used = await monthTokens(orgId, agentType);
+  const limit = Number(p?.limit ?? 0);
+  return { used, limit, suggested: suggestBudget(used, limit, new Date()) };
+}
+
+/** The org's JD templates (with what they contain) and the one the current JD used — desk facts. */
+async function jdTemplateFacts(orgId: string, requisitionId: string | null): Promise<string> {
+  const { contentTemplates } = await import("@db/schema");
+  const rows = await db
+    .select({
+      name: contentTemplates.name,
+      isDefault: contentTemplates.isDefault,
+      config: contentTemplates.config,
+    })
+    .from(contentTemplates)
+    .where(and(eq(contentTemplates.orgId, orgId), eq(contentTemplates.kind, "jd")));
+  const list = rows.length
+    ? rows
+        .map((r) => {
+          const cfg = (r.config ?? {}) as {
+            sections?: { heading?: string }[];
+            boilerplate?: string;
+          };
+          const sections = (cfg.sections ?? [])
+            .map((x) => x.heading)
+            .filter(Boolean)
+            .join(", ");
+          return `"${r.name}"${r.isDefault ? " (default)" : ""}${sections ? ` — sections: ${sections}` : ""}${cfg.boilerplate ? ` — standard wording: "${cfg.boilerplate.slice(0, 120)}"` : ""}`;
+        })
+        .join("; ")
+    : "none";
+  let used = "";
+  if (requisitionId) {
+    const [jd] = await db
+      .select({ version: jobDescriptions.version, templateName: jobDescriptions.templateName })
+      .from(jobDescriptions)
+      .where(
+        and(eq(jobDescriptions.requisitionId, requisitionId), eq(jobDescriptions.orgId, orgId)),
+      )
+      .orderBy(desc(jobDescriptions.version))
+      .limit(1);
+    if (jd)
+      used = ` The current JD (version ${jd.version}) was drafted with ${jd.templateName ? `"${jd.templateName}"` : "the built-in format"}.`;
+  }
+  return `JD templates:\n${untrusted("jd_templates", list)}${used}`;
+}
+
+/** Post the role's latest job description (full text) into the thread. */
+/**
+ * The role's interview plan and hiring manager, posted into the thread as a
+ * card the person edits in place (docs/interview-panel-plan.md, P1).
+ */
+export async function showInterviewPlan(conv: Conversation, justCreated = false): Promise<void> {
+  if (!conv.requisitionId) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "The interview plan comes with the requisition — I'll show it once the role is raised.",
+    });
+    return;
+  }
+  const { planFor } = await import("@/lib/interview-plan.server");
+  const { plan, saved } = await planFor(conv.orgId, conv.requisitionId);
+  const rounds = plan.rounds.map((r) => `L${r.level} ${r.name}`).join(", ");
+  await postMessage(conv, {
+    role: "desk",
+    body: justCreated
+      ? `The interview plan for this role, from its must-haves: ${rounds}. Change the rounds, what each one rates or the panel size here before interviews start; the hiring manager approves each round's panel.`
+      : `The interview plan for this role${saved ? "" : " (the default from its must-haves)"}: ${rounds}. Edit it here.`,
+    card: { type: "interview_plan", requisitionId: conv.requisitionId },
+  });
+}
+
+export async function showJd(
+  conv: Conversation,
+  understood: { label: string; value: string }[] = [],
+): Promise<void> {
+  if (!conv.requisitionId) {
+    await postMessage(conv, {
+      role: "desk",
+      body: "There is no job description yet — the role is still being described. The JD agent drafts one once the requisition is submitted.",
+    });
+    return;
+  }
+  const [jd] = await db
+    .select({
+      version: jobDescriptions.version,
+      status: jobDescriptions.status,
+      fullText: jobDescriptions.fullText,
+      templateName: jobDescriptions.templateName,
+      code: requisitions.code,
+    })
+    .from(jobDescriptions)
+    .innerJoin(requisitions, eq(requisitions.id, jobDescriptions.requisitionId))
+    .where(
+      and(
+        eq(jobDescriptions.requisitionId, conv.requisitionId),
+        eq(jobDescriptions.orgId, conv.orgId),
+      ),
+    )
+    .orderBy(desc(jobDescriptions.version))
+    .limit(1);
+  if (!jd?.fullText?.trim()) {
+    await postMessage(conv, {
+      role: "desk",
+      body: jd
+        ? `Version ${jd.version} of the job description has no text yet.`
+        : "There is no job description for this role yet; the JD agent drafts one once the requisition is submitted.",
+    });
+    return;
+  }
+  const status = jd.status.replace("_", " ");
+  await postMessage(conv, {
+    role: "desk",
+    body: `Here is the job description for ${jd.code} — version ${jd.version}, ${status}${jd.templateName ? `, drafted with "${jd.templateName}"` : ""}.`,
+    card: {
+      type: "jd",
+      requisitionId: conv.requisitionId,
+      code: jd.code,
+      version: jd.version,
+      status,
+      templateName: jd.templateName,
+      text: jd.fullText.slice(0, 20_000),
+      why: {
+        understood,
+        missing: [],
+        next: `Showing JD version ${jd.version} as it is saved now.`,
+      },
+    },
+  });
+}
+
+/* ------------------------------------- after the JD: next steps, supply */
+
+const NEXT_AFTER_JD: { agentType: AgentType; text: string }[] = [
+  {
+    agentType: "intake",
+    text: "Scores everyone in the pipeline against the JD, searches your talent pool and posts a ranked list here.",
+  },
+  {
+    agentType: "publishing",
+    text: "Posts the role on the internal job board and on every job board that is connected (the HR head approves external posts); where no board can post, it gives you a ready post and the apply link to share.",
+  },
+  {
+    agentType: "distribution",
+    text: "Advertises the role on the job portals that suit it — job feeds go to the HR head for approval, portals without an integration get ready text and a reminder for a person to post — and chases portals that send no CVs.",
+  },
+  {
+    agentType: "sourcing",
+    text: "Watches how many applicants arrive by channel and, when the role runs dry, tops it up from the talent pool and invites strong past candidates (with your approval).",
+  },
+];
+
+/**
+ * The JD was approved: tell the thread what happens next (which agents work
+ * now, which are switched off — with a switch), and when a later version
+ * replaces one candidates were scored against, offer to re-score them.
+ */
+async function explainAfterJd(conv: Conversation, jdId: string | null): Promise<void> {
+  const orgId = conv.orgId;
+  const requisitionId = conv.requisitionId!;
+  const [jd] = await db
+    .select({ version: jobDescriptions.version })
+    .from(jobDescriptions)
+    .where(
+      and(
+        jdId ? eq(jobDescriptions.id, jdId) : eq(jobDescriptions.requisitionId, requisitionId),
+        eq(jobDescriptions.orgId, orgId),
+      ),
+    )
+    .orderBy(desc(jobDescriptions.version))
+    .limit(1);
+  const version = jd?.version ?? 1;
+  const items = [];
+  for (const n of NEXT_AFTER_JD)
+    items.push({
+      agentType: n.agentType,
+      name: AGENT_TITLE[n.agentType] ?? n.agentType,
+      text: n.text,
+      enabled: await agentOn(orgId, n.agentType),
+    });
+  const off = items.filter((i) => !i.enabled);
+  await postMessage(conv, {
+    role: "desk",
+    body: `The job description (version ${version}) is approved. Here is what happens next${
+      off.length
+        ? ` — ${off
+            .map((o) => o.name)
+            .join(", ")
+            .replace(
+              /, ([^,]*)$/,
+              " and $1",
+            )} ${off.length === 1 ? "is" : "are"} switched off, so ${off.length === 1 ? "that step waits" : "those steps wait"} until you switch ${off.length === 1 ? "it" : "them"} on`
+        : ""
+    }.`,
+    card: { type: "next_steps", items },
+  });
+  if (version <= 1) return;
+  const [s] = (await db.execute(sql`
+    select count(*)::int n from applications a
+    where a.requisition_id = ${requisitionId} and a.org_id = ${orgId}
+      and a.stage in (${sql.join(
+        RESCORABLE.map((x) => sql`${x}`),
+        sql`, `,
+      )})
+      and exists (select 1 from match_scores m where m.application_id = a.id)`)) as unknown as {
+    n: number;
+  }[];
+  if (!s?.n) return;
+  await postMessage(conv, {
+    role: "desk",
+    body: `${plural(s.n, "candidate")} ${s.n === 1 ? "was" : "were"} scored against an earlier version of the JD. Their scores and ranking may no longer fit version ${version}.`,
+    card: { type: "rescore", count: s.n, version },
+  });
+}
+
+/** Stages whose scores still steer decisions (later stages are past scoring). */
+const RESCORABLE = [
+  "sourced",
+  "applied",
+  "ai_screened",
+  "shortlisted",
+  "reserve",
+  "on_hold",
+] as const;
+
+/**
+ * Re-score the role's active candidates against the current JD: their old
+ * scores go (audited with the count), then they are scored again and the
+ * ranked list is re-posted. Stages are not changed — scoring only moves
+ * people who are still "applied".
+ */
+export async function rescoreThread(conv: Conversation, userId: string): Promise<number> {
+  if (!conv.requisitionId) throw new Error("This thread has no role yet.");
+  const before = await scoresOf(conv);
+  const removed = (await db.execute(sql`
+    delete from match_scores m using applications a
+    where m.application_id = a.id and a.requisition_id = ${conv.requisitionId}
+      and a.org_id = ${conv.orgId}
+      and a.stage in (${sql.join(
+        RESCORABLE.map((x) => sql`${x}`),
+        sql`, `,
+      )})
+    returning m.id`)) as unknown as unknown[];
+  await writeAudit({
+    actor: `user:${userId}`,
+    actorUserId: userId,
+    orgId: conv.orgId,
+    action: "desk.candidates_rescored",
+    entityType: "requisition",
+    entityId: conv.requisitionId,
+    detail: { scoresReplaced: removed.length },
+  });
+  let total = 0;
+  for (let i = 0; i < 4; i++) {
+    const n = await scoreAndRank(conv, userId);
+    total += n;
+    if (n < 25) break;
+  }
+  // Earlier messages quote the old scores and flags: say what changed.
+  const changes = scoreChanges(before, await scoresOf(conv));
+  if (changes) await postMessage(conv, { role: "desk", body: changes });
+  return total;
+}
+
+type ScoreSnap = { applicationId: string; name: string; score: number | null; risks: string[] };
+
+async function scoresOf(conv: Conversation): Promise<ScoreSnap[]> {
+  return (await db.execute(sql`
+    select a.id "applicationId", c.full_name name, m.overall_score score,
+      coalesce(m.risk_flags, '{}') risks
+    from applications a
+    join candidates c on c.id = a.candidate_id
+    left join match_scores m on m.application_id = a.id
+    where a.requisition_id = ${conv.requisitionId} and a.org_id = ${conv.orgId}`)) as unknown as ScoreSnap[];
+}
+
+/**
+ * What a re-score changed, for the thread (pure; unit-tested): score moves
+ * and risk flags no longer raised — so earlier messages quoting them read
+ * as out of date. Null when nothing changed.
+ */
+export function scoreChanges(before: ScoreSnap[], after: ScoreSnap[]): string | null {
+  const lines: string[] = [];
+  for (const b of before) {
+    const a = after.find((x) => x.applicationId === b.applicationId);
+    if (!a || b.score == null) continue;
+    const dropped = (b.risks ?? []).filter((f) => !(a.risks ?? []).includes(f));
+    const moved = a.score != null && a.score !== b.score;
+    if (!moved && !dropped.length) continue;
+    lines.push(
+      `- ${b.name}: ${moved ? `${b.score} → ${a.score}` : `still ${b.score}`}${
+        dropped.length ? `; no longer flagged: ${dropped.map((f) => `"${f}"`).join(", ")}` : ""
+      }`,
+    );
+  }
+  if (!lines.length) return null;
+  return `Re-scored against the current job description:\n${lines.join("\n")}\n\nEarlier messages in this thread that quote the old scores or flags are out of date.`;
+}
+
+/**
+ * Switch an agent on from the thread and start what it would have done: the
+ * Publishing agent publishes this role, the Sourcing agent checks its
+ * supply, the others continue the journey. HR head / CBO / owner (checked by
+ * the caller); audited like the Agent settings switch.
+ */
+export async function enableAgentForThread(
+  conv: Conversation,
+  userId: string,
+  agentType: "intake" | "publishing" | "sourcing" | "distribution",
+): Promise<string | null> {
+  const { agentPolicies } = await import("@db/schema");
+  await db
+    .insert(agentPolicies)
+    .values({ orgId: conv.orgId, agentType, enabled: true, updatedBy: userId })
+    .onConflictDoUpdate({
+      target: [agentPolicies.orgId, agentPolicies.agentType],
+      set: { enabled: true, updatedBy: userId, updatedAt: new Date() },
+    });
+  await writeAudit({
+    actor: `user:${userId}`,
+    actorUserId: userId,
+    orgId: conv.orgId,
+    action: "agent.policy.updated",
+    entityType: "agent_policy",
+    entityId: null,
+    detail: { agentType, enabled: true, via: "hiring_desk" },
+  });
+  if (agentType === "publishing") return publishRole(conv, userId);
+  if (agentType === "sourcing") return startSourcing(conv, userId);
+  if (agentType === "distribution") return startDistribution(conv, userId);
+  await resumeThreadsForAgent(conv.orgId, agentType);
+  return null;
+}
+
+/** Ask the Distribution agent to advertise this role across the job portals. */
+export async function startDistribution(
+  conv: Conversation,
+  userId: string,
+): Promise<string | null> {
+  if (!conv.requisitionId) throw new Error("Choose or create the role first.");
+  const [req] = await db
+    .select({ code: requisitions.code, title: requisitions.title, status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (req?.status !== "approved")
+    throw new Error("Only an approved role can be advertised outside the organisation.");
+  return startForThread(
+    conv,
+    "distribution",
+    userId,
+    `${req.code} "${req.title}": advertise it on the job portals that suit it and make sure the CVs they send back reach it.`,
+    conv.requisitionId,
+    "I've asked the Distribution agent to advertise this role on the job portals. Feed listings come to the HR head for approval; for portals without an integration you'll get a reminder with the ready text.",
+  );
+}
+
+/** Ask the Sourcing agent to check this role's supply now. */
+export async function startSourcing(conv: Conversation, userId: string): Promise<string | null> {
+  if (!conv.requisitionId) throw new Error("Choose or create the role first.");
+  const [req] = await db
+    .select({ code: requisitions.code, title: requisitions.title, status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (req?.status !== "approved") throw new Error("Sourcing works on approved roles.");
+  return startForThread(
+    conv,
+    "sourcing",
+    userId,
+    `${req.code} "${req.title}": check its supply of candidates, top it up from the talent pool and past candidates, and recommend what to change.`,
+    conv.requisitionId,
+    "I've asked the Sourcing agent to check this role's supply and find more candidates.",
+  );
+}
+
+const SOURCE_LABEL: Record<string, string> = {
+  careers_inbox: "careers inbox",
+  careers_site: "the apply page",
+  linkedin_post: "a LinkedIn post",
+  role_invite: "an invitation to apply",
+  direct: "the apply page",
+  ijp: "internal job board",
+  talent_pool: "talent pool upload",
+  pool_match: "talent pool match (a new CV that fits this role)",
+  linkedin: "LinkedIn",
+  naukri: "Naukri",
+  indeed: "Indeed",
+};
+
+/**
+ * New applicants (any channel; not the ones agents added themselves) are
+ * announced in their role's thread, once — the cut-off is the thread's last
+ * announcement. Runs from the scheduler's sweep.
+ */
+export async function announceNewApplicants(orgId?: string): Promise<number> {
+  const threads = await db
+    .select()
+    .from(hiringConversations)
+    .where(
+      and(
+        orgId ? eq(hiringConversations.orgId, orgId) : undefined,
+        eq(hiringConversations.status, "active"),
+        // Hiring threads only — org-desk threads (kind = 'org_profile') never carry a requisition.
+        eq(hiringConversations.kind, "hiring"),
+        sql`${hiringConversations.requisitionId} is not null`,
+        sql`${hiringConversations.updatedAt} >= now() - interval '60 days'`,
+        isNull(hiringConversations.deletedAt),
+      ),
+    )
+    .limit(200);
+  let posted = 0;
+  for (const conv of threads) {
+    const rows = (await db.execute(sql`
+      select c.full_name name, a.source
+      from applications a join candidates c on c.id = a.candidate_id
+      where a.requisition_id = ${conv.requisitionId} and a.org_id = ${conv.orgId}
+        and a.source not like 'agent%'
+        -- Uploaded through this desk: the thread already confirmed them.
+        and a.source <> 'hiring_desk'
+        -- Already in a ranked list posted here: announcing them again reads as news.
+        and not exists (
+          select 1 from hiring_messages m, jsonb_array_elements(m.card -> 'items') it
+          where m.conversation_id = ${conv.id} and m.card ->> 'type' = 'ranked_candidates'
+            and it ->> 'applicationId' = a.id::text)
+        and a.applied_at > greatest(
+          ${conv.createdAt.toISOString()}::timestamptz,
+          coalesce((
+            select max(m.created_at) from hiring_messages m
+            where m.conversation_id = ${conv.id} and m.card ->> 'type' = 'applicants'
+          ), '-infinity'::timestamptz)
+        )
+      order by a.applied_at
+      limit 50`)) as unknown as { name: string; source: string }[];
+    if (!rows.length) continue;
+    const bySource = new Map<string, number>();
+    for (const r of rows) {
+      const k = SOURCE_LABEL[r.source] ?? channelSourceLabel(r.source);
+      bySource.set(k, (bySource.get(k) ?? 0) + 1);
+    }
+    const via = [...bySource].map(([k, n]) => `${n} via ${k}`).join(", ");
+    const names = rows.slice(0, 5).map((r) => r.name);
+    await postMessage(conv, {
+      role: "desk",
+      body: `${plural(rows.length, "new applicant")}: ${via} — ${names.join(", ")}${rows.length > 5 ? ` and ${rows.length - 5} more` : ""}. The Intake & matching agent scores new applicants within minutes when it is on.`,
+      card: { type: "applicants", count: rows.length, bySource: Object.fromEntries(bySource) },
+    });
+    posted++;
+  }
+  return posted;
+}
+
+/** The candidate's AI screening call that has not happened yet, if any. */
+async function openCallFor(orgId: string, applicationId: string) {
+  const { screeningCalls } = await import("@db/schema");
+  const { OPEN_CALL } = await import("../voice/request.server");
+  const [c] = await db
+    .select({ id: screeningCalls.id, status: screeningCalls.status, dueAt: screeningCalls.dueAt })
+    .from(screeningCalls)
+    .where(
+      and(
+        eq(screeningCalls.orgId, orgId),
+        eq(screeningCalls.applicationId, applicationId),
+        eq(screeningCalls.purpose, "screening"),
+        inArray(screeningCalls.status, [...OPEN_CALL]),
+      ),
+    )
+    .orderBy(desc(screeningCalls.createdAt))
+    .limit(1);
+  return c ?? null;
+}
+
+/** FACTS: this role's arranged AI screening calls, and when they ring. */
+async function arrangedCallsFact(conv: Conversation): Promise<string> {
+  if (!conv.requisitionId) return "";
+  const { screeningCalls } = await import("@db/schema");
+  const { OPEN_CALL } = await import("../voice/request.server");
+  const rows = await db
+    .select({
+      name: candidates.fullName,
+      status: screeningCalls.status,
+      dueAt: screeningCalls.dueAt,
+    })
+    .from(screeningCalls)
+    .innerJoin(candidates, eq(candidates.id, screeningCalls.candidateId))
+    .where(
+      and(
+        eq(screeningCalls.orgId, conv.orgId),
+        eq(screeningCalls.requisitionId, conv.requisitionId),
+        eq(screeningCalls.purpose, "screening"),
+        inArray(screeningCalls.status, [...OPEN_CALL]),
+      ),
+    )
+    .limit(10);
+  if (!rows.length) return "Arranged AI screening calls: none.";
+  const tz = await orgTimeZone(conv.orgId);
+  return `Arranged AI screening calls: ${rows
+    .map(
+      (r) =>
+        `${r.name} — ${r.status.replace(/_/g, " ")}${r.dueAt ? `, rings ${localWhen(r.dueAt, tz)}` : ""}`,
+    )
+    .join("; ")}.`;
+}
+
+/**
+ * An arranged AI screening call, from the chat: when it rings, move it (inside
+ * the calling hours — "now" outside them is the next opening, said plainly), or
+ * cancel it. Same roles as "Call now"; every change audited. Moving a call that
+ * repeats a completed screen re-checks the reason it was arranged on against the
+ * last call's record first, and cancels it when the record does not support it —
+ * the hiring desk's judgement stands. (A real thread on 10 November could only
+ * answer "A screening call is already arranged" to "call now".)
+ */
+export async function manageCallFromDesk(
+  conv: Conversation,
+  userId: string,
+  cmd: {
+    action: "when" | "move" | "cancel";
+    name?: string | undefined;
+    ranks?: number[] | undefined;
+    when?: string | undefined;
+    reason?: string | undefined;
+  },
+): Promise<void> {
+  const say = (body: string) => postMessage(conv, { role: "desk", body });
+  if (!conv.requisitionId) {
+    await say("Choose or create the role first.");
+    return;
+  }
+  const { assertRole } = await import("@/lib/auth.middleware");
+  try {
+    await assertRole(userId, conv.orgId, ["recruiter", "hr_head", "president_cbo"]);
+  } catch {
+    await say("Only TA, the HR head or the CBO can change a screening call.");
+    return;
+  }
+  const app = await pickCandidate(conv, cmd, say, { lastCalled: true });
+  if (!app) return;
+  const call = await openCallFor(conv.orgId, app.id);
+  const tz = await orgTimeZone(conv.orgId);
+  if (!call) {
+    await say(
+      `No screening call is arranged for ${app.name}. Say "call ${app.name} again" to arrange one.`,
+    );
+    return;
+  }
+  const { screeningCalls } = await import("@db/schema");
+  const audit = (action: string, detail: Record<string, unknown>) =>
+    writeAudit({
+      actor: `user:${userId}`,
+      actorUserId: userId,
+      orgId: conv.orgId,
+      action,
+      entityType: "screening_call",
+      entityId: call.id,
+      detail: { via: "hiring_desk", conversation_id: conv.id, ...detail },
+    });
+  const cancel = async (why: string) => {
+    await db
+      .update(screeningCalls)
+      .set({ status: "cancelled", dueAt: null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(screeningCalls.id, call.id),
+          eq(screeningCalls.orgId, conv.orgId),
+          inArray(screeningCalls.status, [
+            "requested",
+            "approved",
+            "callback",
+            "no_answer",
+            "failed",
+          ]),
+        ),
+      );
+    await audit("screening_call.cancelled", { reason: why.slice(0, 500) });
+  };
+  if (call.status === "dialling" || call.status === "in_progress") {
+    await say(`The call with ${app.name} is happening right now.`);
+    return;
+  }
+  if (cmd.action === "when") {
+    await say(
+      call.dueAt
+        ? `The screening call with ${app.name} rings ${localWhen(call.dueAt, tz)}.`
+        : `A screening call with ${app.name} is arranged (${call.status.replace(/_/g, " ")}).`,
+    );
+    return;
+  }
+  if (cmd.action === "cancel") {
+    await cancel(cmd.reason ?? "cancelled from the hiring desk");
+    await say(`Cancelled the screening call with ${app.name}.`);
+    return;
+  }
+  // Move. A repeat of a completed screen is re-checked on its record first.
+  const { auditLog } = await import("@db/schema");
+  const [asked] = await db
+    .select({ detail: auditLog.detail })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.orgId, conv.orgId),
+        eq(auditLog.action, "screening_call.requested"),
+        eq(auditLog.entityId, call.id),
+      ),
+    )
+    .orderBy(desc(auditLog.createdAt))
+    .limit(1);
+  const d = (asked?.detail ?? {}) as { again?: boolean; reason?: string };
+  if (d.again) {
+    const verdict = await judgeGoingBack(conv.orgId, {
+      step: `repeat the AI phone screening call with ${app.name}, who has already completed one`,
+      reason: d.reason ?? "(no reason was recorded)",
+      evidence: await callEvidence(conv.orgId, app.id).catch(() => ""),
+    });
+    if (!verdict?.valid) {
+      const why = verdict?.why ?? "the reason could not be checked";
+      await cancel(`re-checked before moving: ${why}`);
+      await audit("desk.go_back_refused", {
+        step: "screening_call_again",
+        reason: (d.reason ?? "").slice(0, 500),
+        why,
+      });
+      await say(
+        `This call repeats ${app.name}'s completed screen, and it was arranged on "${d.reason ?? "no reason"}". The last call's record does not support that: ${why} So I have cancelled it. If there is a real problem with the last call or new information, tell me what it is and I'll arrange a call.`,
+      );
+      return;
+    }
+  }
+  const { phoneScreeningPolicyOf } = await import("../voice/settings.server");
+  const { callbackAt, inWindow, nextWindowStart } = await import("../voice/schedule");
+  const { callingHours } = await import("../voice/call-brief.server");
+  const policy = await phoneScreeningPolicyOf(conv.orgId);
+  const now = Date.now();
+  const asap = !cmd.when || /^now$/i.test(cmd.when);
+  const dueAt = asap ? nextWindowStart(now, policy, tz) : callbackAt(cmd.when, now, policy, tz);
+  await db
+    .update(screeningCalls)
+    .set({ dueAt, updatedAt: new Date() })
+    .where(and(eq(screeningCalls.id, call.id), eq(screeningCalls.orgId, conv.orgId)));
+  await audit("screening_call.moved", {
+    from: call.dueAt?.toISOString() ?? null,
+    to: dueAt.toISOString(),
+    asked: cmd.when ?? "now",
+    reason: (cmd.reason ?? "").slice(0, 500),
+  });
+  const soon = dueAt.getTime() - now < 2 * 60_000;
+  const outside = asap && !inWindow(now, policy, tz);
+  await say(
+    soon
+      ? `Moved the screening call with ${app.name} to now — it rings in a minute or two.`
+      : `${outside ? `It's outside your calling hours (${callingHours(policy)}), so the earliest is ` : `Moved the screening call with ${app.name} to `}${localWhen(dueAt, tz)}.${outside ? ` The call with ${app.name} now rings then.` : ""}`,
+  );
+}
+
+/**
+ * The candidate a desk command is about, in this role: named or ranked, else (when
+ * asked) the one the role's latest screening call was with. Says why when none or
+ * several match, and returns null.
+ */
+async function pickCandidate(
+  conv: Conversation,
+  cmd: { name?: string | undefined; ranks?: number[] | undefined },
+  say: (body: string) => Promise<unknown>,
+  opts: { lastCalled?: boolean } = {},
+): Promise<{ id: string; name: string } | null> {
+  if (!conv.requisitionId) return null;
+  const inRole = and(
+    eq(applications.orgId, conv.orgId),
+    eq(applications.requisitionId, conv.requisitionId),
+  );
+  let picked: { id: string; name: string }[] = [];
+  if (cmd.ranks?.length) {
+    const [id] = await resolveRanks(conv, { ranks: cmd.ranks });
+    if (id)
+      picked = await db
+        .select({ id: applications.id, name: candidates.fullName })
+        .from(applications)
+        .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+        .where(and(inRole, eq(applications.id, id)))
+        .limit(1);
+  } else if (cmd.name?.trim()) {
+    const words = cmd.name
+      .trim()
+      .split(/\s+/)
+      .filter((w) => w.length > 1);
+    picked = await db
+      .select({ id: applications.id, name: candidates.fullName })
+      .from(applications)
+      .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+      .where(and(inRole, ...words.map((w) => ilike(candidates.fullName, `%${w}%`))))
+      .limit(5);
+  } else if (opts.lastCalled) {
+    const { screeningCalls } = await import("@db/schema");
+    picked = await db
+      .select({ id: applications.id, name: candidates.fullName })
+      .from(screeningCalls)
+      .innerJoin(applications, eq(applications.id, screeningCalls.applicationId))
+      .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+      .where(
+        and(inRole, eq(screeningCalls.orgId, conv.orgId), eq(screeningCalls.purpose, "screening")),
+      )
+      .orderBy(desc(screeningCalls.createdAt))
+      .limit(1);
+  }
+  if (!picked.length) {
+    await say(
+      cmd.name
+        ? `I couldn't find "${cmd.name}" in this role's pipeline. Which candidate do you mean?`
+        : opts.lastCalled
+          ? "Who should I call? Name the candidate, or say their rank."
+          : "Which candidate? Name them, or say their rank.",
+    );
+    return null;
+  }
+  if (picked.length > 1) {
+    await say(
+      `More than one candidate matches: ${picked.map((p) => p.name).join(", ")}. Which one?`,
+    );
+    return null;
+  }
+  return picked[0]!;
+}
+
+/**
+ * "Call again" in the chat: arrange an AI phone screening call — the same core
+ * and role check as the "Call now" button (requestScreeningCall, audited
+ * screening_call.requested). The candidate: the one they named or ranked, else
+ * the one this role's latest screening call was with. A real thread on
+ * 10 November sent "call again" to a waiting job-feed listing as a change.
+ */
+export async function callCandidateFromDesk(
+  conv: Conversation,
+  userId: string,
+  cmd: {
+    name?: string | undefined;
+    ranks?: number[] | undefined;
+    reason?: string | undefined;
+  },
+): Promise<void> {
+  const say = (body: string) => postMessage(conv, { role: "desk", body });
+  if (!conv.requisitionId) {
+    await say("Choose or create the role first, then I can arrange a screening call.");
+    return;
+  }
+  const { assertRole } = await import("@/lib/auth.middleware");
+  try {
+    await assertRole(userId, conv.orgId, ["recruiter", "hr_head", "president_cbo"]);
+  } catch {
+    await say("Only TA, the HR head or the CBO can arrange a screening call.");
+    return;
+  }
+  const app = await pickCandidate(conv, cmd, say, { lastCalled: true });
+  if (!app) return;
+  // Already arranged: "call now" moves that call — never a dead end.
+  if (await openCallFor(conv.orgId, app.id)) {
+    await manageCallFromDesk(conv, userId, {
+      action: "move",
+      name: app.name,
+      when: "now",
+      reason: cmd.reason,
+    });
+    return;
+  }
+  // Going back a step — a completed screen done again — needs a reason, judged here.
+  const { screeningCalls } = await import("@db/schema");
+  const [last] = await db
+    .select({ status: screeningCalls.status })
+    .from(screeningCalls)
+    .where(
+      and(
+        eq(screeningCalls.orgId, conv.orgId),
+        eq(screeningCalls.applicationId, app.id),
+        eq(screeningCalls.purpose, "screening"),
+      ),
+    )
+    .orderBy(desc(screeningCalls.createdAt))
+    .limit(1);
+  const goingBack = last?.status === "completed";
+  let accepted: { reason: string; why: string } | null = null;
+  if (goingBack) {
+    accepted = await reasonGate(conv, userId, {
+      stepKey: "screening_call_again",
+      step: `repeat the AI phone screening call with ${app.name}, who has already completed one`,
+      entity: { type: "application", id: app.id },
+      reason: cmd.reason,
+      ask: `${app.name} has already had a screening call. Repeating a completed step needs a reason — why should ${app.name} be called again? (For example: the call dropped, an answer was misheard, or there is new information.)`,
+      refuse: `I won't repeat ${app.name}'s screening call for that reason:`,
+      evidence: () => callEvidence(conv.orgId, app.id),
+    });
+    if (!accepted) return;
+  }
+  const { requestScreeningCall } = await import("../voice/request.server");
+  try {
+    const r = await requestScreeningCall({
+      orgId: conv.orgId,
+      applicationId: app.id,
+      requestedBy: userId,
+      requestedRunId: null,
+      actor: `user:${userId}`,
+      // A completed screen is done again only for a reason judged valid above.
+      again: goingBack,
+      ...(accepted ? { reason: accepted.reason } : {}),
+    });
+    const tz = await orgTimeZone(conv.orgId);
+    const soon = r.dueAt.getTime() - Date.now() < 2 * 60_000;
+    const because = accepted ? ` Reason accepted: ${accepted.why}` : "";
+    await postMessage(conv, {
+      role: "desk",
+      body: soon
+        ? `Arranged an AI screening call with ${app.name} — it rings in a minute or two.${because}`
+        : `Arranged an AI screening call with ${app.name} — it rings ${localWhen(r.dueAt, tz)}, the next time inside your calling hours.${because}`,
+      card: {
+        type: "reasoning",
+        understood: [{ label: "Call", value: app.name }],
+        missing: [],
+        next: "The call's result and its Voice Guard review come back here and under Agents → Call reviews.",
+      },
+    });
+  } catch (e) {
+    await say(
+      `I couldn't arrange the call: ${e instanceof Error ? e.message : "it could not be arranged."}`,
+    );
+  }
+}
+
+/**
+ * The organisation's rule for going back a step: a stated reason, judged by the
+ * desk (judgeGoingBack), before anything is redone. Asks when there is none;
+ * audits every verdict (desk.go_back_allowed / desk.go_back_refused) with the
+ * reason; says why when refused. Returns the accepted reason, or null (already said).
+ */
+async function reasonGate(
+  conv: Conversation,
+  userId: string,
+  g: {
+    stepKey: string;
+    /** What would be redone, for the judge ("re-score this role's candidates"). */
+    step: string;
+    entity: { type: string; id: string };
+    reason: string | undefined;
+    /** Said when no reason was given. */
+    ask: string;
+    /** Opens the refusal; the judge's why follows. */
+    refuse: string;
+    /** The system's record of the step, weighed against the reason. */
+    evidence: () => Promise<string>;
+  },
+): Promise<{ reason: string; why: string } | null> {
+  const say = (body: string) => postMessage(conv, { role: "desk", body });
+  const reason = g.reason?.trim();
+  if (!reason) {
+    await say(g.ask);
+    return null;
+  }
+  const evidence = await g.evidence().catch(() => "");
+  const verdict = await judgeGoingBack(conv.orgId, { step: g.step, reason, evidence });
+  await writeAudit({
+    actor: `user:${userId}`,
+    actorUserId: userId,
+    orgId: conv.orgId,
+    action: verdict?.valid ? "desk.go_back_allowed" : "desk.go_back_refused",
+    entityType: g.entity.type,
+    entityId: g.entity.id,
+    detail: {
+      conversation_id: conv.id,
+      step: g.stepKey,
+      reason: reason.slice(0, 500),
+      why: verdict?.why ?? "the reason could not be checked",
+    },
+  });
+  if (!verdict) {
+    await say("I couldn't check that reason just now, so nothing was changed. Please try again.");
+    return null;
+  }
+  if (!verdict.valid) {
+    await say(
+      `${g.refuse} ${verdict.why} If there is a concrete problem or new information, tell me what it is.`,
+    );
+    return null;
+  }
+  return { reason, why: verdict.why };
+}
+
+/**
+ * The record of a candidate's latest screening call, for judging "call again"
+ * (no words of theirs, no pay): outcome, length, line audio, the required details'
+ * status, answers kept and the Voice Guard's review.
+ */
+export async function callEvidence(orgId: string, applicationId: string): Promise<string> {
+  const { screeningCalls, callReviews } = await import("@db/schema");
+  const [c] = await db
+    .select()
+    .from(screeningCalls)
+    .where(
+      and(
+        eq(screeningCalls.orgId, orgId),
+        eq(screeningCalls.applicationId, applicationId),
+        eq(screeningCalls.purpose, "screening"),
+        // The last call that was answered — not one only arranged.
+        isNotNull(screeningCalls.startedAt),
+      ),
+    )
+    .orderBy(desc(screeningCalls.startedAt))
+    .limit(1);
+  if (!c) return "No answered screening call on record.";
+  const [r] = await db
+    .select()
+    .from(callReviews)
+    .where(and(eq(callReviews.orgId, orgId), eq(callReviews.callId, c.id)))
+    .limit(1);
+  const st = c.callStats;
+  return [
+    `Last screening call: ${c.status}, ended ${c.endReason ?? "unknown"}, ${c.durationS ?? 0} s, consent ${c.consentAt ? "given" : "not given"}.`,
+    st?.audio
+      ? `Line audio: ${st.audio.gaps} gaps in ${st.audio.frames} frames (speech running out mid-sentence), worst delay ${st.audio.maxLateMs} ms.`
+      : "Line audio: not measured.",
+    st
+      ? `Turn-taking: ${st.slowReplies} slow replies, ${st.talkOver} talk-over, ${st.bargeIns} interruptions.`
+      : "",
+    `Required details: ${
+      Object.entries(c.details?.required ?? {})
+        .map(([k, v]) => `${k.replace(/_/g, " ")} ${v}`)
+        .join(", ") || "none recorded"
+    }. Screening answers kept: ${c.answers.length}.`,
+    r
+      ? `Voice Guard review: ${r.verdict ?? r.status}, quality ${r.qualityScore ?? "-"} of 5; findings: ${
+          r.findings.map((f) => `[${f.severity}] ${f.summary}`).join(" ") || "none"
+        }`
+      : "Voice Guard review: none yet.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** A candidate's stage history, for judging a move back. */
+export async function stageEvidence(orgId: string, applicationId: string): Promise<string> {
+  const { stageEvents } = await import("@db/schema");
+  const ev = await db
+    .select({
+      from: stageEvents.fromStage,
+      to: stageEvents.toStage,
+      reason: stageEvents.reason,
+      at: stageEvents.createdAt,
+    })
+    .from(stageEvents)
+    .where(and(eq(stageEvents.orgId, orgId), eq(stageEvents.applicationId, applicationId)))
+    .orderBy(desc(stageEvents.createdAt))
+    .limit(6);
+  if (!ev.length) return "No stage changes on record.";
+  return `Stage history (newest first): ${ev
+    .map(
+      (e) =>
+        `${e.from ?? "new"} → ${e.to} on ${e.at.toISOString().slice(0, 10)}${e.reason ? ` (reason: ${e.reason.slice(0, 120)})` : ""}`,
+    )
+    .join("; ")}.`;
+}
+
+/** When the role's scores were made against which job description, for judging a re-score. */
+export async function scoreEvidence(orgId: string, requisitionId: string): Promise<string> {
+  const [sc] = (await db.execute(sql`
+    select count(*)::int n, max(m.computed_at) last
+    from match_scores m join applications a on a.id = m.application_id
+    where a.org_id = ${orgId} and a.requisition_id = ${requisitionId}`)) as unknown as {
+    n: number;
+    last: string | null;
+  }[];
+  const jds = await db
+    .select({
+      version: jobDescriptions.version,
+      status: jobDescriptions.status,
+      at: jobDescriptions.createdAt,
+    })
+    .from(jobDescriptions)
+    .where(and(eq(jobDescriptions.orgId, orgId), eq(jobDescriptions.requisitionId, requisitionId)))
+    .orderBy(desc(jobDescriptions.createdAt))
+    .limit(3);
+  return [
+    `Scores: ${sc?.n ?? 0} candidates scored, last at ${sc?.last ? new Date(sc.last).toISOString().slice(0, 16) : "never"}.`,
+    `Job descriptions (newest first): ${
+      jds
+        .map((j) => `v${j.version} ${j.status}, made ${j.at.toISOString().slice(0, 16)}`)
+        .join("; ") || "none"
+    }.`,
+  ].join("\n");
+}
+
+/** Stages a candidate may be sent back to from the desk (offer stages are HR's, not here). */
+const BACK_STAGES = [
+  "sourced",
+  "applied",
+  "ai_screened",
+  "shortlisted",
+  "l1",
+  "l2",
+  "l3",
+  "reserve",
+] as const;
+
+/**
+ * Going back a step on the desk (the organisation's rule: only for a reason the
+ * desk judges valid): re-score the role's candidates (rescoreThread), or move a
+ * candidate back a stage — including out of rejected or withdrawn — through
+ * moveStageCore (its transition rules, role checks and stage events; a move the
+ * flow allows only from on hold goes through on hold, both recorded).
+ */
+export async function goBackFromDesk(
+  conv: Conversation,
+  userId: string,
+  cmd: {
+    step: "rescore" | "move_candidate";
+    name?: string | undefined;
+    ranks?: number[] | undefined;
+    toStage?: (typeof BACK_STAGES)[number] | undefined;
+    reason?: string | undefined;
+  },
+): Promise<void> {
+  const say = (body: string) => postMessage(conv, { role: "desk", body });
+  if (!conv.requisitionId) {
+    await say("Choose or create the role first.");
+    return;
+  }
+  if (cmd.step === "rescore") {
+    const accepted = await reasonGate(conv, userId, {
+      stepKey: "rescore",
+      step: "re-score all of this role's active candidates against its job description, replacing their current scores",
+      entity: { type: "requisition", id: conv.requisitionId },
+      reason: cmd.reason,
+      ask: "Re-scoring replaces every candidate's current score, so it needs a reason — why should they be scored again? (For example: the job description changed, or the scores used the wrong requirements.)",
+      refuse: "I won't re-score the candidates for that reason:",
+      evidence: () => scoreEvidence(conv.orgId, conv.requisitionId!),
+    });
+    if (!accepted) return;
+    try {
+      const n = await rescoreThread(conv, userId);
+      await say(
+        `Re-scoring ${n} candidate${n === 1 ? "" : "s"} against the current job description. Reason accepted: ${accepted.why}`,
+      );
+    } catch (e) {
+      await say(`I couldn't re-score: ${e instanceof Error ? e.message : "it failed."}`);
+    }
+    return;
+  }
+  const app = await pickCandidate(conv, cmd, say);
+  if (!app) return;
+  const [row] = await db
+    .select({ stage: applications.stage })
+    .from(applications)
+    .where(and(eq(applications.id, app.id), eq(applications.orgId, conv.orgId)))
+    .limit(1);
+  const { FLOW, STAGE_LABEL, canMove, canonical } = await import("@/lib/lifecycle");
+  const from = canonical(row!.stage as Stage);
+  const to = cmd.toStage;
+  if (!to) {
+    await say(`Which stage should ${app.name} go back to? They are at ${STAGE_LABEL[from]} now.`);
+    return;
+  }
+  const closed = !FLOW.includes(from) && !["on_hold", "reserve"].includes(from);
+  const back = closed || (FLOW.includes(to) && FLOW.indexOf(to) < FLOW.indexOf(from));
+  if (!back) {
+    await say(
+      `${STAGE_LABEL[from]} → ${STAGE_LABEL[to]} is not going back a step. Move ${app.name} forward from the pipeline as usual.`,
+    );
+    return;
+  }
+  const accepted = await reasonGate(conv, userId, {
+    stepKey: "move_back",
+    step: `move ${app.name} back from ${STAGE_LABEL[from]} to ${STAGE_LABEL[to]}${closed ? " (undoing a closed outcome)" : ""}`,
+    entity: { type: "application", id: app.id },
+    reason: cmd.reason,
+    ask: `Moving ${app.name} back from ${STAGE_LABEL[from]} to ${STAGE_LABEL[to]} needs a reason — why? (For example: they were rejected by mistake, or new information about them.)`,
+    refuse: `I won't move ${app.name} back for that reason:`,
+    evidence: () => stageEvidence(conv.orgId, app.id),
+  });
+  if (!accepted) return;
+  const { activeOrgOf } = await import("@/lib/auth.middleware");
+  const org = await activeOrgOf(userId);
+  if (!org || org.orgId !== conv.orgId) {
+    await say("You are not a member of this organisation any more.");
+    return;
+  }
+  const actor = { orgId: conv.orgId, userId, memberEmail: org.memberEmail };
+  const { moveStageCore } = await import("@/lib/pipeline.server");
+  const why = `Back a step: ${accepted.reason}`.slice(0, 500);
+  try {
+    let via = "";
+    if (canMove(from, to)) {
+      await moveStageCore(actor, { applicationId: app.id, toStage: to, reason: why });
+    } else if (canMove(from, "on_hold") && canMove("on_hold", to)) {
+      await moveStageCore(actor, { applicationId: app.id, toStage: "on_hold", reason: why });
+      await moveStageCore(actor, { applicationId: app.id, toStage: to, reason: why });
+      via = " (through On hold, as the flow requires)";
+    } else {
+      await say(
+        `${STAGE_LABEL[from]} → ${STAGE_LABEL[to]} is not an allowed move. A closed candidate can go back to the reserve pool, Sourced or Shortlisted.`,
+      );
+      return;
+    }
+    await say(
+      `Moved ${app.name} back from ${STAGE_LABEL[from]} to ${STAGE_LABEL[to]}${via}. Reason accepted: ${accepted.why}`,
+    );
+  } catch (e) {
+    await say(`I couldn't move ${app.name}: ${e instanceof Error ? e.message : "it failed."}`);
+  }
+}
+
+/** The desk's judgement of a reason to go back a step (model JSON, zod-checked). */
+const GoingBackVerdict = z.object({
+  valid: z.boolean(),
+  /** One plain sentence, said to the person. */
+  why: z.string().trim().min(1).max(300),
+});
+
+/**
+ * Is there a real reason to go back a step in hiring? The organisation's rule
+ * (10 November): a completed step is repeated only for a strong reason, which
+ * the hiring desk asks for and judges. Valid: something went wrong with the
+ * step (a dropped or cut-off call, answers misheard or wrongly recorded, a
+ * technical fault), new information that changes it, or the candidate's own
+ * request with a reason. Not valid: no reason, the request said again, or only
+ * wanting a different result (a low score) — repeating a step to change its
+ * outcome is unfair to the other candidates. Null when it could not be checked.
+ */
+export async function judgeGoingBack(
+  orgId: string,
+  input: { step: string; reason: string; evidence?: string },
+): Promise<z.infer<typeof GoingBackVerdict> | null> {
+  const res = await aiJson({
+    system: [
+      'You check whether a recruiter\'s reason to go back a step in hiring is a real reason. Reply with JSON {"valid": boolean, "why": "one plain sentence to the recruiter"}.',
+      "Valid: something went wrong with the step (the call dropped or was cut off, answers were misheard or recorded wrongly, a technical fault, the candidate could not hear), new information that changes the step, or the candidate's own request with a reason.",
+      'Not valid: no reason; the request repeated ("call again", "just do it"); only wanting a different result ("the score is low", "I think they can do better") — repeating a step to change its outcome is unfair to the other candidates.',
+      "EVIDENCE is the system's own record of the step. A reason that states a fact about it (the call dropped or was cut off, the audio was unclear, answers were misheard or recorded wrongly, the scores used the wrong requirements, they were rejected by mistake) is valid only when EVIDENCE supports it; when EVIDENCE contradicts it or shows nothing of it, it is not valid — say which figures show otherwise. New information or the candidate's own request cannot be seen in the record: valid only when the reason says specifically what it is.",
+      "Judge only the reason and the evidence; never invent facts. Be brief and neutral; never mention the candidate's protected characteristics.",
+      INJECTION_RULES,
+    ].join("\n"),
+    prompt: [
+      `STEP TO REPEAT: ${input.step}`,
+      `REASON GIVEN: ${untrusted("recruiter_reason", input.reason)}`,
+      `EVIDENCE: ${untrusted("system_record", input.evidence?.trim() || "none on record")}`,
+    ].join("\n"),
+    orgId,
+    feature: "hiring_desk",
+    schema: GoingBackVerdict,
+  });
+  return res.ok ? res.data : null;
+}
+
+async function orgTimeZone(orgId: string): Promise<string> {
+  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  return (await getOrgEmailSettings(orgId)).timezone;
+}
+
+/** Applicants in a role's pipeline (any stage but closed ones). */
+async function pipelineSize(orgId: string, requisitionId: string): Promise<number> {
+  const [r] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(applications)
+    .where(
+      and(
+        eq(applications.orgId, orgId),
+        eq(applications.requisitionId, requisitionId),
+        sql`${applications.stage} not in ('rejected','withdrawn')`,
+      ),
+    );
+  return Number(r?.n ?? 0);
+}
+
+/**
+ * A budget that lasts the month: this month's spend projected to its end
+ * (pace so far, at least two days of it), plus 25% headroom — never less than
+ * double the old limit — rounded up to 50k. Doubling alone ran out again the
+ * same day in a live test.
+ */
+export function suggestBudget(used: number, limit: number, now: Date): number {
+  const day = now.getUTCDate();
+  const daysInMonth = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  const projected = (used / Math.max(day, 2)) * daysInMonth * 1.25;
+  return Math.ceil(Math.max(limit * 2, used * 2, projected) / 50_000) * 50_000;
+}
+
+/* ------------------------------------------------------------ deleting a chat */
+
+/** How long a deleted chat can be restored before the sweep purges it. */
+export const RESTORE_DAYS = 30;
+
+export type ThreadDeletion =
+  { kind: "chat" } | { kind: "draft"; requisitionId: string; code: string } | null;
+
+/**
+ * What the dustbin would delete (pure on its inputs; unit-tested): a chat
+ * still gathering details (no requisition), or a chat with an unused draft
+ * requisition. Anything in approval or later is rejected / closed instead,
+ * so its trail stays.
+ */
+export function deletionFor(
+  conv: { requisitionId: string | null },
+  req: { id: string; code: string; status: string; applications: number } | null,
+): ThreadDeletion {
+  if (!conv.requisitionId) return { kind: "chat" };
+  if (req && req.status === "draft" && req.applications === 0)
+    return { kind: "draft", requisitionId: req.id, code: req.code };
+  return null;
+}
+
+async function threadRequisition(conv: Conversation) {
+  if (!conv.requisitionId) return null;
+  const [req] = await db
+    .select({ id: requisitions.id, code: requisitions.code, status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
+    .limit(1);
+  if (!req) return null;
+  const [a] = (await db.execute(sql`
+    select count(*)::int n from applications
+    where requisition_id = ${req.id} and org_id = ${conv.orgId}`)) as unknown as { n: number }[];
+  return { ...req, applications: a?.n ?? 0 };
+}
+
+/**
+ * Whether this person may delete this chat now, and what it would delete.
+ * A chat only: its starter, or the HR head / CBO / owner. With a draft
+ * requisition: HR head / CBO / owner (the Requisitions page's rule).
+ */
+export async function deletionAllowed(conv: Conversation, userId: string): Promise<ThreadDeletion> {
+  const what = deletionFor(conv, await threadRequisition(conv));
+  if (!what) return null;
+  const { assertRole } = await import("@/lib/auth.middleware");
+  const leader = await assertRole(userId, conv.orgId, ["hr_head", "president_cbo"]).then(
+    () => true,
+    () => false,
+  );
+  if (what.kind === "chat") return leader || conv.createdBy === userId ? what : null;
+  return leader ? what : null;
+}
+
+/** Delete a chat (and its unused draft): hidden now, restorable for 30 days; audited. */
+export async function deleteThread(
+  conv: Conversation,
+  userId: string,
+  reason: string,
+  now = new Date(),
+): Promise<{ kind: "chat" | "draft"; code: string | null; restoreUntil: string }> {
+  const { activeOrgOf } = await import("@/lib/auth.middleware");
+  const org = await activeOrgOf(userId);
+  if (!org || org.orgId !== conv.orgId)
+    throw new Error("You are not a member of this organisation.");
+  const what = await deletionAllowed(conv, userId);
+  if (!what) {
+    const req = await threadRequisition(conv);
+    throw new Error(
+      req && req.status !== "draft"
+        ? `${req.code} is ${STATUS_WORDS[req.status] ?? req.status}, so this chat cannot be deleted — reject or close the role instead; the chat then stays as its record.`
+        : req && req.applications > 0
+          ? `${req.code} already has applications, so this chat cannot be deleted.`
+          : "Only the person who started this chat, the HR head, the CBO or an owner can delete it.",
+    );
+  }
+  const why = reason.replace(/\s+/g, " ").trim().slice(0, 500);
+  if (what.kind === "draft" && why.length < 3)
+    throw new Error("Say why — the draft requisition is deleted with the chat.");
+  // Nothing keeps working for a deleted chat.
+  const active = await db
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, conv.orgId),
+        eq(agentRuns.conversationId, conv.id),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+      ),
+    );
+  const { cancelRun } = await import("../agents/runtime.server");
+  for (const r of active) await cancelRun({ orgId: conv.orgId, runId: r.id, userId });
+  const hidden = await db
+    .update(hiringConversations)
+    .set({ deletedAt: now, deletedBy: userId, deleteReason: why || null, updatedAt: now })
+    .where(and(eq(hiringConversations.id, conv.id), isNull(hiringConversations.deletedAt)))
+    .returning({ id: hiringConversations.id });
+  if (!hidden.length) throw new Error("This chat was already deleted.");
+  if (what.kind === "draft") {
+    await db
+      .delete(requisitions)
+      .where(
+        and(
+          eq(requisitions.id, what.requisitionId),
+          eq(requisitions.orgId, conv.orgId),
+          eq(requisitions.status, "draft"),
+        ),
+      );
+    await writeAudit({
+      actor: org.memberEmail,
+      actorUserId: userId,
+      orgId: conv.orgId,
+      action: "requisition.delete",
+      entityType: "requisition",
+      entityId: what.requisitionId,
+      detail: { code: what.code, reason: why, via: "hiring_desk", conversation_id: conv.id },
+    });
+    const { afterSubjectsDeleted } = await import("../agents/runtime.server");
+    await afterSubjectsDeleted(conv.orgId);
+  }
+  const [m] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(hiringMessages)
+    .where(eq(hiringMessages.conversationId, conv.id));
+  await writeAudit({
+    actor: org.memberEmail,
+    actorUserId: userId,
+    orgId: conv.orgId,
+    action: "desk.thread_deleted",
+    entityType: "hiring_conversation",
+    entityId: conv.id,
+    detail: {
+      title: conv.title,
+      messages: Number(m?.n ?? 0),
+      stage: what.kind,
+      requisition: what.kind === "draft" ? what.code : null,
+      reason: why || null,
+      runsStopped: active.length,
+    },
+  });
+  return {
+    kind: what.kind,
+    code: what.kind === "draft" ? what.code : null,
+    restoreUntil: new Date(now.getTime() + RESTORE_DAYS * 864e5).toISOString(),
+  };
+}
+
+/**
+ * Delete a thread — and with scope "split", the other tracks of its fan-out.
+ * Each sibling passes the same rules as a single delete (deletionAllowed:
+ * the starter or HR leadership; a draft only by leadership); one that may
+ * not go is kept and named with the reason, never silently skipped.
+ */
+export async function deleteThreads(
+  conv: Conversation,
+  userId: string,
+  reason: string,
+  scope: "track" | "split",
+  now = new Date(),
+): Promise<
+  Awaited<ReturnType<typeof deleteThread>> & {
+    alsoDeleted: number;
+    kept: { title: string; why: string }[];
+  }
+> {
+  // Read the group before this thread leaves it (siblings skip deleted ones).
+  const siblings = scope === "split" ? await deskSiblings(conv.orgId, conv.id) : [];
+  const res = await deleteThread(conv, userId, reason, now);
+  const kept: { title: string; why: string }[] = [];
+  let alsoDeleted = 0;
+  for (const sib of siblings) {
+    try {
+      await deleteThread(await loadConversation(conv.orgId, sib.id), userId, reason, now);
+      alsoDeleted++;
+    } catch (e) {
+      kept.push({ title: sib.title, why: e instanceof Error ? e.message : "Not deleted." });
+    }
+  }
+  return { ...res, alsoDeleted, kept };
+}
+
+/** Chats deleted in the last 30 days (owners restore them). */
+export async function deletedThreads(orgId: string, now = new Date()) {
+  return db
+    .select({
+      id: hiringConversations.id,
+      title: hiringConversations.title,
+      deletedAt: hiringConversations.deletedAt,
+      reason: hiringConversations.deleteReason,
+    })
+    .from(hiringConversations)
+    .where(
+      and(
+        eq(hiringConversations.orgId, orgId),
+        eq(hiringConversations.kind, "hiring"),
+        sql`${hiringConversations.deletedAt} > ${new Date(now.getTime() - RESTORE_DAYS * 864e5).toISOString()}::timestamptz`,
+      ),
+    )
+    .orderBy(desc(hiringConversations.deletedAt));
+}
+
+/**
+ * An owner restores a chat within 30 days; audited. A draft deleted with it is
+ * not brought back — the chat says so and the details are still there to raise it again.
+ */
+export async function restoreThread(
+  orgId: string,
+  userId: string,
+  id: string,
+  now = new Date(),
+): Promise<{ ok: true }> {
+  const { activeOrgOf } = await import("@/lib/auth.middleware");
+  const org = await activeOrgOf(userId);
+  if (!org || org.orgId !== orgId || !org.isOwner)
+    throw new Error("Only an owner can restore a deleted chat.");
+  const conv = await loadConversation(orgId, id, { includeDeleted: true });
+  if (!conv.deletedAt) throw new Error("This chat is not deleted.");
+  if (now.getTime() - conv.deletedAt.getTime() > RESTORE_DAYS * 864e5)
+    throw new Error(
+      `Deleted chats can be restored for ${RESTORE_DAYS} days; this one has passed that.`,
+    );
+  await db
+    .update(hiringConversations)
+    .set({ deletedAt: null, deletedBy: null, deleteReason: null, updatedAt: now })
+    .where(and(eq(hiringConversations.id, conv.id), eq(hiringConversations.orgId, orgId)));
+  await writeAudit({
+    actor: org.memberEmail,
+    actorUserId: userId,
+    orgId,
+    action: "desk.thread_restored",
+    entityType: "hiring_conversation",
+    entityId: conv.id,
+    detail: { title: conv.title, deletedAt: conv.deletedAt.toISOString() },
+  });
+  const restored = await loadConversation(orgId, id);
+  if (conv.requisitionId === null && restored.status !== "gathering") {
+    // Its draft was deleted with it (the link is cleared): back to gathering details.
+    await db
+      .update(hiringConversations)
+      .set({ status: "gathering" })
+      .where(eq(hiringConversations.id, conv.id));
+    await postMessage(restored, {
+      role: "desk",
+      body: 'This chat was restored. Its draft requisition was deleted with it and is not brought back — the hiring details are still here; say "create it" to raise a new draft.',
+    });
+  } else await postMessage(restored, { role: "desk", body: "This chat was restored." });
+  return { ok: true };
+}
+
+/** Chats deleted more than 30 days ago are removed for good (scheduler sweep); audited. */
+export async function purgeDeletedThreads(now = new Date()): Promise<number> {
+  const gone = await db
+    .delete(hiringConversations)
+    .where(
+      sql`${hiringConversations.deletedAt} <= ${new Date(now.getTime() - RESTORE_DAYS * 864e5).toISOString()}::timestamptz`,
+    )
+    .returning({
+      id: hiringConversations.id,
+      orgId: hiringConversations.orgId,
+      title: hiringConversations.title,
+    });
+  for (const g of gone)
+    await writeAudit({
+      actor: "system:desk-retention",
+      orgId: g.orgId,
+      action: "desk.thread_purged",
+      entityType: "hiring_conversation",
+      entityId: g.id,
+      detail: { title: g.title, afterDays: RESTORE_DAYS },
+    });
+  return gone.length;
+}
+
+/**
+ * Fan a multi-need message out into parallel hiring threads. The first need
+ * stays in this thread; the rest get their own thread each, seeded with the
+ * details said for them and an opening question for what is missing. Every
+ * thread keeps its own questions, runs and approvals — the runs proceed in
+ * parallel exactly as single-need threads do today.
+ */
+export async function splitNeeds(
+  conv: Conversation,
+  userId: string,
+  needs: { title: string; slots: DeskSlots }[],
+): Promise<void> {
+  const [first, ...rest] = needs;
+  const items: { id: string; title: string }[] = [];
+  const firstName = (conv.slots as DeskSlots).roleTitle || first?.title || "the first role";
+  items.push({ id: conv.id, title: firstName });
+  // All threads of one fan-out share this id — the tracks chip in any of
+  // them shows the others' statuses and what needs the person.
+  const groupId = crypto.randomUUID();
+  await db
+    .update(hiringConversations)
+    .set({ splitGroupId: groupId })
+    .where(eq(hiringConversations.id, conv.id));
+
+  for (const need of rest) {
+    const [child] = await db
+      .insert(hiringConversations)
+      .values({
+        orgId: conv.orgId,
+        createdBy: userId,
+        title: need.title,
+        splitGroupId: groupId,
+        // The child starts from ITS OWN details only — never the first
+        // thread's role or the details said for it.
+        slots: mergeSlots({} as DeskSlots, need.slots) as never,
+      })
+      .returning();
+    const childSlots = (child!.slots ?? {}) as DeskSlots;
+    const missing = missingSlots(childSlots);
+    const known = describeNeed(childSlots);
+    await postMessage(child!, {
+      role: "desk",
+      body: `Starting with ${need.title}${known ? ` — ${known}` : ""}. ${
+        missing.length
+          ? FALLBACK_QUESTION[missing[0]!]
+          : "All the required details are in — I'll look for similar roles next."
+      }`,
+      // Same card as any gathering turn: Research it from the market works
+      // from the first message in a fanned-out thread too.
+      ...(missing.length ? { card: thinking([], childSlots, nextStepText(missing[0]!)) } : {}),
+    });
+    items.push({ id: child!.id, title: need.title });
+  }
+
+  await postMessage(conv, {
+    role: "desk",
+    body: `${plural(needs.length, "track")} running in parallel — one thread each, and I'll ask what is missing in each separately. This thread is ${firstName}; the card below opens all of them side by side.`,
+    card: { type: "needs_fanout", items } as never,
+  });
+}
+
+/* ------------------------------------------------- tracks chip (siblings) */
+
+export type DeskTrackView = {
+  id: string;
+  title: string;
+  status: string;
+  /** Open agent requests waiting for the person in this thread. */
+  needsYou: number;
+  /** This is the thread being viewed. */
+  self: boolean;
+};
+
+/**
+ * The other threads of the same fan-out, with what needs the person in each.
+ * Threads created before `split_group_id` existed are linked lazily from
+ * their fan-out card's track list, so older splits get the chip too.
+ */
+export async function deskSiblings(
+  orgId: string,
+  conversationId: string,
+): Promise<DeskTrackView[]> {
+  const [conv] = await db
+    .select({ splitGroupId: hiringConversations.splitGroupId })
+    .from(hiringConversations)
+    .where(and(eq(hiringConversations.id, conversationId), eq(hiringConversations.orgId, orgId)))
+    .limit(1);
+  if (!conv) return [];
+  let groupId = conv.splitGroupId;
+  if (!groupId) {
+    // Write-behind: derive the group from this thread's fan-out card.
+    const msgs = await db
+      .select({ id: hiringMessages.id, card: hiringMessages.card })
+      .from(hiringMessages)
+      .where(eq(hiringMessages.conversationId, conversationId));
+    const fanout = msgs.find((m) => (m.card as { type?: string } | null)?.type === "needs_fanout");
+    const items =
+      (fanout?.card as { items?: { id: string }[] } | null)?.items ?? ([] as { id: string }[]);
+    if (items.length < 2) return [];
+    // The fan-out card's message id IS the group id: deterministic, so every
+    // thread of the split derives and stamps the same value whenever it runs.
+    groupId = fanout!.id;
+    await db
+      .update(hiringConversations)
+      .set({ splitGroupId: groupId })
+      .where(
+        and(
+          eq(hiringConversations.orgId, orgId),
+          inArray(hiringConversations.id, [conversationId, ...items.map((i) => i.id)]),
+        ),
+      );
+  }
+  const rows = (await db.execute(sql`
+    select hc.id, hc.title, hc.status, hc.created_by,
+      (select count(*)::int from agent_tasks t
+         join agent_runs r on r.id = t.run_id
+        where r.conversation_id = hc.id and t.status = 'open') as needs_you
+    from hiring_conversations hc
+    where hc.org_id = ${orgId} and hc.split_group_id = ${groupId}
+      and hc.id <> ${conversationId} and hc.deleted_at is null
+    order by hc.created_at`)) as unknown as {
+    id: string;
+    title: string;
+    status: string;
+    created_by: string;
+    needs_you: number;
+  }[];
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    status: r.status,
+    needsYou: r.needs_you,
+    self: false,
+  }));
+}

@@ -1,0 +1,29 @@
+node_modules
+dist
+.output
+.vinxi
+pnpm-lock.yaml
+package-lock.json
+bun.lock
+apps/web/src/routeTree.gen.ts
+
+# Generated docs checked by tests (bun scripts/voice-charter-doc.ts)
+apps/web/docs/voice-agents-charter.md
+
+# Generated doc (node scripts/gen-er-diagram.mjs)
+apps/web/docs/er-diagram.md
+
+# Agent manifest and prompt files — a reformat would change agents.lock.json
+# hashes and voice behaviour (refactor rule 4). Never format these.
+apps/web/src/server/agents/definitions.ts
+apps/web/src/server/agents/tools*.ts
+apps/web/src/server/voice/call-prompt.ts
+apps/web/src/server/voice/negotiation-prompt.ts
+apps/web/src/server/voice/scheduling-prompt.ts
+apps/web/src/server/voice/greeting.ts
+apps/web/src/server/voice/spoken-guard.ts
+
+# Import-graph analysis artifacts (large, generated)
+scripts/refactor/graph*.json
+scripts/refactor/edges*.json
+scripts/refactor/analyze-*.txt

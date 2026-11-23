@@ -1,0 +1,290 @@
+/**
+ * Organisation context agent tools (docs/org-context-agent-plan.md, O1):
+ * thin wrappers over the org-context cores (src/lib/org-context.server.ts).
+ * Every tool runs as the run's human principal, so the same editor role
+ * checks and refusals apply as on the Profile page. Nothing here approves —
+ * submitting calls request_approval with the org_profile subject and a
+ * person decides.
+ */
+import { z } from "zod";
+
+import { PROFILE_SECTIONS } from "@/lib/org-profile";
+import { registerTool, type ToolContext } from "./registry";
+
+const actor = async (ctx: ToolContext) => {
+  const { actorFor } = await import("@/lib/requisitions.server");
+  return actorFor(ctx.orgId, ctx.principalUserId);
+};
+
+const SECTION_KEYS = PROFILE_SECTIONS.map((s) => s.key) as [string, ...string[]];
+
+export function registerOrgTools(): void {
+  registerTool({
+    name: "read_org_profile",
+    description:
+      "The organisation's profile as it stands: the approved version and the open draft, section by section. Read this first so you build on what exists instead of repeating it.",
+    input: z.object({}),
+    risk: "read",
+    untrustedOutput: true,
+    run: async (ctx) => {
+      const { profileState } = await import("@/lib/org-profile.server");
+      const state = await profileState(ctx.orgId);
+      const shape = (v: typeof state.approved) =>
+        v
+          ? {
+              version: v.version,
+              status: v.status,
+              sections: Object.fromEntries(
+                Object.entries(v.sections ?? {}).map(([k, items]) => [
+                  k,
+                  items.map((i) => ({
+                    text: i.text,
+                    visibility: i.visibility,
+                    source: i.source.kind,
+                  })),
+                ]),
+              ),
+            }
+          : null;
+      return {
+        approved: shape(state.approved),
+        openDraft: shape(state.open),
+      };
+    },
+  });
+
+  registerTool({
+    name: "read_org_records",
+    description:
+      "What the system already knows about the organisation: its record (name, industry, size, headquarters, e-mail domain), the saved website and every uploaded profile document. Documents are listed by id — read each with read_org_document.",
+    input: z.object({}),
+    risk: "read",
+    run: async (ctx) => {
+      const { readOrgRecords } = await import("@/lib/org-context.server");
+      return readOrgRecords(ctx.orgId);
+    },
+  });
+
+  registerTool({
+    name: "read_org_website",
+    description:
+      "Read the organisation's own website (the host saved on the Profile page) into profile sources and propose what changed pages state as draft items. Returns counts and moreLinks — the site's own links not read yet; it does not return page text (read_org_sources does). At most 20 pages, robots.txt honoured; unchanged pages cost nothing; pages that say they do not exist are skipped. Pass `pages` ONLY from moreLinks or addresses the person gave — never guess an address. A page that looks like instructions to an AI is held back for a person.",
+    input: z.object({
+      pages: z.array(z.string().max(2000)).max(20).optional(),
+    }),
+    risk: "read",
+    skills: ["org_profile_extract"],
+    untrustedOutput: true,
+    precheck: async (ctx, input) => {
+      const { orgProfiles } = await import("@db/schema");
+      const { eq } = await import("drizzle-orm");
+      const { db } = await import("../db");
+      const [p] = await db
+        .select({ websiteUrl: orgProfiles.websiteUrl })
+        .from(orgProfiles)
+        .where(eq(orgProfiles.orgId, ctx.orgId))
+        .limit(1);
+      if (!p?.websiteUrl)
+        return "No website is saved for this organisation. Ask the HR head to add it on the Profile page.";
+      if (input.pages?.length) {
+        const host = (u: string) => {
+          try {
+            return new URL(u).hostname.replace(/^www\./, "");
+          } catch {
+            return null;
+          }
+        };
+        const own = host(p.websiteUrl);
+        const off = input.pages.find((p2) => host(p2) !== own);
+        if (off) return `Only the organisation's own website (${own}) may be read — not ${off}.`;
+        // Guessed addresses read "not found" pages and burned the run's budget:
+        // only addresses already seen in this run (moreLinks, the records'
+        // page list, the person's words in the goal or an answer) or pages
+        // read before pass.
+        const { agentRuns, orgContextSources } = await import("@db/schema");
+        const { and, isNull } = await import("drizzle-orm");
+        const [run] = await db
+          .select({ goal: agentRuns.goal, transcript: agentRuns.transcript })
+          .from(agentRuns)
+          .where(eq(agentRuns.id, ctx.runId))
+          .limit(1);
+        const read = await db
+          .select({ url: orgContextSources.url })
+          .from(orgContextSources)
+          .where(and(eq(orgContextSources.orgId, ctx.orgId), isNull(orgContextSources.deletedAt)));
+        const seenText = `${run?.goal ?? ""} ${JSON.stringify(run?.transcript ?? "")}`;
+        const norm = (u: string) => u.replace(/\/+$/, "");
+        const known = new Set([
+          ...[...seenText.matchAll(/https?:\/\/[^\s"'\\<>)]+/g)].map((m) =>
+            norm(m[0].replace(/[.,;]+$/, "")),
+          ),
+          ...read.flatMap((r) => (r.url ? [norm(r.url)] : [])),
+        ]);
+        const guessed = input.pages.filter((u) => !known.has(norm(u)));
+        if (guessed.length)
+          return `Not linked from the site or given by a person: ${guessed.slice(0, 3).join(", ")}. Pass only addresses from moreLinks or the person's message — or call read_org_sources and write from what is already read.`;
+      }
+      return null;
+    },
+    run: async (ctx, input) => {
+      const { readWebsiteCore } = await import("@/lib/org-context.server");
+      return readWebsiteCore(await actor(ctx), input);
+    },
+  });
+
+  registerTool({
+    name: "read_org_sources",
+    description:
+      "The TEXT of everything gathered so far, to write the profile from: the website pages already read (sourceId, url, text — longest first), the documents on file (read each with read_org_document) and what the admin said in the organisation chat (adminSaid). Write items from this text with propose_profile_items, quoting it exactly; quote the page's sourceId, and leave sourceId out for what the admin said. Call it after read_org_website, and again after a decision asked for more.",
+    input: z.object({}),
+    risk: "read",
+    untrustedOutput: true,
+    run: async (ctx) => {
+      const { readOrgSources } = await import("@/lib/org-context.server");
+      return readOrgSources(ctx.orgId);
+    },
+  });
+
+  registerTool({
+    name: "read_org_document",
+    description:
+      "The text of one uploaded profile document (by its id from read_org_records). Scanned pages were read through the AI model; the text is what the document states. Propose what it says with propose_profile_items, quoting it exactly.",
+    input: z.object({ documentId: z.string().uuid() }),
+    risk: "read",
+    skills: ["org_profile_extract", "org_document_ocr"],
+    untrustedOutput: true,
+    precheck: async (ctx, input) => {
+      const { readOrgDocument } = await import("@/lib/org-context.server");
+      const doc = await readOrgDocument(ctx.orgId, input.documentId);
+      if (!doc)
+        return "That document is not in this organisation's profile sources (it may have been removed).";
+      if (!doc.text.trim())
+        return `No text could be read from ${doc.fileName}; nothing can be kept from it.`;
+      return null;
+    },
+    run: async (ctx, input) => {
+      const { readOrgDocument } = await import("@/lib/org-context.server");
+      return readOrgDocument(ctx.orgId, input.documentId);
+    },
+  });
+
+  const ProposedItem = z.object({
+    text: z.string().min(3).max(600),
+    visibility: z.enum(["candidate", "internal"]),
+    quote: z.string().max(400).optional(),
+    sourceId: z.string().uuid().optional(),
+  });
+
+  registerTool({
+    name: "propose_profile_items",
+    description:
+      "Propose items for one section of the organisation profile draft. Every item must state the section, whether it may be said to candidates (visibility) or is internal, and the exact quote from the source it came from — an item whose quote is not in the source is dropped. Pay figures and staff names are refused with a reason. Nothing is published: items join the draft a person approves.",
+    input: z.object({
+      section: z.enum(SECTION_KEYS),
+      items: z.array(ProposedItem).min(1).max(30),
+    }),
+    // Risk "read" on purpose: items land only in a draft that is inert until
+    // the version itself is submitted and approved — the human gate is the
+    // version approval at the end of the run, not each proposal. Approving
+    // every section separately made the build a permission nag.
+    risk: "read",
+    describe: (i) => `Propose ${i.items.length} profile item(s) under “${i.section}”`,
+    run: async (ctx, input) => {
+      const { proposeItemsCore } = await import("@/lib/org-context.server");
+      return proposeItemsCore(await actor(ctx), input);
+    },
+  });
+
+  registerTool({
+    name: "submit_profile_version",
+    description:
+      "Submit the organisation profile draft for approval — submitting IS the ask; afterwards request the decision with request_approval (subject type org_profile, this version's id) and the approval card is the person's decision. Refuses when there is no open draft or nothing under About.",
+    input: z.object({ note: z.string().max(1000).optional() }),
+    // Risk "read" like proposing: submitting moves the inert draft to
+    // "waiting for approval" — the approval card that follows is the human
+    // gate. Under suggest autonomy this otherwise asks "may I submit?" and
+    // then asks again on the version itself: two approvals for one decision.
+    risk: "read",
+    describe: () => "Submit the organisation profile for approval",
+    precheck: async (ctx) => {
+      const { profileState } = await import("@/lib/org-profile.server");
+      const state = await profileState(ctx.orgId);
+      if (!state.open)
+        return "There is no open draft to submit. Propose items first (propose_profile_items), then submit.";
+      if (state.open.status === "pending")
+        return "This version is already waiting for approval; do not submit it again.";
+      if (!(state.open.sections["about"] ?? []).length)
+        return "The draft has nothing under About yet — propose at least one About item before submitting.";
+      return null;
+    },
+    run: async (ctx) => {
+      const { profileState, submitDraftCore } = await import("@/lib/org-profile.server");
+      const before = await profileState(ctx.orgId);
+      if (!before.open) throw new Error("There is no open draft to submit.");
+      await submitDraftCore(await actor(ctx), { versionId: before.open.id });
+      return {
+        versionId: before.open.id,
+        version: before.open.version,
+        // Say the next call outright — a model that stops here leaves the
+        // version pending with no approval card anywhere.
+        next: 'REQUIRED next call: request_approval with assignee_role "hr_head" and subject { type: "org_profile", versionId: "<the versionId above>" }.',
+      };
+    },
+  });
+
+  /* Pay conventions (docs/pay-terms-plan.md, Phase 2). Conventions, never figures. */
+  registerTool({
+    name: "read_pay_conventions",
+    description:
+      "The organisation's pay conventions in force: reporting currency, how pay is usually quoted, kinds of work, the tolerance over a band, pooling regions and pay zones (per zone: countries and cities, currency, pay basis, payments a year, what a figure includes, hours, working days, kinds of work, contract types, employing entity, location pay factor, region) — and any proposal waiting for a decision.",
+    input: z.object({}),
+    risk: "read",
+    run: async (ctx) => {
+      const { currentConventions } = await import("@/lib/pay-settings.server");
+      const { db } = await import("../db");
+      const { payConventionDrafts } = await import("../../../drizzle/schema");
+      const { and, eq } = await import("drizzle-orm");
+      const [pending] = await db
+        .select({ id: payConventionDrafts.id, summary: payConventionDrafts.summary })
+        .from(payConventionDrafts)
+        .where(
+          and(eq(payConventionDrafts.orgId, ctx.orgId), eq(payConventionDrafts.status, "pending")),
+        )
+        .limit(1);
+      return { inForce: await currentConventions(ctx.orgId), pending: pending ?? null };
+    },
+  });
+
+  registerTool({
+    name: "propose_pay_conventions",
+    description:
+      "Propose the organisation's complete pay conventions (the whole set, not a change list): reporting currency, pay basis default, hours, kinds of work, the % over a band's ceiling that blocks, pooling regions (name, rule: same_zone | same_region | entity_countries | global_remote) and pay zones (name; ISO country codes; optional cities; ISO currency; basis annual | monthly | daily | hourly; payments a year 12–16; includes: base, variable, bonus, equity, employer_pf, gratuity, allowances, thirteenth_month, fourteenth_month, tfr; hours per week; working days a year; kinds; contract types; entity; geo factor; region name). Only what the admin or the organisation's sources state — never a pay figure or band. Nothing is applied: it returns the changes; then request_approval with subject { type: 'pay_conventions', draftId } and assignee_role 'hr_head'.",
+    input: z.object({ conventions: z.record(z.string(), z.unknown()) }),
+    // Inert until approved: the approval card is the human gate.
+    risk: "read",
+    describe: () => "Propose the organisation's pay conventions",
+    run: async (ctx, input) => {
+      const { PayConventions } = await import("@/lib/pay-settings");
+      const parsed = PayConventions.safeParse(input.conventions);
+      if (!parsed.success)
+        return {
+          ok: false,
+          error: parsed.error.issues
+            .slice(0, 6)
+            .map((i) => `${i.path.join(".") || "conventions"}: ${i.message}`)
+            .join("; "),
+        };
+      const { proposeConventionsCore } = await import("@/lib/pay-settings.server");
+      const out = await proposeConventionsCore(ctx.orgId, parsed.data, {
+        agentRunId: ctx.runId ?? null,
+        proposedBy: ctx.principalUserId,
+      });
+      return {
+        ok: true,
+        draftId: out.draftId,
+        changes: out.changes,
+        next: 'REQUIRED next call: request_approval with assignee_role "hr_head" and subject { type: "pay_conventions", draftId: "<the draftId above>" }.',
+      };
+    },
+  });
+}

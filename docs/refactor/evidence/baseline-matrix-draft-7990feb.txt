@@ -1,0 +1,210 @@
+UNMAPPED 1 src/server.ts
+SIZES {"ui":{"files":183,"lines":52985},"agents":{"files":48,"lines":19110},"ai":{"files":12,"lines":4335},"candidates":{"files":19,"lines":3100},"interviews":{"files":36,"lines":8497},"auth":{"files":12,"lines":1003},"matching":{"files":13,"lines":3907},"distribution":{"files":16,"lines":4418},"onboarding":{"files":9,"lines":3196},"catalogue":{"files":9,"lines":1599},"org":{"files":18,"lines":7333},"offers":{"files":19,"lines":5350},"desk":{"files":9,"lines":7272},"db":{"files":3,"lines":7020},"comms":{"files":32,"lines":4997},"core":{"files":22,"lines":2173},"requisitions":{"files":14,"lines":3107},"voice":{"files":33,"lines":7660},"platform-admin":{"files":2,"lines":561},"UNMAPPED":{"files":1,"lines":390}}
+   9 UNMAPPED -> core
+  11 agents -> ai
+  10 agents -> auth
+   9 agents -> comms
+  35 agents -> core
+  69 agents -> db
+   4 agents -> desk
+  10 agents -> distribution
+  29 agents -> interviews
+   6 agents -> matching
+  15 agents -> offers
+   3 agents -> onboarding
+   6 agents -> org
+  11 agents -> requisitions
+  21 agents -> voice
+   2 ai -> agents
+   3 ai -> auth
+   5 ai -> core
+  16 ai -> db
+   1 ai -> matching
+   1 ai -> voice
+   2 auth -> core
+   6 auth -> db
+   2 candidates -> agents
+   3 candidates -> ai
+   7 candidates -> auth
+   2 candidates -> comms
+  14 candidates -> core
+  19 candidates -> db
+   5 candidates -> distribution
+   4 candidates -> matching
+   1 candidates -> org
+   3 candidates -> requisitions
+   2 catalogue -> auth
+   1 catalogue -> core
+   2 catalogue -> db
+   1 catalogue -> org
+   4 catalogue -> ui
+   3 comms -> agents
+   1 comms -> ai
+   6 comms -> auth
+   1 comms -> candidates
+   3 comms -> core
+  16 comms -> db
+   1 comms -> distribution
+   2 comms -> interviews
+   2 comms -> offers
+   1 comms -> onboarding
+   2 comms -> requisitions
+   2 core -> agents
+   1 core -> comms
+   9 core -> db
+   1 db -> core
+   3 db -> interviews
+   1 db -> matching
+  18 desk -> agents
+   5 desk -> ai
+   4 desk -> auth
+   2 desk -> comms
+   6 desk -> core
+  10 desk -> db
+   1 desk -> distribution
+   2 desk -> interviews
+   1 desk -> matching
+   6 desk -> org
+   2 desk -> requisitions
+   2 distribution -> auth
+   2 distribution -> candidates
+   1 distribution -> comms
+  16 distribution -> core
+  14 distribution -> db
+   3 distribution -> org
+   2 distribution -> requisitions
+  10 interviews -> agents
+   5 interviews -> ai
+   9 interviews -> auth
+   8 interviews -> comms
+  25 interviews -> core
+  39 interviews -> db
+   4 interviews -> desk
+   1 interviews -> matching
+   4 interviews -> org
+   5 interviews -> requisitions
+   3 matching -> agents
+   5 matching -> ai
+   5 matching -> auth
+   2 matching -> candidates
+   1 matching -> comms
+   2 matching -> core
+  16 matching -> db
+   4 matching -> interviews
+   1 matching -> onboarding
+   4 matching -> org
+   2 matching -> requisitions
+   6 offers -> agents
+   6 offers -> ai
+  11 offers -> auth
+   5 offers -> comms
+  12 offers -> core
+  20 offers -> db
+   4 offers -> desk
+   3 offers -> interviews
+   3 offers -> onboarding
+   2 offers -> org
+   1 offers -> requisitions
+   1 offers -> voice
+   3 onboarding -> agents
+   2 onboarding -> ai
+   3 onboarding -> auth
+   1 onboarding -> candidates
+   7 onboarding -> core
+  10 onboarding -> db
+   2 onboarding -> org
+   7 org -> agents
+   2 org -> ai
+  14 org -> auth
+   2 org -> candidates
+   3 org -> catalogue
+   2 org -> comms
+  12 org -> core
+  30 org -> db
+   1 org -> distribution
+   3 org -> interviews
+   1 org -> matching
+   1 org -> offers
+   1 org -> requisitions
+   2 platform-admin -> auth
+   1 platform-admin -> comms
+   3 platform-admin -> core
+   2 platform-admin -> db
+   1 platform-admin -> org
+   7 requisitions -> agents
+   3 requisitions -> ai
+   8 requisitions -> auth
+   1 requisitions -> comms
+   6 requisitions -> core
+  15 requisitions -> db
+   3 requisitions -> distribution
+   2 requisitions -> org
+   2 ui -> UNMAPPED
+  24 ui -> agents
+   3 ui -> ai
+  32 ui -> auth
+  25 ui -> candidates
+  11 ui -> catalogue
+  17 ui -> comms
+  61 ui -> core
+  23 ui -> db
+   8 ui -> desk
+  14 ui -> distribution
+  20 ui -> interviews
+  16 ui -> matching
+  21 ui -> offers
+   9 ui -> onboarding
+  46 ui -> org
+   5 ui -> platform-admin
+  20 ui -> requisitions
+   4 ui -> voice
+   8 voice -> agents
+   5 voice -> ai
+   2 voice -> auth
+  10 voice -> comms
+  17 voice -> core
+  29 voice -> db
+   3 voice -> desk
+   1 voice -> distribution
+   9 voice -> interviews
+   3 voice -> matching
+   4 voice -> offers
+   4 voice -> org
+   2 voice -> requisitions
+MUTUAL PAIRS:
+  agents <-> ai  (11 / 2)
+  agents <-> comms  (9 / 3)
+  agents <-> core  (35 / 2)
+  agents <-> desk  (4 / 18)
+  agents <-> interviews  (29 / 10)
+  agents <-> matching  (6 / 3)
+  agents <-> offers  (15 / 6)
+  agents <-> onboarding  (3 / 3)
+  agents <-> org  (6 / 7)
+  agents <-> requisitions  (11 / 7)
+  agents <-> voice  (21 / 8)
+  ai <-> matching  (1 / 5)
+  ai <-> voice  (1 / 5)
+  candidates <-> comms  (2 / 1)
+  candidates <-> distribution  (5 / 2)
+  candidates <-> matching  (4 / 2)
+  candidates <-> org  (1 / 2)
+  catalogue <-> org  (1 / 3)
+  catalogue <-> ui  (4 / 11)
+  comms <-> core  (3 / 1)
+  comms <-> distribution  (1 / 1)
+  comms <-> interviews  (2 / 8)
+  comms <-> offers  (2 / 5)
+  comms <-> requisitions  (2 / 1)
+  core <-> db  (9 / 1)
+  db <-> interviews  (3 / 39)
+  db <-> matching  (1 / 16)
+  desk <-> interviews  (2 / 4)
+  distribution <-> org  (3 / 1)
+  distribution <-> requisitions  (2 / 3)
+  interviews <-> matching  (1 / 4)
+  interviews <-> org  (4 / 3)
+  matching <-> org  (4 / 1)
+  offers <-> org  (2 / 1)
+  offers <-> voice  (1 / 4)
+  org <-> requisitions  (1 / 2)

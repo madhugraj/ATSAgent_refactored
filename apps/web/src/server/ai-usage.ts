@@ -1,0 +1,166 @@
+import { currentAgentRun, currentAiSubject } from "./agents/context";
+import { db } from "./db";
+import { aiUsageEvents, type AiUsageStatus } from "@db/schema";
+
+/**
+ * Stable slugs for every AI-powered feature. Each provider request is logged
+ * against one of these so the platform console can break spend down per module.
+ */
+export const AI_FEATURES = [
+  "resume_parse",
+  "jd_parse",
+  "jd_generate",
+  "jd_import",
+  "weight_suggest",
+  "linkedin_post",
+  "candidate_score",
+  "screening_kit",
+  "screening_grade",
+  "audio_transcribe",
+  "linkedin_signal",
+  "writing_signal",
+  "claim_verify",
+  "assessment_generate",
+  "assessment_score",
+  "role_profile",
+  "doc_extract",
+  "market_benchmark",
+  "salary_research",
+  "template_import",
+  "jobcard_qa",
+  "offer_letter",
+  "offer_policy_check",
+  "labour_policy_ocr",
+  "copilot",
+  "talent_brain",
+  // Copilot: market signal for the demand outlook (src/lib/demand-outlook.ts).
+  "demand_outlook",
+  "model_test",
+  // Agent steps (docs/agentic-plan.md §4) — one slug per agent.
+  "agent_copilot",
+  "agent_requisition",
+  "agent_jd",
+  "agent_publishing",
+  "agent_intake",
+  "agent_screening",
+  "agent_interview",
+  "agent_evaluation",
+  "agent_offer",
+  "agent_onboarding",
+  "agent_sourcing",
+  "agent_distribution",
+  "agent_screening_call",
+  "agent_scheduling_call",
+  "agent_negotiation_call",
+  "agent_followup",
+  "agent_org_context",
+  "agent_labour_policy",
+  // Agent studio agents (platform-built, granted per organisation; migration 0082).
+  "agent_studio",
+  // Workflow builder chat: drafts a workflow graph and its dry-run tests.
+  "workflow_assistant",
+  "agent_expert_interview",
+  "agent_panel_l1",
+  "agent_panel_l2",
+  "agent_panel_l3",
+  // Voice Guard (docs/voice-guard.md): the after-call review of AI phone calls.
+  "agent_voice_guard",
+  // Organisation context agent (docs/org-context-agent-plan.md): the org desk
+  // conversation turns, website-page extraction and document OCR.
+  "org_desk",
+  "org_profile_extract",
+  "org_document_ocr",
+  // Hiring desk conversation turns (docs/agentic-plan.md §13.2).
+  "hiring_desk",
+  // Talent-pool search: expanding must-haves into equivalent terms.
+  "talent_search",
+  // Hiring desk: researching skills / experience / pay for a role the person delegated.
+  "role_research",
+  // Live voice: the screening call with a candidate (docs/voice-screening-agent.md).
+  "screening_call",
+  // Live voice: the call to pick an interview time (docs/voice-scheduling-call-plan.md).
+  "scheduling_call",
+  // Live voice: the pay discussion call (docs/negotiator-voice-agent.md).
+  "negotiation_call",
+  // Pay call rehearsals (scripts/evals/negotiation-live-sim.ts): the AI candidate and the
+  // judge that scores the flow (reported, never gating).
+  "eval_candidate_sim",
+  "eval_call_judge",
+  // Silent panel agents (docs/silent-panel-agent-plan.md): the agent's own
+  // assessment of an interview call, and the panel's factual summary of it.
+  "panel_assess",
+  "panel_summary",
+  // Model safety check: red-team probes before Autonomous (docs/red-team.md).
+  "redteam_probe",
+  // A panelist's proposed scorecard change, reviewed against the job before the
+  // hiring manager decides (src/lib/panel-changes.server.ts).
+  "plan_change_review",
+  // Whether a panelist's reason for moving a round is a genuine one
+  // (src/lib/panel-changes.server.ts).
+  "panel_change_reason",
+] as const;
+
+export type AiFeature = (typeof AI_FEATURES)[number];
+
+/**
+ * AI spend ledger. Fire-and-forget like `writeAudit`: a logging failure must
+ * never break the AI call it is measuring, but it is logged loudly.
+ */
+export async function recordAiUsage(input: {
+  orgId?: string | null;
+  userId?: string | null;
+  feature: string;
+  provider: string;
+  model: string;
+  status: AiUsageStatus;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens?: number | null;
+  attempt?: number;
+  durationMs?: number | null;
+  grounded?: boolean | null;
+  errorMessage?: string | null;
+}): Promise<void> {
+  try {
+    const clamp = (n: number | null | undefined) =>
+      Math.max(0, Math.round(Number.isFinite(n ?? NaN) ? (n as number) : 0));
+    const subject = currentAiSubject();
+    const [row] = await db
+      .insert(aiUsageEvents)
+      .values({
+        orgId: input.orgId ?? null,
+        userId: input.userId ?? null,
+        feature: input.feature,
+        provider: input.provider,
+        model: input.model,
+        status: input.status,
+        promptTokens: clamp(input.promptTokens),
+        completionTokens: clamp(input.completionTokens),
+        totalTokens: clamp(input.totalTokens),
+        attempt: Math.max(1, Math.round(input.attempt ?? 1)),
+        durationMs:
+          input.durationMs == null || !Number.isFinite(input.durationMs)
+            ? null
+            : Math.max(0, Math.round(input.durationMs)),
+        grounded: input.grounded ?? null,
+        errorMessage: input.errorMessage ? input.errorMessage.slice(0, 500) : null,
+        // Attribute requests made inside an agent run (incl. AI calls within tools).
+        agentRunId: currentAgentRun()?.runId ?? null,
+        // …and to the role / candidate it was made for (cost per candidate).
+        requisitionId: subject?.requisitionId ?? null,
+        applicationId: subject?.applicationId ?? null,
+        candidateId: subject?.candidateId ?? null,
+      })
+      .returning({ id: aiUsageEvents.id });
+    if (row && subject?.events) subject.events.push(row.id);
+    // Tie the row to the model call being captured as training data, if any.
+    if (row)
+      (await import("./training/capture.server")).noteUsageEvent(
+        row.id,
+        input.provider,
+        input.model,
+      );
+  } catch (e) {
+    console.error("[ai-usage] failed to record", input.feature, e);
+  }
+}

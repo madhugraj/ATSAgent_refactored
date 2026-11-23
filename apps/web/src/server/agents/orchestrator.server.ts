@@ -1,0 +1,1140 @@
+/**
+ * Orchestrator v1 (docs/agentic-plan.md §3.1) — deterministic, no model.
+ *
+ * Drains agent_events and, per event:
+ *  1. closes inbox gate tasks whose requisition / JD was decided elsewhere, so
+ *     the waiting run carries on;
+ *  2. starts the next agent in the requisition → JD → publish chain when the
+ *     organisation has switched that agent on and none is already working on
+ *     the requisition.
+ *
+ * Runs act for the member who raised the requisition (falling back to the
+ * member whose action produced the event).
+ */
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+
+import { db } from "../db";
+import {
+  agentEvents,
+  agentPolicies,
+  agentRuns,
+  applications,
+  jobDescriptions,
+  matchScores,
+  offers,
+  orgMembers,
+  requisitions,
+} from "@db/schema";
+import { log } from "../log";
+import { agentRunScope } from "./context";
+import { loadPolicy } from "./policy";
+import { getAgent } from "./registry";
+import { startRun, syncGateTasks } from "./runtime.server";
+import { activeRunFor } from "./tools";
+
+const MAX_ATTEMPTS = 3;
+
+export type OrchestratorCounts = {
+  processed: number;
+  started: number;
+  synced: number;
+  failed: number;
+};
+
+export async function processAgentEvents(
+  opts: { max?: number; orgId?: string } = {},
+): Promise<OrchestratorCounts> {
+  const max = Math.min(Math.max(opts.max ?? 50, 1), 200);
+  const counts: OrchestratorCounts = { processed: 0, started: 0, synced: 0, failed: 0 };
+
+  const dueIds = db
+    .select({ id: agentEvents.id })
+    .from(agentEvents)
+    .where(
+      and(
+        eq(agentEvents.status, "pending"),
+        opts.orgId ? eq(agentEvents.orgId, opts.orgId) : undefined,
+      ),
+    )
+    .orderBy(agentEvents.createdAt)
+    .limit(max)
+    .for("update", { skipLocked: true });
+  const claimed = await db
+    .update(agentEvents)
+    .set({ status: "processing", updatedAt: new Date() })
+    .where(inArray(agentEvents.id, dueIds))
+    .returning();
+
+  for (const e of claimed) {
+    try {
+      const r = await handle(e);
+      counts.started += r.started;
+      counts.synced += r.synced;
+      await db
+        .update(agentEvents)
+        .set({ status: "done", updatedAt: new Date() })
+        .where(eq(agentEvents.id, e.id));
+      counts.processed++;
+    } catch (err) {
+      counts.failed++;
+      const attempts = e.attempts + 1;
+      log.error("agent.orchestrator.event_failed", {
+        org_id: e.orgId,
+        event_id: e.id,
+        type: e.type,
+        error: err as Error,
+      });
+      await db
+        .update(agentEvents)
+        .set({
+          status: attempts >= MAX_ATTEMPTS ? "failed" : "pending",
+          attempts,
+          lastError: err instanceof Error ? err.message.slice(0, 500) : String(err),
+          updatedAt: new Date(),
+        })
+        .where(eq(agentEvents.id, e.id));
+    }
+  }
+  return counts;
+}
+
+type Event = typeof agentEvents.$inferSelect;
+
+async function handle(e: Event): Promise<{ started: number; synced: number }> {
+  let synced = 0;
+  let started = 0;
+  if (!e.subjectId) return { started, synced };
+
+  // 0. Agent workflows granted to this organisation run alongside the built-in
+  // flow (docs/agent-workflows.md); a workflow failing never blocks it.
+  try {
+    const { onWorkflowEvent } = await import("./workflows.server");
+    started += await onWorkflowEvent(e);
+  } catch (err) {
+    log.error("workflow.start_failed", { org_id: e.orgId, type: e.type, error: err as Error });
+  }
+
+  // 1. Keep inbox gates in step with decisions made on the regular pages.
+  if (e.type === "requisition.status_changed") {
+    const from = String((e.payload as { from?: string }).from ?? "");
+    synced += await syncGateTasks(
+      e.orgId,
+      { type: "requisition", id: e.subjectId },
+      e.actorUserId,
+      from,
+    );
+  }
+  if (e.type === "jd.approved" || e.type === "jd.changes_requested") {
+    synced += await syncGateTasks(
+      e.orgId,
+      { type: "jd", id: e.subjectId },
+      e.actorUserId,
+      "pending_dh",
+    );
+  }
+
+  if (e.type === "offer.status_changed") {
+    const from = String((e.payload as { from?: string }).from ?? "");
+    synced += await syncGateTasks(e.orgId, { type: "offer", id: e.subjectId }, e.actorUserId, from);
+  }
+
+  // 2. Dispatch the next agent in the chain.
+  const payload = e.payload as {
+    to?: string;
+    requisitionId?: string;
+    applicationId?: string;
+    comment?: string;
+  };
+  // Candidate- and offer-level events: find the application and its requisition.
+  const applicationId =
+    e.subjectType === "application" ? e.subjectId : (payload.applicationId ?? null);
+  let requisitionId = e.subjectType === "requisition" ? e.subjectId : payload.requisitionId;
+  if (!requisitionId && applicationId) {
+    const [app] = await db
+      .select({ requisitionId: applications.requisitionId })
+      .from(applications)
+      .where(and(eq(applications.id, applicationId), eq(applications.orgId, e.orgId)))
+      .limit(1);
+    requisitionId = app?.requisitionId;
+  }
+  if (!requisitionId) return { started, synced };
+  const [req] = await db
+    .select({
+      id: requisitions.id,
+      code: requisitions.code,
+      title: requisitions.title,
+      status: requisitions.status,
+      createdBy: requisitions.createdBy,
+    })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, requisitionId), eq(requisitions.orgId, e.orgId)))
+    .limit(1);
+  if (!req) return { started, synced };
+  const principal = req.createdBy ?? e.actorUserId;
+  if (!principal) return { started, synced };
+
+  const dispatch = async (
+    agent:
+      | "requisition"
+      | "jd"
+      | "publishing"
+      | "distribution"
+      | "screening"
+      | "interview"
+      | "evaluation"
+      | "offer"
+      | "onboarding"
+      | "panel_l1"
+      | "panel_l2"
+      | "panel_l3",
+    goal: string,
+    /** Per-candidate work (evaluation) de-duplicates on the application instead. */
+    subject: { type: "requisition" | "application"; id: string } = {
+      type: "requisition",
+      id: req.id,
+    },
+  ) => {
+    if (!getAgent(agent) && process.env["NODE_ENV"] !== "test") {
+      // A reloaded module graph can start with an empty registry; never drop
+      // an event silently because of it.
+      const { ensureAgentsRegistered } = await import("./index");
+      ensureAgentsRegistered();
+    }
+    if (!getAgent(agent)) {
+      log.warn("agent.orchestrator.agent_missing", { org_id: e.orgId, agent, type: e.type });
+      return;
+    }
+    // Nothing starts for a role that is closed, rejected or on hold; late
+    // events (a scorecard, a no-show, an offer change) wait for a person.
+    if (["closed", "rejected", "on_hold"].includes(req.status)) {
+      log.info("agent.orchestrator.role_inactive", {
+        org_id: e.orgId,
+        agent,
+        type: e.type,
+        status: req.status,
+      });
+      return;
+    }
+    const policy = await loadPolicy(e.orgId, agent);
+    if (!policy.enabled) {
+      // A hiring-desk thread waiting on this role hears why nothing happens.
+      const { notifyAgentOff } = await import("../desk/desk.server");
+      await notifyAgentOff(e.orgId, req.id, agent);
+      return;
+    }
+    if (await activeRunFor(e.orgId, agent, subject.id)) return;
+    await startRun({
+      orgId: e.orgId,
+      agentType: agent,
+      principalUserId: principal,
+      goal: `${goal}\n\nRequisition id: ${req.id}`,
+      subjectType: subject.type,
+      subjectId: subject.id,
+      triggerEventId: e.id,
+    });
+    started++;
+  };
+
+  const latestJd = async () =>
+    (
+      await db
+        .select({ status: jobDescriptions.status })
+        .from(jobDescriptions)
+        .where(and(eq(jobDescriptions.requisitionId, req.id), eq(jobDescriptions.orgId, e.orgId)))
+        .orderBy(desc(jobDescriptions.version))
+        .limit(1)
+    )[0];
+
+  // A closed, rejected or paused role: stop its agents (and end or pause its thread).
+  if (
+    e.type === "requisition.status_changed" &&
+    (payload.to === "closed" || payload.to === "rejected" || payload.to === "on_hold")
+  ) {
+    const { onRequisitionEnded } = await import("../desk/desk.server");
+    await onRequisitionEnded(e.orgId, req.id, payload.to, e.actorUserId);
+  }
+
+  // An approver sent the requisition back with what should change: the
+  // Requisition agent applies it (pay terms, band, skills…) and resubmits, or
+  // asks a person when it cannot — nobody is left wondering why nothing moved.
+  if (
+    e.type === "requisition.status_changed" &&
+    payload.to === "draft" &&
+    (e.payload as { sentBack?: boolean }).sentBack
+  ) {
+    await dispatch(
+      "requisition",
+      `An approver sent requisition ${req.code} "${req.title}" back to draft with this change: "${String(payload.comment ?? "").slice(0, 500)}". Read get_requisition, make exactly that change (set_pay_terms then set_compensation for pay or currency; update_requisition_draft for other fields), say in one line what you changed, then submit_requisition_for_approval. Never assume what the change leaves open: if it gives pay without saying per month, per year or per hour, or a currency or basis different from the role's current one without saying which, or the new band is far from the current one, ask_human first with the exact choice (e.g. "Is 2,000–5,000 USD per month or per year?") and make the change only after the answer. If the change is unclear or you cannot make it, ask a person instead of resubmitting it unchanged.`,
+    );
+  }
+
+  if (e.type === "requisition.status_changed" && payload.to === "approved") {
+    // Hiring desk: the person chose to reuse an earlier role's approved JD.
+    const { reuseJdIfChosen } = await import("../desk/desk.server");
+    const reused = await reuseJdIfChosen(e.orgId, req.id);
+    const jd = reused ? { status: "approved" as const } : await latestJd();
+    if (!jd || jd.status === "draft" || jd.status === "changes_requested") {
+      await dispatch(
+        "jd",
+        `Requisition ${req.code} "${req.title}" is approved. Draft its job description and get it approved by the department head.`,
+      );
+    }
+  }
+
+  // Hiring desk: once a thread's JD is approved, rank candidates for it.
+  if (e.type === "jd.approved") {
+    const { onJdApproved } = await import("../desk/desk.server");
+    await onJdApproved(e.orgId, req.id, e.subjectType === "jd" ? e.subjectId : null);
+  }
+
+  if (e.type === "application.shortlisted") {
+    const ids = (e.payload as { applicationIds?: string[] }).applicationIds ?? [];
+    await dispatch(
+      "screening",
+      `${ids.length} candidate(s) were shortlisted for ${req.code} "${req.title}". Prepare their screening kits, send assessments and summarise who should proceed.`,
+    );
+  }
+
+  if (e.type === "application.advanced") {
+    const ids = (e.payload as { applicationIds?: string[] }).applicationIds ?? [];
+    await dispatch(
+      "interview",
+      `${ids.length} candidate(s) advanced to an interview round for ${req.code} "${req.title}". Book their next rounds.`,
+      // One candidate: the run is theirs, so its cost counts in their hiring cost.
+      ids.length === 1 ? { type: "application", id: ids[0]! } : undefined,
+    );
+  }
+
+  if (e.type === "scorecard.submitted") {
+    const p = e.payload as {
+      applicationId?: string;
+      level?: number;
+      verdict?: string;
+      finalRound?: boolean;
+      policy?: string;
+      heldForPanelReview?: boolean;
+    };
+    // Under the "immediate" policy the round's verdict already moved the
+    // candidate: nobody is asked for a hiring decision.
+    const due =
+      p.policy !== "immediate" &&
+      (p.finalRound !== false || p.verdict === "hold" || p.verdict === "reject");
+    await dispatch(
+      "evaluation",
+      `Interview round L${p.level ?? "?"} is complete (round verdict: ${p.verdict ?? "?"}) for ${req.code} "${req.title}". Debrief candidate application ${p.applicationId}${
+        due
+          ? " and ask the hiring manager for the hiring decision."
+          : p.heldForPanelReview
+            ? ". The move is on hold: the round's panel agent disagrees with the panel and the HR head reviews it. Write the debrief only — do not request a hiring decision."
+            : p.policy === "immediate"
+              ? ". The role's verdict policy is immediate, so the round's verdict has already moved the candidate: write the debrief only — do not request a hiring decision."
+              : ". This is not the final round and the verdict is select: write the debrief only — do not request a hiring decision."
+      }`,
+      p.applicationId ? { type: "application", id: p.applicationId } : undefined,
+    );
+  }
+
+  // Silent panel agents: the round's own level's agent reads the call.
+  if (e.type === "interview.transcript_ready" && applicationId) {
+    const p = e.payload as { level?: number; interviewId?: string };
+    if (p.interviewId && (p.level === 1 || p.level === 2 || p.level === 3))
+      await dispatch(
+        `panel_l${p.level}`,
+        `The call of the L${p.level} interview round ${p.interviewId} (candidate application ${applicationId}, ${req.code} "${req.title}") has its transcript. Assess it and send the panel the factual summary.`,
+        { type: "application", id: applicationId },
+      );
+  }
+
+  // The panel has scored and the round's panel agent's view differs: it asks the HR head.
+  if (e.type === "panel.review_due" && applicationId) {
+    const p = e.payload as { level?: number; interviewId?: string; outcome?: string };
+    if (p.interviewId && (p.level === 1 || p.level === 2 || p.level === 3))
+      await dispatch(
+        `panel_l${p.level}`,
+        `The panel has finished scoring the L${p.level} interview round ${p.interviewId} (candidate application ${applicationId}, ${req.code} "${req.title}"), and your view of the call ${p.outcome === "disagree" ? "disagrees with" : "partly agrees with"} theirs. Ask the HR head to review it with request_panel_review.`,
+        { type: "application", id: applicationId },
+      );
+  }
+
+  if (e.type === "interview.panellist_unavailable" && applicationId) {
+    const p = e.payload as { level?: number; memberId?: string; name?: string; when?: string };
+    await dispatch(
+      "interview",
+      `${p.name ?? "A panellist"} (memberId ${p.memberId}) cannot make the booked L${p.level ?? "?"} interview of candidate application ${applicationId} (${req.code} "${req.title}") on ${p.when ?? "its booked time"}. Propose a stand-in for that candidate only: list_substitutes, then propose_substitute — someone free at the booked time if possible, so the candidate's time stays. Do not offer new times unless you are told the booking was cancelled.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
+  if (e.type === "interview.panel_times_rejected" && applicationId) {
+    const p = e.payload as {
+      level?: number;
+      interviewerEmail?: string | null;
+      panelEmails?: string[];
+      suggested?: { email: string; at: string }[];
+      said?: string;
+    };
+    const sugg = (p.suggested ?? []).map((x) => x.at);
+    await dispatch(
+      "interview",
+      `No proposed L${p.level ?? "?"} interview time suits the whole panel for candidate application ${applicationId} (${req.code} "${req.title}"); the candidate was not contacted. What the panel said: ${String(p.said ?? "").slice(0, 600)}. Offer new times with the same panel (interviewerEmail ${p.interviewerEmail ?? "?"}${p.panelEmails?.length ? `, panelEmails ${p.panelEmails.join(", ")}` : ""}): ${sugg.length ? `start from the suggested times ${sugg.join(", ")} and add free times from find_interview_slots` : "use find_interview_slots"}. The panel is asked again before the candidate hears.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
+  if (e.type === "interview.missed" && applicationId) {
+    const p = e.payload as { level?: number; outcome?: string };
+    await dispatch(
+      "interview",
+      `The L${p.level ?? "?"} interview for candidate application ${applicationId} (${req.code} "${req.title}") did not happen (${(p.outcome ?? "").replace(/_/g, " ")}). Offer new times for that round.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
+  if (applicationId && e.type === "interview.slots_unanswered") {
+    const p = e.payload as { level?: number; why?: string; note?: string | null };
+    await dispatch(
+      "interview",
+      `Candidate application ${applicationId} (${req.code} "${req.title}") did not take the offered L${p.level ?? "?"} interview times (${p.why === "expired" ? "the link expired unanswered" : "none of them work"}${p.note ? `: "${String(p.note).slice(0, 300)}"` : ""}). Offer different times — other days and times of day, honouring what they said — or ask a person if that is not possible. Offering them places the scheduling call (or e-mails them) by itself.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
+  if (applicationId && e.type === "interview.slots_no_reply") {
+    const p = e.payload as { level?: number };
+    await dispatch(
+      "interview",
+      `Candidate application ${applicationId} (${req.code} "${req.title}") was e-mailed the L${p.level ?? "?"} interview times because no call could be placed then; a call is possible now. Ask for a scheduling call (request_scheduling_call) so the assistant phones them to pick one. If it is refused, leave it to the e-mail — do not offer new times.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
+  if (applicationId && e.type === "assessment.completed") {
+    const p = e.payload as { score?: number | null };
+    // Only while the candidate is still at screening: once a person has moved
+    // them on, the screening recommendation is no longer the open question.
+    const [app] = await db
+      .select({ stage: applications.stage })
+      .from(applications)
+      .where(and(eq(applications.id, applicationId), eq(applications.orgId, e.orgId)))
+      .limit(1);
+    if (app && ["applied", "ai_screened", "shortlisted", "reserve", "on_hold"].includes(app.stage))
+      await dispatch(
+        "screening",
+        `Candidate application ${applicationId} (${req.code} "${req.title}") completed the written assessment${p.score != null ? ` (${p.score}/100)` : ""}. Read the result, add your proceed / hold recommendation as a candidate note citing the scores and red flags, then ask a person to decide (request_approval, screening_decision). Never move them yourself — a person decides.`,
+        { type: "application", id: applicationId },
+      );
+  }
+
+  if (applicationId && e.type === "screening_call.ended") {
+    const p = e.payload as { status?: string; endReason?: string; missingDetails?: string[] };
+    // Required details the call did not get (checked on every ending, also a cut-off).
+    const missing = p.missingDetails?.length
+      ? ` The call did not get ${p.missingDetails.join(", ")}: include in your note that a person should ask for them (or send the pay & availability form).`
+      : "";
+    const [app] = await db
+      .select({ stage: applications.stage })
+      .from(applications)
+      .where(and(eq(applications.id, applicationId), eq(applications.orgId, e.orgId)))
+      .limit(1);
+    if (app && ["shortlisted", "reserve", "on_hold"].includes(app.stage))
+      await dispatch(
+        "screening",
+        p.status === "completed" && p.endReason !== "not_interested"
+          ? `Candidate application ${applicationId} (${req.code} "${req.title}") took the AI screening call and the answers were graded.${missing} Read the result, add your proceed / hold recommendation as a candidate note, then ask a person to decide (request_approval, screening_decision). Never move them yourself — a person decides.`
+          : `Candidate application ${applicationId} (${req.code} "${req.title}"): the AI screening call ended — ${p.endReason ?? p.status}. Act on how it ended as your instructions say (the written assessment, or a note for a person).`,
+        { type: "application", id: applicationId },
+      );
+  }
+
+  if (applicationId && e.type === "negotiation.agreed") {
+    // A figure agreed with the candidate (their answer or a recorded call):
+    // the Offer agent drafts (or revises a sent-back draft) at it.
+    const busy = await db
+      .select({ id: offers.id })
+      .from(offers)
+      .where(
+        and(
+          eq(offers.orgId, e.orgId),
+          eq(offers.applicationId, applicationId),
+          inArray(offers.status, ["pending_hr", "pending_cbo", "approved", "released", "accepted"]),
+        ),
+      )
+      .limit(1);
+    if (!busy.length)
+      await dispatch(
+        "offer",
+        `A pay figure was agreed with the candidate for application ${applicationId} (${req.code} "${req.title}"). Read get_offer_context: draft the offer (or revise the sent-back draft) at the agreed figure with the joining date, generate the letter and take it through HR head and CBO approval.`,
+        { type: "application", id: applicationId },
+      );
+  }
+
+  if (applicationId && e.type === "negotiation.needs_call") {
+    // The candidate countered, asked for a call or let the link close: the Offer
+    // agent may ask for the AI pay call (the HR head approves it).
+    const p = e.payload as { negotiationId?: string; why?: string };
+    const why =
+      p.why === "countered"
+        ? "replied to the pay message with another figure"
+        : p.why === "call_requested"
+          ? "asked for a call about the pay"
+          : "did not answer the pay message before its link closed";
+    await dispatch(
+      "offer",
+      `The candidate for application ${applicationId} (${req.code} "${req.title}") ${why}. Read get_offer_context and follow step 1f: ask for the AI pay call for negotiation ${p.negotiationId ?? "(see context)"}, or finish if it is refused.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
+  if (applicationId && e.type === "compensation.submitted") {
+    // The offer waits for the candidate's expectation: continue it once known —
+    // only for a selected candidate whose offer is not already with approvers.
+    const [app] = await db
+      .select({ stage: applications.stage })
+      .from(applications)
+      .where(and(eq(applications.id, applicationId), eq(applications.orgId, e.orgId)))
+      .limit(1);
+    const offerRows = await db
+      .select({ status: offers.status })
+      .from(offers)
+      .where(and(eq(offers.orgId, e.orgId), eq(offers.applicationId, applicationId)));
+    const [selected] = await db
+      .select({ id: agentEvents.id })
+      .from(agentEvents)
+      .where(
+        and(
+          eq(agentEvents.orgId, e.orgId),
+          eq(agentEvents.type, "hiring.selected"),
+          eq(agentEvents.subjectId, applicationId),
+        ),
+      )
+      .limit(1);
+    const busy = offerRows.some((o) =>
+      ["pending_hr", "pending_cbo", "approved", "released", "accepted", "countered"].includes(
+        o.status,
+      ),
+    );
+    const wanted =
+      app?.stage === "offer_pending" || !!selected || offerRows.some((o) => o.status === "draft");
+    if (app && wanted && !busy && !["rejected", "hired", "joined", "withdrawn"].includes(app.stage))
+      await dispatch(
+        "offer",
+        `The candidate for application ${applicationId} (${req.code} "${req.title}") has shared their expected CTC and notice period. Continue the offer: read get_offer_context and propose within the band, or ask the HR head first if the expectation is above it.`,
+        { type: "application", id: applicationId },
+      );
+  }
+
+  if (applicationId && e.type === "hiring.selected") {
+    await dispatch(
+      "offer",
+      `The hiring manager selected candidate application ${applicationId} for ${req.code} "${req.title}". Prepare the offer within the approved band and take it through approval.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
+  if (
+    applicationId &&
+    e.type === "offer.status_changed" &&
+    payload.to === "draft" &&
+    (e.payload as { sentBack?: boolean }).sentBack
+  ) {
+    await dispatch(
+      "offer",
+      `An approver sent the offer for candidate application ${applicationId} (${req.code} "${req.title}") back to draft: "${String(payload.comment ?? "").slice(0, 500)}". Address their reason inside the band and take it through approval again, or ask a person.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
+  if (applicationId && e.type === "offer.status_changed" && payload.to === "countered") {
+    await dispatch(
+      "offer",
+      `The candidate for application ${applicationId} (${req.code} "${req.title}") asked for changes to their offer. Read what they asked for, propose a revision inside the band with your reasoning, regenerate the letter and take it through approval again.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
+  if (applicationId && e.type === "offer.status_changed" && payload.to === "approved") {
+    await dispatch(
+      "onboarding",
+      `The offer for candidate application ${applicationId} (${req.code} "${req.title}") is approved. Collect and cross-check the pre-onboarding documents, ask HR to validate them, then ask for the release.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
+  if (applicationId && e.type === "onboarding.document_received") {
+    // Only once the candidate has an approved offer (documents can arrive earlier).
+    const [approved] = await db
+      .select({ id: offers.id })
+      .from(offers)
+      .where(
+        and(
+          eq(offers.orgId, e.orgId),
+          eq(offers.applicationId, applicationId),
+          eq(offers.status, "approved"),
+        ),
+      )
+      .limit(1);
+    if (approved)
+      await dispatch(
+        "onboarding",
+        `A pre-onboarding document arrived for candidate application ${applicationId} (${req.code} "${req.title}"). Check readiness and ask HR to validate what is pending.`,
+        { type: "application", id: applicationId },
+      );
+  }
+
+  if (applicationId && e.type === "onboarding.document_rejected") {
+    const p = e.payload as { docType?: string; reason?: string };
+    await dispatch(
+      "onboarding",
+      `HR rejected the ${String(p.docType ?? "document").replace(/_/g, " ")} for candidate application ${applicationId} (${req.code} "${req.title}"): "${String(p.reason ?? "").slice(0, 300)}". Ask the candidate for a new copy, telling them why.`,
+      { type: "application", id: applicationId },
+    );
+  }
+
+  if (e.type === "jd.changes_requested") {
+    await dispatch(
+      "jd",
+      `The department head asked for changes to the job description for ${req.code} "${req.title}": ${payload.comment ?? "(no comment)"}. Revise it and resubmit.`,
+    );
+  }
+
+  if (e.type === "jd.approved" && req.status === "approved") {
+    const [published] = await db
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.orgId, e.orgId),
+          eq(agentRuns.agentType, "publishing"),
+          eq(agentRuns.subjectId, req.id),
+          eq(agentRuns.status, "done"),
+          eq(agentRuns.mode, "live"),
+        ),
+      )
+      .limit(1);
+    if (!published) {
+      await dispatch(
+        "publishing",
+        `Requisition ${req.code} "${req.title}" and its job description are approved. Publish it internally and prepare the external posts.`,
+      );
+    }
+    // The Distribution agent advertises it across the portals — only where the
+    // organisation switched it on (no "agent is off" note for an optional agent).
+    if (
+      getAgent("distribution") &&
+      (await loadPolicy(e.orgId, "distribution")).enabled &&
+      !(await recentRun(e.orgId, "distribution", 24 * 30, req.id))
+    ) {
+      await dispatch(
+        "distribution",
+        `Requisition ${req.code} "${req.title}" and its job description are approved. Advertise it on the right job portals and make sure the CVs they send back reach it.`,
+      );
+    }
+  }
+  return { started, synced };
+}
+
+/* ------------------------------------------------------ inline kick (dev UX) */
+
+const kicking = new Set<string>();
+/** Inline kick loops in flight in this process — a ceiling against storms. */
+let inFlight = 0;
+const MAX_INLINE_KICKS = 12;
+
+/**
+ * Best-effort: process this org's events and advance its runs right away, so
+ * people see agents react without waiting for the next scheduler tick. The
+ * scheduler (/api/public/agent-tick) remains the source of truth. Disabled in
+ * tests and with AGENT_INLINE_KICK=0.
+ *
+ * Runs are independent: a kick while another kick for the same organisation
+ * is still driving a long run does not wait behind it — it claims and drives
+ * what is queued now (claims are disjoint, so two kicks never drive the same
+ * run). Only events and sweeps stay with one kick per organisation at a time.
+ */
+export function kickAgents(orgId: string): void {
+  if (process.env["NODE_ENV"] === "test" || process.env["AGENT_INLINE_KICK"] === "0") return;
+  if (inFlight >= MAX_INLINE_KICKS) return; // the scheduler picks the rest up
+  const lead = !kicking.has(orgId);
+  if (lead) kicking.add(orgId);
+  inFlight++;
+  // Detach from the caller's run scope: the tick drives other runs (each sets
+  // its own scope) and must not credit their events to the run that kicked it.
+  void agentRunScope.exit(async () => {
+    try {
+      const { ensureAgentsRegistered } = await import("./index");
+      ensureAgentsRegistered();
+      const { runAgentTick } = await import("./runtime.server");
+      for (let i = 0; i < 3; i++) {
+        const c = await runAgentTick({ orgId, max: 3, ...(lead ? {} : { runsOnly: true }) });
+        if (!c.claimed && !c.reclaimed) break;
+      }
+    } catch (err) {
+      log.warn("agent.kick.failed", { org_id: orgId, error: err as Error });
+    } finally {
+      inFlight--;
+      if (lead) kicking.delete(orgId);
+    }
+  });
+}
+
+/** Events still waiting, for diagnostics. */
+export async function pendingEventCount(orgId: string): Promise<number> {
+  const [r] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(agentEvents)
+    .where(and(eq(agentEvents.orgId, orgId), eq(agentEvents.status, "pending")));
+  return Number(r?.n ?? 0);
+}
+
+/* ------------------------------------------------------------------ sweeps */
+
+const INTAKE_COOLDOWN_HOURS = 6;
+/** New applicants wait at most this long for an intake run (minutes between runs per role). */
+const FRESH_INTAKE_MINUTES = 10;
+const FOLLOWUP_COOLDOWN_HOURS = 20;
+
+async function enabledOrgs(agentType: string, orgId?: string): Promise<string[]> {
+  const rows = await db
+    .select({ orgId: agentPolicies.orgId })
+    .from(agentPolicies)
+    .where(
+      and(
+        eq(agentPolicies.agentType, agentType as never),
+        eq(agentPolicies.enabled, true),
+        orgId ? eq(agentPolicies.orgId, orgId) : undefined,
+        sql`not exists (select 1 from agent_policies p where p.org_id = ${agentPolicies.orgId} and p.agent_type = '*' and p.enabled = false)`,
+      ),
+    );
+  return rows.map((r) => r.orgId);
+}
+
+async function ownerOf(orgId: string): Promise<string | null> {
+  const [o] = await db
+    .select({ userId: orgMembers.userId })
+    .from(orgMembers)
+    .where(
+      and(
+        eq(orgMembers.orgId, orgId),
+        eq(orgMembers.isOwner, true),
+        eq(orgMembers.status, "active"),
+      ),
+    )
+    .limit(1);
+  return o?.userId ?? null;
+}
+
+async function recentRun(
+  orgId: string,
+  agentType: string,
+  hours: number,
+  subjectId?: string,
+): Promise<boolean> {
+  const [r] = await db
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, orgId),
+        eq(agentRuns.agentType, agentType as never),
+        // Dry-run replays never stand in for real work.
+        eq(agentRuns.mode, "live"),
+        subjectId ? eq(agentRuns.subjectId, subjectId) : undefined,
+        sql`(${agentRuns.status} in ('queued','running','awaiting_human') or ${agentRuns.createdAt} >= now() - make_interval(hours => ${hours}))`,
+      ),
+    )
+    .limit(1);
+  return Boolean(r);
+}
+
+/**
+ * Time-based work the event stream does not cover (docs/agentic-plan.md §3.1):
+ * intake for approved requisitions with unscored or held applications, and a
+ * daily follow-up pass. Only for organisations that switched the agent on.
+ */
+export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<number> {
+  let started = 0;
+  // Every answered AI phone call gets its Voice Guard review (mandatory).
+  if (getAgent("voice_guard")) {
+    try {
+      const { sweepCallReviews } = await import("../voice/guard/review.server");
+      started += (await sweepCallReviews(opts)).started;
+    } catch (err) {
+      log.warn("voice_guard.sweep_failed", { error: err as Error });
+    }
+  }
+  // Applicants who just arrived (any channel) are scored within minutes, not
+  // at the next 6-hourly pass; agent-added ones are scored by the run that added them.
+  if (getAgent("intake")) {
+    for (const orgId of await enabledOrgs("intake", opts.orgId)) {
+      const fresh = (await db.execute(sql`
+        select a.requisition_id id, count(*)::int n, string_agg(distinct a.source, ', ') sources
+        from ${applications} a
+        join ${requisitions} r on r.id = a.requisition_id and r.status = 'approved'
+        where a.org_id = ${orgId}
+          and a.applied_at >= now() - interval '2 hours'
+          and a.source not like 'agent%'
+          and not exists (select 1 from ${matchScores} m where m.application_id = a.id)
+        group by a.requisition_id
+        limit 10`)) as unknown as { id: string; n: number; sources: string }[];
+      for (const f of fresh) {
+        const [busy] = (await db.execute(sql`
+          select 1 from agent_runs where org_id = ${orgId} and agent_type = 'intake'
+            and subject_id = ${f.id} and mode = 'live'
+            and (status in ('queued','running','awaiting_human') or created_at >= now() - interval '${sql.raw(String(FRESH_INTAKE_MINUTES))} minutes')
+          limit 1`)) as unknown as unknown[];
+        if (busy) continue;
+        const [r] = await db
+          .select({
+            code: requisitions.code,
+            title: requisitions.title,
+            createdBy: requisitions.createdBy,
+          })
+          .from(requisitions)
+          .where(and(eq(requisitions.id, f.id), eq(requisitions.orgId, orgId)))
+          .limit(1);
+        const principal = r?.createdBy ?? (await ownerOf(orgId));
+        if (!r || !principal) continue;
+        await startRun({
+          orgId,
+          agentType: "intake",
+          principalUserId: principal,
+          goal: `${f.n} new application(s) arrived for ${r.code} "${r.title}" (via ${f.sources}). Score them and review who should be shortlisted.\n\nRequisition id: ${f.id}`,
+          subjectType: "requisition",
+          subjectId: f.id,
+        });
+        started++;
+      }
+    }
+  }
+  // Starving roles get the Sourcing agent (once a day per role at most), and
+  // new CVs in the pool are checked against the open roles (plain code).
+  if (getAgent("sourcing")) {
+    const { starvingRoles } = await import("./sourcing.server");
+    const { matchNewCvsToRoles } = await import("./pool-match.server");
+    for (const orgId of await enabledOrgs("sourcing", opts.orgId)) {
+      try {
+        await matchNewCvsToRoles(orgId);
+      } catch (err) {
+        log.warn("pool.match_failed", { org_id: orgId, error: err as Error });
+      }
+      for (const r of await starvingRoles(orgId)) {
+        const principal = r.createdBy ?? (await ownerOf(orgId));
+        if (!principal) continue;
+        await startRun({
+          orgId,
+          agentType: "sourcing",
+          principalUserId: principal,
+          goal: `${r.code} "${r.title}" needs more candidates. Check its supply, top it up from the talent pool and past candidates, and recommend what to change.\n\nRequisition id: ${r.id}`,
+          subjectType: "requisition",
+          subjectId: r.id,
+        });
+        started++;
+      }
+    }
+  }
+  // The Distribution agent's daily check: CVs arriving by portal, quiet
+  // listings, unread inbox mail and role-limited CVs past retention.
+  if (getAgent("distribution")) {
+    for (const orgId of await enabledOrgs("distribution", opts.orgId)) {
+      const [recent] = await db
+        .select({ id: agentRuns.id })
+        .from(agentRuns)
+        .where(
+          and(
+            eq(agentRuns.orgId, orgId),
+            eq(agentRuns.agentType, "distribution"),
+            eq(agentRuns.mode, "live"),
+            isNull(agentRuns.subjectId),
+            sql`(${agentRuns.status} in ('queued','running','awaiting_human') or ${agentRuns.createdAt} >= now() - interval '20 hours')`,
+          ),
+        )
+        .limit(1);
+      if (recent) continue;
+      const principal = await ownerOf(orgId);
+      if (!principal) continue;
+      await startRun({
+        orgId,
+        agentType: "distribution",
+        principalUserId: principal,
+        goal: "Daily check: CVs arriving from the job portals, listings that have sent none, careers-inbox mail that could not be read, and CVs a portal limited to their role that are due for erasure.",
+      });
+      started++;
+    }
+  }
+  // The Organisation context agent's monthly website re-read: pages whose hash
+  // is unchanged cost no AI call; a changed site raises a draft for approval.
+  if (getAgent("org_context")) {
+    for (const orgId of await enabledOrgs("org_context", opts.orgId)) {
+      const { orgProfiles } = await import("@db/schema");
+      const [p] = await db
+        .select({
+          websiteUrl: orgProfiles.websiteUrl,
+          currentVersionId: orgProfiles.currentVersionId,
+          nextRereadAt: orgProfiles.nextRereadAt,
+        })
+        .from(orgProfiles)
+        .where(eq(orgProfiles.orgId, orgId))
+        .limit(1);
+      if (!p?.websiteUrl || !p.currentVersionId) continue;
+      if (p.nextRereadAt && p.nextRereadAt.getTime() > Date.now()) continue;
+      const [recent] = await db
+        .select({ id: agentRuns.id })
+        .from(agentRuns)
+        .where(
+          and(
+            eq(agentRuns.orgId, orgId),
+            eq(agentRuns.agentType, "org_context"),
+            eq(agentRuns.mode, "live"),
+            sql`(${agentRuns.status} in ('queued','running','awaiting_human') or ${agentRuns.createdAt} >= now() - interval '7 days')`,
+          ),
+        )
+        .limit(1);
+      if (recent) continue;
+      const principal = await ownerOf(orgId);
+      if (!principal) continue;
+      await startRun({
+        orgId,
+        agentType: "org_context",
+        principalUserId: principal,
+        goal: "Monthly website re-read: re-read the organisation's website, propose what changed as profile items with their exact quotes, and submit the version for approval. If nothing changed, say so and finish without submitting.",
+        subjectType: "org_profile",
+        subjectId: p.currentVersionId,
+      });
+      await db
+        .update(orgProfiles)
+        .set({ nextRereadAt: new Date(Date.now() + 30 * 864e5), updatedAt: new Date() })
+        .where(eq(orgProfiles.orgId, orgId));
+      started++;
+    }
+  }
+  // The Labour law & policy agent's weekly read of the organisation's approved
+  // official sources (docs/labour-policy-agent-plan.md): unchanged pages cost no AI call.
+  if (getAgent("labour_policy")) {
+    for (const orgId of await enabledOrgs("labour_policy", opts.orgId)) {
+      const { policySources } = await import("@db/schema");
+      const [src] = await db
+        .select({ id: policySources.id })
+        .from(policySources)
+        .where(and(eq(policySources.orgId, orgId), eq(policySources.active, true)))
+        .limit(1);
+      if (!src) continue;
+      const [recent] = await db
+        .select({ id: agentRuns.id })
+        .from(agentRuns)
+        .where(
+          and(
+            eq(agentRuns.orgId, orgId),
+            eq(agentRuns.agentType, "labour_policy"),
+            eq(agentRuns.mode, "live"),
+            sql`(${agentRuns.status} in ('queued','running','awaiting_human') or ${agentRuns.createdAt} >= now() - interval '7 days')`,
+          ),
+        )
+        .limit(1);
+      if (recent) continue;
+      const principal = await ownerOf(orgId);
+      if (!principal) continue;
+      await startRun({
+        orgId,
+        agentType: "labour_policy",
+        principalUserId: principal,
+        goal: "Weekly policy check: read each approved source, record every change that matters to hiring where the organisation hires with the source's exact words, and ask the HR head about each. If nothing changed, say so.",
+      });
+      started++;
+    }
+  }
+  // Interview times nobody chose in time close, and the team hears about it.
+  try {
+    const { expireOffers } = await import("@/lib/slot-offers.server");
+    await expireOffers(opts.orgId);
+  } catch (err) {
+    log.warn("interview.slot_expiry_failed", { error: err as Error });
+  }
+  // The end-to-end hiring SLA: the desk hears once when a candidate falls behind.
+  try {
+    const { sweepHiringSla } = await import("../hiring-sla.server");
+    await sweepHiringSla(opts.orgId);
+  } catch (err) {
+    log.warn("hiring.sla_sweep_failed", { error: err as Error });
+  }
+  // Scorecards are due 2 hours after a round: reminders, then the HR head.
+  try {
+    const { sweepScorecards } = await import("@/lib/scorecard-chase.server");
+    await sweepScorecards(opts.orgId);
+  } catch (err) {
+    log.warn("interview.scorecard_sweep_failed", { error: err as Error });
+  }
+  // The panel's answer window: a reminder, then a default so a silent panelist
+  // never holds the candidate up past the hiring SLA.
+  try {
+    const { sweepPanelAnswers } = await import("@/lib/interview-confirmations.server");
+    await sweepPanelAnswers(opts.orgId);
+  } catch (err) {
+    log.warn("interview.panel_answer_sweep_failed", { error: err as Error });
+  }
+  // Interview links held for the scheduling call that went first: e-mailed once
+  // that call ended without a booking, never got going, or ran out of time.
+  try {
+    const { releaseHeldOfferLinks } = await import("@/lib/slot-offers.server");
+    await releaseHeldOfferLinks(opts.orgId);
+  } catch (err) {
+    log.warn("interview.link_release_failed", { error: err as Error });
+  }
+  // Times that could only be e-mailed (no call was possible when offered): once a
+  // call is possible, the Interview coordinator asks for one (once per offer).
+  try {
+    const { raiseUnansweredOffers } = await import("../voice/scheduling-request.server");
+    await raiseUnansweredOffers(Date.now(), opts.orgId);
+  } catch (err) {
+    log.warn("scheduling_call.trigger_failed", { error: err as Error });
+  }
+  // Interview calls the silent panel agent reads: their transcripts are
+  // fetched from the meeting provider after the call (plain code).
+  try {
+    const { sweepTranscripts } = await import("../panel/transcripts.server");
+    await sweepTranscripts(opts.orgId);
+  } catch (err) {
+    log.warn("panel.transcript_sweep_failed", { error: err as Error });
+  }
+  // Training data older than each organisation's retention is deleted.
+  try {
+    const { applyTrainingRetention } = await import("@/lib/training.functions");
+    await applyTrainingRetention(opts.orgId);
+  } catch (err) {
+    log.warn("training.retention_failed", { error: err as Error });
+  }
+  // Written assessments: due reminders, overdue follow-up, closing links
+  // (the organisation's policy — src/lib/assessment-timeline.server.ts).
+  try {
+    const { runAssessmentSweep } = await import("@/lib/assessment-timeline.server");
+    await runAssessmentSweep(opts.orgId);
+  } catch (err) {
+    log.warn("assessment.sweep_failed", { error: err as Error });
+  }
+  // Pay discussions whose link closed unanswered (src/lib/negotiation.server.ts).
+  try {
+    const { runNegotiationSweep } = await import("@/lib/negotiation.server");
+    await runNegotiationSweep(opts.orgId);
+  } catch (err) {
+    log.warn("negotiation.sweep_failed", { error: err as Error });
+  }
+  // Pay & availability forms: the same timeline (src/lib/compensation.server.ts).
+  try {
+    const { runCompensationSweep } = await import("@/lib/compensation.server");
+    await runCompensationSweep(opts.orgId);
+  } catch (err) {
+    log.warn("compensation.sweep_failed", { error: err as Error });
+  }
+  // Google for Jobs follows each role's state; Google is told within the
+  // platform's daily quota (src/server/distribution/).
+  try {
+    const { reconcileGoogleListings } = await import("../distribution/distribution.server");
+    await reconcileGoogleListings(opts.orgId);
+    if (!opts.orgId) {
+      const { processIndexQueue } = await import("../distribution/google-indexing.server");
+      await processIndexQueue();
+    }
+  } catch (err) {
+    log.warn("distribution.sweep_failed", { error: err as Error });
+  }
+  // Deleted hiring-desk chats past their 30-day restore are removed for good.
+  if (!opts.orgId) {
+    try {
+      const { purgeDeletedThreads } = await import("../desk/desk.server");
+      await purgeDeletedThreads();
+    } catch (err) {
+      log.warn("desk.purge_failed", { error: err as Error });
+    }
+  }
+  // Hiring-desk threads hear about new applicants.
+  try {
+    const { announceNewApplicants } = await import("../desk/desk.server");
+    await announceNewApplicants(opts.orgId);
+  } catch (err) {
+    log.warn("desk.announce_failed", { error: err as Error });
+  }
+  if (getAgent("intake")) {
+    for (const orgId of await enabledOrgs("intake", opts.orgId)) {
+      const reqs = await db
+        .select({
+          id: requisitions.id,
+          code: requisitions.code,
+          title: requisitions.title,
+          createdBy: requisitions.createdBy,
+        })
+        .from(requisitions)
+        .where(
+          and(
+            eq(requisitions.orgId, orgId),
+            eq(requisitions.status, "approved"),
+            // Something new to review: an unscored application, or a candidate
+            // put on hold since the last review. A hold that is only waiting for
+            // a person is not new — re-reviewing it every cooldown spent a full
+            // run (and a pool top-up) each time while nothing had changed.
+            sql`(
+              exists (
+                select 1 from ${applications} a
+                left join ${matchScores} m on m.application_id = a.id
+                where a.requisition_id = ${requisitions.id} and m.id is null
+              )
+              or exists (
+                select 1 from ${applications} a
+                where a.org_id = ${orgId}
+                  and a.requisition_id = ${requisitions.id}
+                  and a.stage = 'ai_screened'
+                  and coalesce(
+                    (select max(se.created_at) from stage_events se
+                     where se.org_id = ${orgId} and se.application_id = a.id
+                       and se.to_stage = 'ai_screened'),
+                    a.applied_at
+                  ) > coalesce((
+                    select max(ar.created_at) from ${agentRuns} ar
+                    where ar.org_id = ${orgId} and ar.agent_type = 'intake'
+                      and ar.subject_id = ${requisitions.id} and ar.mode = 'live'
+                  ), 'epoch'::timestamptz)
+              )
+            )`,
+          ),
+        )
+        .limit(5);
+      for (const r of reqs) {
+        if (await recentRun(orgId, "intake", INTAKE_COOLDOWN_HOURS, r.id)) continue;
+        const principal = r.createdBy ?? (await ownerOf(orgId));
+        if (!principal) continue;
+        // While candidates wait on a person, more candidates from the pool only
+        // add to the queue (and to the role's cost) — hold the top-up until then.
+        const [held] = (await db.execute(sql`
+          select count(*)::int as n from ${applications}
+          where org_id = ${orgId} and requisition_id = ${r.id} and stage = 'ai_screened'`)) as unknown as {
+          n: number;
+        }[];
+        const topUp = held?.n
+          ? `do not add candidates from the talent pool — ${held.n} held candidate(s) are still waiting for a person to decide`
+          : "top up from the talent pool if the shortlist is thin";
+        await startRun({
+          orgId,
+          agentType: "intake",
+          principalUserId: principal,
+          goal: `Review the pipeline for ${r.code} "${r.title}": score new applications, review held candidates, propose rejections for a person to confirm, and ${topUp}.\n\nRequisition id: ${r.id}`,
+          subjectType: "requisition",
+          subjectId: r.id,
+        });
+        started++;
+      }
+    }
+  }
+  if (getAgent("followup")) {
+    for (const orgId of await enabledOrgs("followup", opts.orgId)) {
+      if (await recentRun(orgId, "followup", FOLLOWUP_COOLDOWN_HOURS)) continue;
+      const owner = await ownerOf(orgId);
+      if (!owner) continue;
+      await startRun({
+        orgId,
+        agentType: "followup",
+        principalUserId: owner,
+        goal: "Daily follow-up: find everything overdue and remind the right people.",
+      });
+      started++;
+    }
+  }
+  return started;
+}

@@ -1,0 +1,44 @@
+{
+  "name": "atsagent-monorepo",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "tools/*"
+  ],
+  "scripts": {
+    "build": "bunx turbo run build",
+    "typecheck": "bunx turbo run typecheck",
+    "lint": "eslint apps scripts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "for f in scripts/*.test.ts; do bun test \"$f\" || fails=\"$fails $f\"; done; [ -z \"$fails\" ] || { echo \"failed:$fails\"; exit 1; }",
+    "test:db": "DATABASE_URL=${DATABASE_URL:?DATABASE_URL required} bun run test",
+    "db:migrate": "node scripts/migrate-pg.mjs",
+    "db:local": "bash scripts/local-db.sh",
+    "agents:lock": "bun scripts/agents-lock.ts",
+    "eval:agents": "bun scripts/agent-eval.ts",
+    "eval:matching": "bun scripts/matching-eval.ts",
+    "eval:weights": "bun scripts/weight-eval.ts",
+    "test:e2e": "bun scripts/local-e2e/e2e-check.ts",
+    "bias-report": "bun scripts/bias-report.ts",
+    "prepare": "git config core.hooksPath .githooks || true"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.32.0",
+    "dependency-cruiser": "^16.10.4",
+    "eslint": "^9.32.0",
+    "eslint-config-prettier": "^10.1.1",
+    "eslint-plugin-prettier": "^5.5.7",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^15.15.0",
+    "prettier": "^3.9.10",
+    "turbo": "^2.5.10",
+    "typescript-eslint": "^8.72.1"
+  },
+  "packageManager": "bun@1.3.14",
+  "dependencies": {
+    "postgres": "^3.4.9"
+  }
+}

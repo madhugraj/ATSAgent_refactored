@@ -1,0 +1,251 @@
+UNMAPPED 24 src/lib/agent-governance.functions.ts src/lib/agent-intelligence.functions.ts src/lib/agent-modality.ts src/lib/agent-reports.ts src/lib/appearance.ts src/lib/call-reviews.functions.ts src/lib/demand-outlook.ts src/lib/hiring-oversight.functions.ts src/lib/iso.ts src/lib/labour-policy.functions.ts src/lib/labour-policy.server.ts src/lib/pay-context.server.ts src/lib/pay-convert.ts src/lib/pay-settings.functions.ts src/lib/pay-settings.server.ts src/lib/pay-settings.ts src/lib/pay-terms.ts src/lib/pool-coverage.ts src/lib/report-window.ts src/lib/weight-advice.ts src/lib/workflow-templates.ts src/server/copilot/copilot.server.ts src/server/copilot/data.server.ts src/server.ts
+SIZES {"ui":{"files":216,"lines":66253},"UNMAPPED":{"files":24,"lines":8922},"agents":{"files":61,"lines":26369},"ai":{"files":12,"lines":4545},"candidates":{"files":19,"lines":3112},"interviews":{"files":40,"lines":11415},"auth":{"files":12,"lines":1003},"matching":{"files":14,"lines":4132},"distribution":{"files":16,"lines":4439},"onboarding":{"files":9,"lines":3203},"catalogue":{"files":9,"lines":1627},"org":{"files":22,"lines":9001},"offers":{"files":22,"lines":5957},"desk":{"files":10,"lines":8247},"db":{"files":3,"lines":8168},"comms":{"files":36,"lines":5702},"core":{"files":24,"lines":2369},"requisitions":{"files":14,"lines":3450},"voice":{"files":40,"lines":10425},"platform-admin":{"files":4,"lines":2030}}
+  14 UNMAPPED -> agents
+   5 UNMAPPED -> ai
+   8 UNMAPPED -> auth
+   1 UNMAPPED -> candidates
+  14 UNMAPPED -> core
+  19 UNMAPPED -> db
+   2 UNMAPPED -> desk
+   1 UNMAPPED -> distribution
+   1 UNMAPPED -> interviews
+   6 UNMAPPED -> org
+   2 UNMAPPED -> ui
+   2 UNMAPPED -> voice
+  12 agents -> UNMAPPED
+  15 agents -> ai
+  10 agents -> auth
+   9 agents -> comms
+  41 agents -> core
+  90 agents -> db
+   4 agents -> desk
+  10 agents -> distribution
+  32 agents -> interviews
+   7 agents -> matching
+  17 agents -> offers
+   3 agents -> onboarding
+   8 agents -> org
+  11 agents -> requisitions
+  25 agents -> voice
+   2 ai -> agents
+   3 ai -> auth
+   5 ai -> core
+  16 ai -> db
+   1 ai -> matching
+   1 ai -> voice
+   2 auth -> core
+   6 auth -> db
+   2 candidates -> agents
+   3 candidates -> ai
+   7 candidates -> auth
+   2 candidates -> comms
+  14 candidates -> core
+  19 candidates -> db
+   5 candidates -> distribution
+   4 candidates -> matching
+   1 candidates -> org
+   3 candidates -> requisitions
+   2 catalogue -> auth
+   1 catalogue -> core
+   2 catalogue -> db
+   1 catalogue -> org
+   4 catalogue -> ui
+   4 comms -> agents
+   1 comms -> ai
+   7 comms -> auth
+   1 comms -> candidates
+   7 comms -> core
+  18 comms -> db
+   1 comms -> distribution
+   2 comms -> interviews
+   2 comms -> offers
+   1 comms -> onboarding
+   2 comms -> requisitions
+   2 core -> agents
+   1 core -> comms
+  13 core -> db
+   1 core -> desk
+   1 core -> requisitions
+   2 db -> UNMAPPED
+   1 db -> core
+   3 db -> interviews
+   1 db -> matching
+   1 db -> offers
+   2 desk -> UNMAPPED
+  22 desk -> agents
+   5 desk -> ai
+   4 desk -> auth
+   2 desk -> comms
+   6 desk -> core
+  10 desk -> db
+   1 desk -> distribution
+   2 desk -> interviews
+   1 desk -> matching
+   6 desk -> org
+   4 desk -> requisitions
+   1 desk -> ui
+   4 desk -> voice
+   2 distribution -> auth
+   2 distribution -> candidates
+   1 distribution -> comms
+  16 distribution -> core
+  14 distribution -> db
+   3 distribution -> org
+   2 distribution -> requisitions
+   2 interviews -> UNMAPPED
+  11 interviews -> agents
+   6 interviews -> ai
+  11 interviews -> auth
+  11 interviews -> comms
+  32 interviews -> core
+  47 interviews -> db
+   7 interviews -> desk
+   1 interviews -> matching
+   4 interviews -> org
+   7 interviews -> requisitions
+   1 interviews -> voice
+   3 matching -> UNMAPPED
+   3 matching -> agents
+   5 matching -> ai
+   5 matching -> auth
+   2 matching -> candidates
+   1 matching -> comms
+   2 matching -> core
+  18 matching -> db
+   5 matching -> interviews
+   1 matching -> onboarding
+   6 matching -> org
+   2 matching -> requisitions
+   4 offers -> UNMAPPED
+   6 offers -> agents
+   8 offers -> ai
+  13 offers -> auth
+   5 offers -> comms
+  13 offers -> core
+  24 offers -> db
+   4 offers -> desk
+   3 offers -> interviews
+   3 offers -> onboarding
+   2 offers -> org
+   2 offers -> requisitions
+   1 offers -> voice
+   3 onboarding -> agents
+   2 onboarding -> ai
+   3 onboarding -> auth
+   1 onboarding -> candidates
+   7 onboarding -> core
+  10 onboarding -> db
+   2 onboarding -> org
+   2 org -> UNMAPPED
+   9 org -> agents
+   4 org -> ai
+  16 org -> auth
+   2 org -> candidates
+   3 org -> catalogue
+   2 org -> comms
+  14 org -> core
+  36 org -> db
+   1 org -> distribution
+   3 org -> interviews
+   1 org -> matching
+   1 org -> offers
+   1 org -> requisitions
+   1 platform-admin -> UNMAPPED
+  12 platform-admin -> agents
+   1 platform-admin -> ai
+   4 platform-admin -> auth
+   1 platform-admin -> comms
+   5 platform-admin -> core
+   6 platform-admin -> db
+   1 platform-admin -> org
+   7 requisitions -> agents
+   3 requisitions -> ai
+   8 requisitions -> auth
+   2 requisitions -> comms
+   6 requisitions -> core
+  15 requisitions -> db
+   3 requisitions -> distribution
+   2 requisitions -> org
+  27 ui -> UNMAPPED
+  29 ui -> agents
+   6 ui -> ai
+  32 ui -> auth
+  24 ui -> candidates
+  11 ui -> catalogue
+  19 ui -> comms
+  64 ui -> core
+  24 ui -> db
+   9 ui -> desk
+  14 ui -> distribution
+  29 ui -> interviews
+  16 ui -> matching
+  22 ui -> offers
+   9 ui -> onboarding
+  54 ui -> org
+   7 ui -> platform-admin
+  21 ui -> requisitions
+   5 ui -> voice
+   5 voice -> UNMAPPED
+   9 voice -> agents
+   5 voice -> ai
+   2 voice -> auth
+  10 voice -> comms
+  18 voice -> core
+  33 voice -> db
+   3 voice -> desk
+   1 voice -> distribution
+  10 voice -> interviews
+   3 voice -> matching
+   4 voice -> offers
+   4 voice -> org
+   2 voice -> requisitions
+MUTUAL PAIRS:
+  UNMAPPED <-> agents  (14 / 12)
+  UNMAPPED <-> db  (19 / 2)
+  UNMAPPED <-> desk  (2 / 2)
+  UNMAPPED <-> interviews  (1 / 2)
+  UNMAPPED <-> org  (6 / 2)
+  UNMAPPED <-> ui  (2 / 27)
+  UNMAPPED <-> voice  (2 / 5)
+  agents <-> ai  (15 / 2)
+  agents <-> comms  (9 / 4)
+  agents <-> core  (41 / 2)
+  agents <-> desk  (4 / 22)
+  agents <-> interviews  (32 / 11)
+  agents <-> matching  (7 / 3)
+  agents <-> offers  (17 / 6)
+  agents <-> onboarding  (3 / 3)
+  agents <-> org  (8 / 9)
+  agents <-> requisitions  (11 / 7)
+  agents <-> voice  (25 / 9)
+  ai <-> matching  (1 / 5)
+  ai <-> voice  (1 / 5)
+  candidates <-> comms  (2 / 1)
+  candidates <-> distribution  (5 / 2)
+  candidates <-> matching  (4 / 2)
+  candidates <-> org  (1 / 2)
+  catalogue <-> org  (1 / 3)
+  catalogue <-> ui  (4 / 11)
+  comms <-> core  (7 / 1)
+  comms <-> distribution  (1 / 1)
+  comms <-> interviews  (2 / 11)
+  comms <-> offers  (2 / 5)
+  comms <-> requisitions  (2 / 2)
+  core <-> db  (13 / 1)
+  core <-> desk  (1 / 6)
+  core <-> requisitions  (1 / 6)
+  db <-> interviews  (3 / 47)
+  db <-> matching  (1 / 18)
+  db <-> offers  (1 / 24)
+  desk <-> interviews  (2 / 7)
+  desk <-> ui  (1 / 9)
+  desk <-> voice  (4 / 3)
+  distribution <-> org  (3 / 1)
+  distribution <-> requisitions  (2 / 3)
+  interviews <-> matching  (1 / 5)
+  interviews <-> org  (4 / 3)
+  interviews <-> voice  (1 / 10)
+  matching <-> org  (6 / 1)
+  offers <-> org  (2 / 1)
+  offers <-> voice  (1 / 4)
+  org <-> requisitions  (1 / 2)

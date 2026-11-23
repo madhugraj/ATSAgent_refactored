@@ -1,0 +1,826 @@
+/**
+ * Requisition and JD lifecycle cores, shared by the server functions (people)
+ * and agent tools (agents acting for a person). Every core takes the acting
+ * member, checks the same roles the UI path always checked, predicates every
+ * query on the organisation, and emits the domain event the orchestrator
+ * listens to (docs/agentic-plan.md §3.1).
+ */
+import { and, desc, eq, like } from "drizzle-orm";
+
+import { db } from "../server/db";
+import { jobDescriptions, requisitions } from "@db/schema";
+import { emitAgentEvent } from "../server/agents/events";
+import { assertRole, type AppRole } from "./auth.middleware";
+import type { OrgProfileSections } from "./org-profile";
+
+export type LifecycleActor = {
+  orgId: string;
+  userId: string;
+  memberEmail: string;
+  /** Set when an agent performs the action for this member (recorded in trails). */
+  via?: "agent";
+};
+
+export type ReqStatus =
+  | "draft"
+  | "pending_dh"
+  | "pending_hr"
+  | "pending_cbo"
+  | "approved"
+  | "rejected"
+  | "on_hold"
+  | "closed";
+
+/**
+ * The requisition approval chain (DH → HR → CBO): each target status names the
+ * legal source statuses and the role that may make the hop. Org owners pass
+ * every role check (assertRole semantics).
+ */
+export const REQ_TRANSITIONS: Partial<
+  Record<ReqStatus, { from: ReqStatus[]; role?: AppRole | AppRole[] }>
+> = {
+  draft: { from: ["draft", "rejected", "on_hold"] },
+  pending_dh: { from: ["draft", "rejected", "on_hold"] },
+  pending_hr: { from: ["pending_dh"], role: "department_head" },
+  pending_cbo: { from: ["pending_hr"], role: "hr_head" },
+  approved: { from: ["pending_cbo"], role: "president_cbo" },
+  rejected: {
+    from: ["pending_dh", "pending_hr", "pending_cbo"],
+    role: ["department_head", "hr_head", "president_cbo"],
+  },
+  on_hold: {
+    from: ["draft", "pending_dh", "pending_hr", "pending_cbo", "approved"],
+    role: ["hr_head", "president_cbo"],
+  },
+  closed: { from: ["approved", "on_hold"], role: ["hr_head", "president_cbo"] },
+};
+
+/** The next status an approver at `status` moves the requisition to. */
+export const NEXT_APPROVAL: Partial<Record<ReqStatus, ReqStatus>> = {
+  pending_dh: "pending_hr",
+  pending_hr: "pending_cbo",
+  pending_cbo: "approved",
+};
+
+/** Which role approves a requisition waiting at `status`. */
+export const APPROVER_ROLE: Partial<Record<ReqStatus, AppRole>> = {
+  pending_dh: "department_head",
+  pending_hr: "hr_head",
+  pending_cbo: "president_cbo",
+};
+
+export type RequisitionFields = {
+  title: string;
+  departmentId: string | null;
+  location: string;
+  openings: number;
+  experienceMin: number;
+  experienceMax: number;
+  budgetCtc: number;
+  ctcBandMin: number | null;
+  ctcBandMax: number | null;
+  maxNoticePeriodDays: number | null;
+  workAuthorizationRequired: string | null;
+  hiringManager: string | null;
+  mustHaveSkills: string[];
+  goodToHaveSkills: string[];
+  responsibilities: string | null;
+  educationRequirement: string | null;
+  billingType: string;
+  engagementType: string;
+  clientName: string | null;
+  costCenter: string | null;
+  /** onsite | hybrid | remote. */
+  workMode?: "onsite" | "hybrid" | "remote" | null;
+};
+
+export async function createRequisitionCore(
+  actor: LifecycleActor,
+  f: RequisitionFields,
+  status: "draft" | "pending_dh",
+): Promise<{ id: string; code: string }> {
+  // The organisation may insist on an approved organisation profile first.
+  const { assertProfileAllowsRequisition } = await import("./org-profile.server");
+  await assertProfileAllowsRequisition(actor.orgId);
+  // Parallel creates (three needs fanned out at once) race on the next code:
+  // retry the read-then-insert on the (orgId, code) unique conflict.
+  const year = new Date().getFullYear();
+  let row: { id: string } | undefined;
+  let code = "";
+  for (let attempt = 0; attempt < 5 && !row; attempt++) {
+    const [latest] = await db
+      .select({ code: requisitions.code })
+      .from(requisitions)
+      .where(and(eq(requisitions.orgId, actor.orgId), like(requisitions.code, `REQ-${year}-%`)))
+      .orderBy(desc(requisitions.code))
+      .limit(1);
+    const next = Number(latest?.code?.match(/REQ-\d{4}-(\d+)$/)?.[1] ?? 0) + 1;
+    code = `REQ-${year}-${String(next).padStart(3, "0")}`;
+    try {
+      [row] = await db
+        .insert(requisitions)
+        .values({
+          orgId: actor.orgId,
+          code,
+          title: f.title,
+          departmentId: f.departmentId,
+          location: f.location,
+          workMode: f.workMode ?? null,
+          openings: f.openings || 1,
+          experienceMin: f.experienceMin || 0,
+          experienceMax: f.experienceMax || 0,
+          budgetCtc: String(f.budgetCtc || 0),
+          ctcBandMin: f.ctcBandMin != null ? String(f.ctcBandMin) : null,
+          ctcBandMax: f.ctcBandMax != null ? String(f.ctcBandMax) : null,
+          maxNoticePeriodDays: f.maxNoticePeriodDays,
+          workAuthorizationRequired: f.workAuthorizationRequired,
+          hiringManager: f.hiringManager,
+          mustHaveSkills: f.mustHaveSkills,
+          goodToHaveSkills: f.goodToHaveSkills,
+          responsibilities: f.responsibilities,
+          educationRequirement: f.educationRequirement,
+          billingType: f.billingType,
+          engagementType: f.engagementType,
+          clientName: f.clientName,
+          costCenter: f.costCenter,
+          createdBy: actor.userId,
+          status,
+        })
+        .returning({ id: requisitions.id });
+    } catch (e) {
+      // A concurrent create took the code: re-read and try the next one.
+      if (!String(e).includes("requisitions_org_code_key") && !String(e).includes("duplicate key"))
+        throw e;
+    }
+  }
+  if (!row) throw new Error("Could not allocate a requisition code; try again.");
+
+  await emitAgentEvent({
+    orgId: actor.orgId,
+    type: "requisition.created",
+    subjectType: "requisition",
+    subjectId: row!.id,
+    actorUserId: actor.userId,
+    payload: { status, via: actor.via ?? null },
+  });
+  return { id: row!.id, code };
+}
+
+/** Fields an agent (or person) may change while a requisition is still a draft. */
+export type RequisitionDraftPatch = {
+  [
+    K in keyof Pick<
+      RequisitionFields,
+      | "title"
+      | "departmentId"
+      | "location"
+      | "workMode"
+      | "openings"
+      | "experienceMin"
+      | "experienceMax"
+      | "mustHaveSkills"
+      | "goodToHaveSkills"
+      | "responsibilities"
+      | "educationRequirement"
+      | "hiringManager"
+      | "maxNoticePeriodDays"
+    >
+  ]?: RequisitionFields[K] | undefined;
+};
+
+export async function updateRequisitionDraftCore(
+  actor: LifecycleActor,
+  id: string,
+  patch: RequisitionDraftPatch,
+): Promise<void> {
+  const [current] = await db
+    .select({ status: requisitions.status })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, id), eq(requisitions.orgId, actor.orgId)))
+    .limit(1);
+  if (!current) throw new Error("Requisition not found.");
+  if (!["draft", "rejected", "on_hold"].includes(current.status)) {
+    throw new Error(`A ${current.status} requisition can no longer be edited.`);
+  }
+  const set: Partial<typeof requisitions.$inferInsert> = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (v !== undefined) (set as Record<string, unknown>)[k] = v;
+  }
+  if (!Object.keys(set).length) return;
+  await db
+    .update(requisitions)
+    .set(set)
+    .where(and(eq(requisitions.id, id), eq(requisitions.orgId, actor.orgId)));
+}
+
+export async function advanceRequisitionCore(
+  actor: LifecycleActor,
+  input: { id: string; status: ReqStatus; comment?: string | null },
+): Promise<{ from: ReqStatus; to: ReqStatus }> {
+  const [current] = await db
+    .select({ status: requisitions.status, approvalTrail: requisitions.approvalTrail })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, input.id), eq(requisitions.orgId, actor.orgId)))
+    .limit(1);
+  if (!current) throw new Error("Requisition not found.");
+
+  const rule = REQ_TRANSITIONS[input.status];
+  if (!rule || !rule.from.includes(current.status)) {
+    throw new Error(`A requisition cannot move from ${current.status} to ${input.status}.`);
+  }
+  if (rule.role) await assertRole(actor.userId, actor.orgId, rule.role);
+
+  // The approval trail is evidence — rebuilt server-side, never client-supplied.
+  const prior = Array.isArray(current.approvalTrail) ? current.approvalTrail : [];
+  const trail = [
+    ...prior,
+    {
+      from: current.status,
+      to: input.status,
+      actor: actor.memberEmail,
+      decision: input.status,
+      comment: input.comment ?? null,
+      at: new Date().toISOString(),
+      ...(actor.via ? { via: actor.via } : {}),
+    },
+  ];
+  // Only from the status read above: two approvers deciding at the same
+  // moment both passed the checks, and both wrote — a doubled trail and a
+  // status that skipped a step. The second now finds the role moved on.
+  const moved = await db
+    .update(requisitions)
+    .set({ status: input.status, approvalTrail: trail as never })
+    .where(
+      and(
+        eq(requisitions.id, input.id),
+        eq(requisitions.orgId, actor.orgId),
+        eq(requisitions.status, current.status),
+      ),
+    )
+    .returning({ id: requisitions.id });
+  if (!moved.length)
+    throw new Error(
+      "Someone else decided this requisition at the same moment — refresh to see where it is now.",
+    );
+
+  // Closing a role takes its job-board postings down with it — best-effort.
+  if (input.status === "closed") {
+    const { closePostingsForRequisition } = await import("../server/boards/publish.server");
+    await closePostingsForRequisition({
+      orgId: actor.orgId,
+      actor: { memberEmail: actor.memberEmail, userId: actor.userId },
+      requisitionId: input.id,
+    }).catch(() => undefined);
+  }
+
+  await emitAgentEvent({
+    orgId: actor.orgId,
+    type: "requisition.status_changed",
+    subjectType: "requisition",
+    subjectId: input.id,
+    actorUserId: actor.userId,
+    payload: { from: current.status, to: input.status, via: actor.via ?? null },
+  });
+  return { from: current.status, to: input.status };
+}
+
+/** Statuses where the requisition is with an approver. */
+export const IN_APPROVAL: ReqStatus[] = ["pending_dh", "pending_hr", "pending_cbo"];
+
+/**
+ * Send a requisition in approval back to draft with the changes asked for
+ * (never final, unlike Decline): the current step's approver, the person who
+ * raised it, or the HR head / CBO (owners pass). The reason goes on the
+ * approval trail; approvals given so far no longer count — on resubmission the
+ * chain starts again at the department head. Audited; raises
+ * requisition.status_changed (to draft, sentBack).
+ */
+export async function sendBackRequisitionCore(
+  actor: LifecycleActor,
+  input: { id: string; reason: string; reopen?: boolean | undefined },
+): Promise<{ from: ReqStatus; code: string }> {
+  const reason = input.reason.replace(/\s+/g, " ").trim().slice(0, 1000);
+  if (reason.length < 3)
+    throw new Error("Say what should change — it goes to the Requisition agent and on the trail.");
+  const [current] = await db
+    .select({
+      status: requisitions.status,
+      code: requisitions.code,
+      createdBy: requisitions.createdBy,
+      approvalTrail: requisitions.approvalTrail,
+    })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, input.id), eq(requisitions.orgId, actor.orgId)))
+    .limit(1);
+  if (!current) throw new Error("Requisition not found.");
+  const from = current.status as ReqStatus;
+  // Reopen: a declined or paused requisition goes back to draft with the
+  // change, the same way a send-back does (the person who raised it, the HR
+  // head or the CBO).
+  const reopening = !!input.reopen && (from === "rejected" || from === "on_hold");
+  if (reopening) {
+    if (current.createdBy !== actor.userId)
+      await assertRole(
+        actor.userId,
+        actor.orgId,
+        ["hr_head", "president_cbo"],
+        "Only the person who raised it, the HR head or the CBO can reopen it.",
+      );
+  } else if (!IN_APPROVAL.includes(from))
+    throw new Error(
+      from === "draft"
+        ? "This requisition is a draft — change it directly."
+        : `A requisition that is ${from.replace(/_/g, " ")} cannot be sent back; only one in approval can.`,
+    );
+  if (!reopening && current.createdBy !== actor.userId) {
+    const approver = APPROVER_ROLE[from]!;
+    await assertRole(
+      actor.userId,
+      actor.orgId,
+      [...new Set<AppRole>([approver, "hr_head", "president_cbo"])],
+      "Only the current approver, the person who raised it, the HR head or the CBO can send it back.",
+    );
+  }
+  const trail = [
+    ...(Array.isArray(current.approvalTrail) ? current.approvalTrail : []),
+    {
+      from,
+      to: "draft",
+      actor: actor.memberEmail,
+      decision: reopening ? "reopened" : "sent_back",
+      comment: reason,
+      at: new Date().toISOString(),
+      ...(actor.via ? { via: actor.via } : {}),
+    },
+  ];
+  const done = await db
+    .update(requisitions)
+    .set({ status: "draft", approvalTrail: trail as never })
+    .where(
+      and(
+        eq(requisitions.id, input.id),
+        eq(requisitions.orgId, actor.orgId),
+        eq(requisitions.status, from),
+      ),
+    )
+    .returning({ id: requisitions.id });
+  if (!done.length) throw new Error("This requisition has just moved on; refresh to see it.");
+  const { writeAudit } = await import("../server/audit");
+  await writeAudit({
+    actor: actor.memberEmail,
+    actorUserId: actor.userId,
+    orgId: actor.orgId,
+    action: reopening ? "requisition.reopened" : "requisition.sent_back",
+    entityType: "requisition",
+    entityId: input.id,
+    detail: { code: current.code, from, reason, ...(actor.via ? { via: actor.via } : {}) },
+  });
+  await emitAgentEvent({
+    orgId: actor.orgId,
+    type: "requisition.status_changed",
+    subjectType: "requisition",
+    subjectId: input.id,
+    actorUserId: actor.userId,
+    payload: { from, to: "draft", sentBack: true, comment: reason, via: actor.via ?? null },
+  });
+  return { from, code: current.code };
+}
+
+export async function updateRequisitionCompensationCore(
+  actor: LifecycleActor,
+  input: {
+    id: string;
+    budgetCtc: number;
+    ctcBandMin: number | null;
+    ctcBandMax: number | null;
+    careerLevel?: string | null;
+  },
+): Promise<void> {
+  await db
+    .update(requisitions)
+    .set({
+      budgetCtc: String(input.budgetCtc || 0),
+      ctcBandMin: input.ctcBandMin != null ? String(input.ctcBandMin) : null,
+      ctcBandMax: input.ctcBandMax != null ? String(input.ctcBandMax) : null,
+      careerLevel: input.careerLevel || null,
+    })
+    .where(and(eq(requisitions.id, input.id), eq(requisitions.orgId, actor.orgId)));
+}
+
+export type ScoringWeights = {
+  skills: number;
+  experience: number;
+  career: number;
+  impact: number;
+  education: number;
+  social: number;
+};
+
+/** Weights are whole percentages that add up to 100 (pure; unit-tested). */
+export function weightsProblem(
+  w: ScoringWeights,
+  custom: { key: string; label: string; hint: string; weight: number }[] = [],
+): string | null {
+  const vals = [...Object.values(w), ...custom.map((d) => d.weight)];
+  if (vals.some((v) => !Number.isInteger(v) || v < 0 || v > 100))
+    return "Each weight is a whole percentage between 0 and 100.";
+  if (custom.length > 4) return "At most 4 custom dimensions.";
+  const keys = new Set<string>();
+  for (const d of custom) {
+    if (!/^[a-z0-9_]{1,40}$/.test(d.key))
+      return `Custom dimension key "${d.key}" must be lowercase letters, digits and underscores.`;
+    if (keys.has(d.key)) return `Custom dimension key "${d.key}" is duplicated.`;
+    keys.add(d.key);
+    if (!d.label.trim() || d.label.length > 60)
+      return "Each custom dimension needs a label (up to 60 characters).";
+    if (d.hint.trim().length < 10 || d.hint.length > 300)
+      return `Custom dimension "${d.label}" needs a scoring hint of 10–300 characters — it is the instruction the scorer reads.`;
+  }
+  const total = vals.reduce((a, b) => a + b, 0);
+  return total === 100 ? null : `The weights add up to ${total}%; they must total 100%.`;
+}
+
+/**
+ * Change a requisition's scoring weights — they decide how every candidate is
+ * ranked, so: a draft (or rejected / on-hold) one by the person who raised it
+ * or the HR head / CBO; one in approval only by sending it back for changes;
+ * an approved one by the HR head / CBO (its candidates can then be re-scored);
+ * never a closed one. Must total 100; audited with before and after.
+ */
+export async function saveRequisitionWeightsCore(
+  actor: LifecycleActor,
+  id: string,
+  w: ScoringWeights,
+  custom: { key: string; label: string; hint: string; weight: number }[] = [],
+): Promise<{ status: ReqStatus; changed: boolean }> {
+  const problem = weightsProblem(w, custom);
+  if (problem) throw new Error(problem);
+  const [req] = await db
+    .select({
+      status: requisitions.status,
+      code: requisitions.code,
+      createdBy: requisitions.createdBy,
+      skills: requisitions.weightSkills,
+      experience: requisitions.weightExperience,
+      career: requisitions.weightCareer,
+      impact: requisitions.weightImpact,
+      education: requisitions.weightEducation,
+      social: requisitions.weightSocial,
+      customWeights: requisitions.customWeights,
+    })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, id), eq(requisitions.orgId, actor.orgId)))
+    .limit(1);
+  if (!req) throw new Error("Requisition not found.");
+  const status = req.status as ReqStatus;
+  if (IN_APPROVAL.includes(status))
+    throw new Error(
+      `${req.code} is in approval, so its weights are what the approvers are reviewing. Send it back for changes (from its approval card or the hiring desk) to change them.`,
+    );
+  if (status === "closed")
+    throw new Error(`${req.code} is closed; its weights can no longer change.`);
+  const leaders: AppRole[] = ["hr_head", "president_cbo"];
+  if (status === "approved")
+    await assertRole(
+      actor.userId,
+      actor.orgId,
+      leaders,
+      "Only the HR head or the CBO can change the weights of an approved requisition.",
+    );
+  else if (req.createdBy !== actor.userId)
+    await assertRole(
+      actor.userId,
+      actor.orgId,
+      leaders,
+      "Only the person who raised this requisition, the HR head or the CBO can change its weights.",
+    );
+  const before = {
+    skills: req.skills,
+    experience: req.experience,
+    career: req.career,
+    impact: req.impact,
+    education: req.education,
+    social: req.social,
+    custom: req.customWeights ?? [],
+  };
+  const after = {
+    skills: w.skills,
+    experience: w.experience,
+    career: w.career,
+    impact: w.impact,
+    education: w.education,
+    social: w.social,
+    custom,
+  };
+  const changed = JSON.stringify(before) !== JSON.stringify(after);
+  if (!changed) return { status, changed: false };
+  await db
+    .update(requisitions)
+    .set({
+      weightSkills: w.skills,
+      weightExperience: w.experience,
+      weightCareer: w.career,
+      weightImpact: w.impact,
+      weightEducation: w.education,
+      weightSocial: w.social,
+      customWeights: custom,
+    })
+    .where(and(eq(requisitions.id, id), eq(requisitions.orgId, actor.orgId)));
+  const { writeAudit } = await import("../server/audit");
+  await writeAudit({
+    actor: actor.memberEmail,
+    actorUserId: actor.userId,
+    orgId: actor.orgId,
+    action: "requisition.weights_changed",
+    entityType: "requisition",
+    entityId: id,
+    detail: { code: req.code, status, before, after, ...(actor.via ? { via: actor.via } : {}) },
+  });
+  return { status, changed: true };
+}
+
+export async function setRequisitionIjpCore(
+  actor: LifecycleActor,
+  id: string,
+  enabled: boolean,
+): Promise<void> {
+  await db
+    .update(requisitions)
+    .set({ ijpEnabled: enabled, ijpPostedAt: enabled ? new Date() : null })
+    .where(and(eq(requisitions.id, id), eq(requisitions.orgId, actor.orgId)));
+}
+
+/* ------------------------------------------------------------ JD versions */
+
+export type JdContent = {
+  purpose: string;
+  responsibilities: string;
+  must_have: string[];
+  good_to_have: string[];
+  qualifications: string;
+  success_factors: string;
+  reporting_to: string;
+  full_text: string;
+};
+
+/** File a JD as the next version, waiting for Department Head review. */
+export async function saveJobDescriptionCore(
+  actor: LifecycleActor,
+  input: {
+    requisitionId: string;
+    jd: JdContent;
+    templateId?: string | null;
+    templateName?: string | null;
+  },
+): Promise<{ id: string; version: number }> {
+  const [requisition] = await db
+    .select({ id: requisitions.id })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, input.requisitionId), eq(requisitions.orgId, actor.orgId)))
+    .limit(1);
+  if (!requisition) throw new Error("Requisition not found");
+
+  // A JD that repeats an internal-only organisation-profile line (or makes an
+  // absolute claim the never-say list forbids) is refused before it exists —
+  // one gate for the button, the import path and the JD agent alike (O2).
+  const { profileState } = await import("./org-profile.server");
+  const { internalLineReason } = await import("./org-profile");
+  const state = await profileState(actor.orgId);
+  const sections = state.open?.sections ?? state.approved?.sections ?? ({} as OrgProfileSections);
+  const internal = internalLineReason(`${input.jd.purpose ?? ""}\n${input.jd.full_text}`, sections);
+  if (internal) throw new Error(internal.reason);
+
+  const [latest] = await db
+    .select({ version: jobDescriptions.version })
+    .from(jobDescriptions)
+    .where(
+      and(
+        eq(jobDescriptions.requisitionId, input.requisitionId),
+        eq(jobDescriptions.orgId, actor.orgId),
+      ),
+    )
+    .orderBy(desc(jobDescriptions.version))
+    .limit(1);
+  const version = (latest?.version ?? 0) + 1;
+
+  const [row] = await db
+    .insert(jobDescriptions)
+    .values({
+      requisitionId: input.requisitionId,
+      orgId: actor.orgId,
+      version,
+      status: "pending_dh",
+      purpose: input.jd.purpose,
+      responsibilities: input.jd.responsibilities,
+      mustHave: input.jd.must_have,
+      goodToHave: input.jd.good_to_have,
+      qualifications: input.jd.qualifications,
+      successFactors: input.jd.success_factors,
+      reportingTo: input.jd.reporting_to,
+      fullText: input.jd.full_text,
+      templateId: input.templateId || null,
+      templateName: input.templateName || null,
+    })
+    .returning({ id: jobDescriptions.id });
+
+  await emitAgentEvent({
+    orgId: actor.orgId,
+    type: "jd.submitted",
+    subjectType: "jd",
+    subjectId: row!.id,
+    actorUserId: actor.userId,
+    payload: { requisitionId: input.requisitionId, version, via: actor.via ?? null },
+  });
+  return { id: row!.id, version };
+}
+
+const JD_REVIEWERS: AppRole[] = ["department_head", "hr_head", "president_cbo"];
+
+async function jdForReview(actor: LifecycleActor, id: string) {
+  await assertRole(
+    actor.userId,
+    actor.orgId,
+    JD_REVIEWERS,
+    "Only a department head, HR head or the CBO can review a job description.",
+  );
+  const [jd] = await db
+    .select({ status: jobDescriptions.status, requisitionId: jobDescriptions.requisitionId })
+    .from(jobDescriptions)
+    .where(and(eq(jobDescriptions.id, id), eq(jobDescriptions.orgId, actor.orgId)))
+    .limit(1);
+  if (!jd) throw new Error("Job description not found.");
+  if (jd.status === "approved") throw new Error("This version is already approved.");
+  return jd;
+}
+
+/** Approve a JD version — a department-head-and-above decision. */
+export async function approveJobDescriptionCore(
+  actor: LifecycleActor,
+  input: { id: string; fullText?: string | null },
+): Promise<void> {
+  const jd = await jdForReview(actor, input.id);
+  await db
+    .update(jobDescriptions)
+    // Keep the drafted text unless the approver supplied an edited version
+    // (approving from an agent card or without edits used to erase it).
+    .set({
+      status: "approved",
+      ...(input.fullText?.trim() ? { fullText: input.fullText } : {}),
+    })
+    .where(and(eq(jobDescriptions.id, input.id), eq(jobDescriptions.orgId, actor.orgId)));
+  await emitAgentEvent({
+    orgId: actor.orgId,
+    type: "jd.approved",
+    subjectType: "jd",
+    subjectId: input.id,
+    actorUserId: actor.userId,
+    payload: { requisitionId: jd.requisitionId },
+  });
+}
+
+/** Send a JD version back to its author with the reviewer's comment. */
+export async function requestJdChangesCore(
+  actor: LifecycleActor,
+  input: { id: string; comment: string },
+): Promise<void> {
+  const jd = await jdForReview(actor, input.id);
+  await db
+    .update(jobDescriptions)
+    .set({ status: "changes_requested", approverComment: input.comment })
+    .where(and(eq(jobDescriptions.id, input.id), eq(jobDescriptions.orgId, actor.orgId)));
+  await emitAgentEvent({
+    orgId: actor.orgId,
+    type: "jd.changes_requested",
+    subjectType: "jd",
+    subjectId: input.id,
+    actorUserId: actor.userId,
+    payload: { requisitionId: jd.requisitionId, comment: input.comment },
+  });
+}
+
+/** Resolve the member identity an agent acts as. */
+export async function actorFor(orgId: string, userId: string): Promise<LifecycleActor> {
+  const { activeOrgOf } = await import("./auth.middleware");
+  const org = await activeOrgOf(userId);
+  if (!org || org.orgId !== orgId)
+    throw new Error("The person this agent works for has left the organisation.");
+  return { orgId, userId, memberEmail: org.memberEmail, via: "agent" };
+}
+
+export type ApproverEdit = {
+  title?: string | undefined;
+  openings?: number | undefined;
+  location?: string | undefined;
+  workMode?: "onsite" | "hybrid" | "remote" | undefined;
+  experienceMin?: number | undefined;
+  experienceMax?: number | undefined;
+  ctcBandMin?: number | null | undefined;
+  ctcBandMax?: number | null | undefined;
+  mustHaveSkills?: string[] | undefined;
+  goodToHaveSkills?: string[] | undefined;
+  responsibilities?: string | undefined;
+};
+
+/**
+ * Correct a requisition while it waits for approval (only the current step's
+ * approver) or after it was sent back (the person who raised it, the HR head
+ * or the CBO); owners pass. It stays at its step; what changed goes on the
+ * approval trail (built here) and the audit log, so the next approver sees it.
+ */
+export async function editRequisitionInApprovalCore(
+  actor: LifecycleActor,
+  id: string,
+  patch: ApproverEdit,
+): Promise<{ changed: string[] }> {
+  const [current] = await db
+    .select()
+    .from(requisitions)
+    .where(and(eq(requisitions.id, id), eq(requisitions.orgId, actor.orgId)))
+    .limit(1);
+  if (!current) throw new Error("Requisition not found.");
+  const from = current.status as ReqStatus;
+  const returned = from === "draft" || from === "rejected" || from === "on_hold";
+  if (!IN_APPROVAL.includes(from) && !returned)
+    throw new Error("Only a requisition in approval or sent back can be corrected here.");
+  if (IN_APPROVAL.includes(from))
+    await assertRole(
+      actor.userId,
+      actor.orgId,
+      APPROVER_ROLE[from]!,
+      "Only the approver at this step can correct it.",
+    );
+  else if (current.createdBy !== actor.userId)
+    await assertRole(
+      actor.userId,
+      actor.orgId,
+      ["hr_head", "president_cbo"],
+      "Only the person who raised it, the HR head or the CBO can correct it.",
+    );
+  if (
+    (patch.experienceMin ?? current.experienceMin) > (patch.experienceMax ?? current.experienceMax)
+  )
+    throw new Error("Minimum experience is above the maximum.");
+  const set: Record<string, unknown> = {};
+  const changed: string[] = [];
+  const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) continue;
+    const val = k === "ctcBandMin" || k === "ctcBandMax" ? (v === null ? null : String(v)) : v;
+    const cur = (current as Record<string, unknown>)[k];
+    const norm = (x: unknown) =>
+      k === "ctcBandMin" || k === "ctcBandMax" ? (x == null ? null : Number(x)) : x;
+    if (same(norm(cur), norm(val))) continue;
+    set[k] = val;
+    changed.push(k);
+  }
+  if (!changed.length) return { changed };
+  const LABEL: Record<string, string> = {
+    title: "role",
+    openings: "openings",
+    location: "location",
+    workMode: "work mode",
+    experienceMin: "experience",
+    experienceMax: "experience",
+    ctcBandMin: "CTC band",
+    ctcBandMax: "CTC band",
+    mustHaveSkills: "must-have skills",
+    goodToHaveSkills: "good-to-have skills",
+    responsibilities: "responsibilities",
+  };
+  const words = [...new Set(changed.map((c) => LABEL[c] ?? c))];
+  const prior = Array.isArray(current.approvalTrail) ? current.approvalTrail : [];
+  set["approvalTrail"] = [
+    ...prior,
+    {
+      from,
+      to: from,
+      actor: actor.memberEmail,
+      decision: "edited",
+      comment: `Corrected ${words.join(", ")}.`,
+      at: new Date().toISOString(),
+    },
+  ];
+  const done = await db
+    .update(requisitions)
+    .set(set)
+    .where(
+      and(
+        eq(requisitions.id, id),
+        eq(requisitions.orgId, actor.orgId),
+        eq(requisitions.status, from),
+      ),
+    )
+    .returning({ id: requisitions.id });
+  if (!done.length) throw new Error("This requisition has just moved on; refresh to see it.");
+  const { writeAudit } = await import("../server/audit");
+  await writeAudit({
+    actor: actor.memberEmail,
+    actorUserId: actor.userId,
+    orgId: actor.orgId,
+    action: "requisition.edited_in_approval",
+    entityType: "requisition",
+    entityId: id,
+    detail: { code: current.code, at: from, fields: words },
+  });
+  return { changed: words };
+}
