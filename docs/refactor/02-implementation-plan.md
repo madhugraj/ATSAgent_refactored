@@ -314,7 +314,9 @@ cd ../ATSAgent && git log --oneline $(cat ../ATSAgent_refactored/docs/refactor/S
 
 For each commit, apply the same change at the new path (`inventory.csv` maps old → new). Migrations keep
 their number. Agent changes keep their version bump. Then update `SOURCE_SHA`. If more than ~30 commits are
-pending, sync before starting new moves.
+pending, sync before starting new moves. After syncing, run `node scripts/refactor/parity.mjs <source-checkout>`:
+every tracked source path must exist at its new path or sit on the written exclusion list
+(`docs/refactor/sync-exclusions.txt`) — added at Phase 1 review (C2).
 
 ## Review protocol (team ↔ Claude)
 

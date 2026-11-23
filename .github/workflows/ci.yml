@@ -53,6 +53,8 @@ jobs:
       # checkout (they map source paths, which don't exist in this repo).
       - name: Refactor invariants (every table owned)
         run: node scripts/refactor/table-owners.mjs
+      - name: Dependency rules (depcruise ratchet, review C3)
+        run: node tools/depcruise-check.mjs
       - name: Apply database schema
         run: node scripts/migrate-pg.mjs
 

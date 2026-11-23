@@ -108,18 +108,16 @@ describe("event lineage", () => {
 
 describe("governance chains", () => {
   /**
-   * The harness reads on a pooled connection: an INSERT..RETURNING resolves
-   * before its implicit commit is visible to other connections, so the first
-   * read can miss the chain just written (Phase 1 flake fix). Poll briefly.
+   * computeHarness's default window is `to: new Date()` — a JS clock
+   * snapshot — while a row written microseconds earlier carries `createdAt`
+   * from the Postgres clock. When the two land in the same millisecond, the
+   * `lte(createdAt, to)` filter drops the just-written run and the chain
+   * looks broken (the root cause of the flake here — proven with
+   * timestamps, phase-1 review A1: NOT an insert-visibility race). The test
+   * reads with an explicit window that extends past every row it wrote.
    */
-  async function harnessStable(match: (h: Awaited<ReturnType<typeof computeHarness>>) => boolean) {
-    let h = await computeHarness(orgId);
-    for (let i = 0; i < 20 && !match(h); i++) {
-      await new Promise((r) => setTimeout(r, 25));
-      h = await computeHarness(orgId);
-    }
-    return h;
-  }
+  const harnessWindow = () =>
+    computeHarness(orgId, { from: new Date(0), to: new Date(Date.now() + 60_000), agent: null });
   async function chained(publisherRun: string, agentType: string) {
     await agentRunScope.run({ runId: publisherRun, orgId, agentType: "x" }, () => emit(orgId));
     const evs = await db
@@ -133,7 +131,7 @@ describe("governance chains", () => {
     const a = await run("requisition");
     const b = await chained(a, "jd");
     await chained(b, "publishing");
-    const h = await harnessStable((x) => x.handoffs.chainedRuns === 2);
+    const h = await harnessWindow();
     expect(h.handoffs.chainedRuns).toBe(2);
     expect(h.handoffs.longest?.path).toEqual(["requisition", "jd", "publishing"]);
     expect(h.handoffs.loops).toHaveLength(0);
@@ -144,7 +142,7 @@ describe("governance chains", () => {
     const a = await run("requisition");
     const b = await chained(a, "jd");
     await chained(b, "requisition");
-    const h = await harnessStable((x) => x.handoffs.loops.length === 1);
+    const h = await harnessWindow();
     expect(h.handoffs.loops).toHaveLength(1);
     expect(h.handoffs.loops[0]!.path).toEqual(["requisition", "jd", "requisition"]);
     expect(h.questions.find((q) => q.key === "handoffs")?.tone).toBe("bad");
