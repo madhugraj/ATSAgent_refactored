@@ -209,7 +209,7 @@ src/lib/email-templates/screening-call-booked.tsx,comms,shared
 src/lib/email-templates/send-email.ts,comms,shared
 src/lib/email-templates/signup.tsx,comms,shared
 src/lib/email-templates/stage-update.tsx,comms,shared
-src/lib/error-capture.ts,observability,shared
+src/lib/error-capture.ts,observability,server
 src/lib/error-page.ts,std,shared
 src/lib/errors.ts,std,shared
 src/lib/eval-catalog.ts,agents,shared
@@ -571,7 +571,7 @@ src/server/voice/call-session.server.ts,voice,server
 src/server/voice/call-stats.ts,voice,server
 src/server/voice/call-tools.ts,voice,server
 src/server/voice/charter.ts,voice,server
-src/server/voice/debug.ts,voice,server
+src/server/voice/debug.ts,observability,server
 src/server/voice/dispatcher.server.ts,voice,server
 src/server/voice/g711.ts,voice,server
 src/server/voice/greeting.ts,voice,server
