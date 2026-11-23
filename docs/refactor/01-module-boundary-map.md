@@ -93,7 +93,7 @@ ATSAgent_refactored/
 │  ├─ parser-worker/     sandboxed CV parser (from src/server/parser/worker.ts)
 │  └─ extension/         browser extension (unchanged plain JS)
 ├─ packages/             (all React-free except ui and comms email templates)
-│  ├─ config  observability  security  db  storage                          L0
+│  ├─ std  config  observability  security  db  storage                     L0
 │  ├─ auth  audit  platform-http  ai  kernel                                L1
 │  ├─ org  legal  comms  integrations  desk-core                            L2
 │  ├─ requisitions  candidates  pipeline  matching  interviews              L3
@@ -271,7 +271,7 @@ the owner's server functions or, for reporting, directly.
 Hotspots: `organizations` (89 FK refs), `users` (31), `applications` (22), `candidates` (20), `requisitions` (19), `agent_runs` (9; referenced by training, negotiation, panel and screening-call tables).
 `screening_calls` references 10 tables across 6 domains. Leave it as is, and document it as a voice-owned table.
 
-All 102 tables in `drizzle/schema.ts` are listed above (checked by script on 2026-11-22). Any table added later needs an owner before it merges.
+**125 tables** at `SOURCE_SHA` `dcb6a4b` (was 102 at `7990feb`; 23 new from #69/#78 — owners proposed in `scripts/refactor/table-owners.mjs`, approved at Gate 1). Any table added later needs an owner before it merges.
 
 ---
 
