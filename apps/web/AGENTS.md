@@ -64,9 +64,9 @@
 ## Documentation
 
 - `drizzle/schema.ts` is the schema source of truth. Any schema change adds an
-  idempotent SQL file under `drizzle/pg-migrations/` (next number, applied by
-  `scripts/migrate-pg.mjs`) and regenerates `docs/er-diagram.md` via
-  `node scripts/gen-er-diagram.mjs`.
+  idempotent SQL file under `packages/db/drizzle/pg-migrations/` (next number, applied by
+  `packages/db/scripts/migrate-pg.mjs`) and regenerates `docs/er-diagram.md` via
+  `node packages/db/scripts/gen-er-diagram.mjs`.
 - Keep `README.md`, `DEPLOYMENT-GCP.md`, `infra/DEPLOYMENT-HANDOFF.md`,
   `SECURITY.md` and `roadmap.md` current with shipped behaviour in the same
   change that alters behaviour.

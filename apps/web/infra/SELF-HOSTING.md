@@ -27,7 +27,7 @@ The schema source of truth is `drizzle/pg-migrations/`, applied by the
 idempotent runner (safe to re-run; it records applied files in `pg_migrations`):
 
 ```bash
-DATABASE_URL="postgres://…/atsiq" bun scripts/migrate-pg.mjs
+DATABASE_URL="postgres://…/atsiq" bun packages/db/scripts/migrate-pg.mjs
 ```
 
 To bring existing data across, restore a data-only dump over that schema:
@@ -64,7 +64,7 @@ gcloud artifacts repositories create atsiq --repository-format=docker --location
 ## 3. Continuous deployment
 
 `.github/workflows/deploy.yml` (already in this repo) builds the Dockerfile,
-runs `scripts/migrate-pg.mjs` against the database, and deploys to Cloud Run on
+runs `packages/db/scripts/migrate-pg.mjs` against the database, and deploys to Cloud Run on
 every push to `main`. Enable it by adding the repo secrets `GCP_PROJECT`,
 `GCP_SA_KEY` and the variables `GCP_REGION`, `GCP_REPOSITORY`,
 `DEPLOY_ENABLED=true` (see the header of the workflow file).

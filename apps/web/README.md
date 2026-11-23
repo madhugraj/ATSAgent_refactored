@@ -81,7 +81,7 @@ ATSIQ by Yavar AI is an enterprise recruiting intelligence platform. It combines
 - `docs/parallel-hiring-desk-plan.md` — the plan for handling multiple hiring needs in parallel (fan-out threads, shared questions, split-screen supervision)
 - `docs/pay-terms-plan.md` — currency, pay basis, kinds of work, pay zones and regional pooling for organisations hiring across countries (built: schema, the pay converter, pay conventions approved by the HR head, requisition pay terms, the screening call and matching in each role's currency, pool and needed-by date, offers with a rate fixed at approval, the negotiation call, JD and job postings, reports in the reporting currency)
 - `docs/labour-policy-agent-plan.md` — the Labour law & policy agent: official sources per pay zone, HR-approved updates to the organisation profile, and the offer check before every offer letter (built: sources, quoted findings approved by the HR head, rules in the organisation context, the offer check before approval, the screening call following the rules where the job is)
-- `docs/er-diagram.md` — entity-relationship diagram for all tables, generated from `drizzle/schema.ts` (`node scripts/gen-er-diagram.mjs`)
+- `docs/er-diagram.md` — entity-relationship diagram for all tables, generated from `packages/db/src/server/schema.ts` (`node packages/db/scripts/gen-er-diagram.mjs`)
 - `docs/deployment-scouts-gcp.md` — DevOps runbook for production on GCP (www.scouts.yavar.ai): infrastructure, secrets, Kubernetes manifests (`infra/gke/`), scheduler jobs and CI/CD (`.github/workflows/deploy-gke.yml`)
 - `DEPLOYMENT-GCP.md` and `infra/DEPLOYMENT-HANDOFF.md` — deployment runbooks (earlier z-atsiq setup)
 - `SECURITY.md` — security policy and secure-development baseline
@@ -112,9 +112,9 @@ bun test
 bun run test:e2e
 ```
 
-Local PostgreSQL is managed by `scripts/local-db.sh` (`bun run db:local init`, then `start`, `stop`, `status`, `migrate`, `backup`, `restore`): PostgreSQL 14 like production, data in a durable per-user folder (never `/tmp`), password auth on 127.0.0.1, verified daily backups. See `docs/runbooks/local-database.md`.
+Local PostgreSQL is managed by `packages/db/scripts/local-db.sh` (`bun run db:local init`, then `start`, `stop`, `status`, `migrate`, `backup`, `restore`): PostgreSQL 14 like production, data in a durable per-user folder (never `/tmp`), password auth on 127.0.0.1, verified daily backups. See `docs/runbooks/local-database.md`.
 
-Run the database test suites against a **separate, disposable database**, never the one your dev server uses: some suites delete their own records and `scripts/integration.verify.test.ts` truncates every organisation, user and candidate (it refuses unless the database name contains `test`, `ci`, `verify`, `tmp` or `scratch`). For example: create `atsagent_test`, run `DATABASE_URL=postgres://…/atsagent_test bun scripts/migrate-pg.mjs`, then run the suites with that same `DATABASE_URL`.
+Run the database test suites against a **separate, disposable database**, never the one your dev server uses: some suites delete their own records and `scripts/integration.verify.test.ts` truncates every organisation, user and candidate (it refuses unless the database name contains `test`, `ci`, `verify`, `tmp` or `scratch`). For example: create `atsagent_test`, run `DATABASE_URL=postgres://…/atsagent_test bun packages/db/scripts/migrate-pg.mjs`, then run the suites with that same `DATABASE_URL`.
 
 The E2E harness under `scripts/local-e2e/` uses a disposable PostgreSQL fixture. Provider-backed AI, email, meeting and job-board operations require an isolated test organisation with its own credentials.
 

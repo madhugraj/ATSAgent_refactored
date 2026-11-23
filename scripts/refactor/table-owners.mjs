@@ -2,11 +2,11 @@
 // proposals awaiting reviewer approval at Gate 1). The owner decides which
 // package's /server may WRITE; anyone may read.
 // Usage: node table-owners.mjs [schema-path]
-//   default schema: <repo-root>/apps/web/drizzle/schema.ts
+//   default schema: <repo-root>/packages/db/src/server/schema.ts
 import fs from "node:fs";
 
 const schema =
-  process.argv[2] ?? new URL("../../apps/web/drizzle/schema.ts", import.meta.url).pathname;
+  process.argv[2] ?? new URL("../../packages/db/src/server/schema.ts", import.meta.url).pathname;
 
 const s = fs.readFileSync(schema, "utf8");
 // pgTable("name", ...) — the name may be followed by a newline before the
