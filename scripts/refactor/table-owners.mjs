@@ -177,4 +177,10 @@ if (missing.length) {
 const proposedCount = tables.filter((t) =>
   Object.keys(PROPOSED).some((o) => PROPOSED[o].includes(t)),
 ).length;
-console.log(`\nok — every table owned (${proposedCount} still PROPOSED)`);
+if (proposedCount > 0) {
+  console.error(`\n${proposedCount} tables still PROPOSED — an owner decision is pending (F1)`);
+  for (const [owner, list] of Object.entries(PROPOSED))
+    for (const t of list) if (tables.includes(t)) console.error(`  ${owner}: ${t}`);
+  process.exit(1);
+}
+console.log(`\nok — every table owned`);
