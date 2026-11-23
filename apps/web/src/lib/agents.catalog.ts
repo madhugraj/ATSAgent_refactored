@@ -1,0 +1,276 @@
+/**
+ * Client-safe agent catalogue: names, descriptions and the plan phase each
+ * agent ships in (docs/agentic-plan.md §4). No vendor or model names.
+ */
+import type { AgentAutonomy, AgentType } from "@db/schema";
+
+export type AgentInfo = {
+  type: AgentType;
+  label: string;
+  description: string;
+  /** Plan phase that delivers this agent. */
+  phase: 1 | 2 | 3 | 4;
+};
+
+export const AGENT_CATALOG: AgentInfo[] = [
+  {
+    type: "copilot",
+    label: "Aditi",
+    phase: 1,
+    description:
+      "Turns a chat request into a plan and hands it to the orchestrator once you confirm.",
+  },
+  {
+    type: "requisition",
+    label: "Requisition agent",
+    phase: 1,
+    description:
+      "Drafts requisitions with skills, weights and a pay band backed by market evidence; prepares approval briefs and chases approvers.",
+  },
+  {
+    type: "jd",
+    label: "JD agent",
+    phase: 1,
+    description:
+      "Drafts job descriptions from your templates, checks for duplicates and revises on feedback.",
+  },
+  {
+    type: "publishing",
+    label: "Publishing agent",
+    phase: 1,
+    description: "Checks the job card and prepares LinkedIn, job-board and internal postings.",
+  },
+  {
+    type: "intake",
+    label: "Intake & matching agent",
+    phase: 2,
+    description:
+      "Parses, dedupes, verifies and scores applicants, shortlists, and proposes rejections for you to confirm.",
+  },
+  {
+    type: "sourcing",
+    label: "Sourcing agent",
+    phase: 2,
+    description:
+      "Watches applicants by channel, tops up a starving role from the talent pool, invites strong past candidates to apply (with your approval) and recommends where to publish.",
+  },
+  {
+    type: "distribution",
+    label: "Distribution agent",
+    phase: 2,
+    description:
+      "Advertises approved roles across job portals by the route each allows (Google for Jobs, job feeds, posting by hand), chases portals that send no CVs, credits every CV to its portal and erases CVs a portal limited to their role once it is over (with your approval).",
+  },
+  {
+    type: "org_context",
+    label: "Organisation context agent",
+    phase: 2,
+    description:
+      "Builds and keeps the organisation's profile from its records, its own website and its documents — the approved facts every other agent works from. Every version waits for the HR head's approval.",
+  },
+  {
+    type: "expert_interview",
+    label: "Role expert interview agent",
+    phase: 2,
+    description:
+      "Interviews a role's hiring manager in two short rounds of questions and writes the role expert brief — must-haves and why, deal-breakers, what good looks like, must-ask screening questions and each interview round's rubric. The hiring manager approves it before screening and interviews use it.",
+  },
+  {
+    type: "panel_l1",
+    label: "L1 panel agent",
+    phase: 3,
+    description:
+      "A silent member of every L1 interview panel: reads the call's transcript from your own meeting tool, keeps its own view of the candidate and of how the round was run hidden until the panel has scored, and e-mails the panel a factual summary of the call — never a score. It never speaks in the call and never decides.",
+  },
+  {
+    type: "panel_l2",
+    label: "L2 panel agent",
+    phase: 3,
+    description:
+      "A silent member of every L2 interview panel: reads the call's transcript from your own meeting tool, keeps its own view of the candidate and of how the round was run hidden until the panel has scored, and e-mails the panel a factual summary of the call — never a score. It never speaks in the call and never decides.",
+  },
+  {
+    type: "panel_l3",
+    label: "L3 panel agent",
+    phase: 3,
+    description:
+      "A silent member of every L3 interview panel: reads the call's transcript from your own meeting tool, keeps its own view of the candidate and of how the round was run hidden until the panel has scored, and e-mails the panel a factual summary of the call — never a score. It never speaks in the call and never decides.",
+  },
+  {
+    type: "screening",
+    label: "Screening agent",
+    phase: 2,
+    description:
+      "Builds screening kits, sends assessments, grades answers and writes a proceed / hold summary.",
+  },
+  {
+    type: "screening_call",
+    label: "Screening call agent",
+    phase: 2,
+    description:
+      "Phones a shortlisted candidate when the Screening agent asks and a person approves: says it is an AI, asks consent, asks the role's screening questions — never about pay — and hands the answers back for grading.",
+  },
+  {
+    type: "scheduling_call",
+    label: "Scheduling call agent",
+    phase: 3,
+    description:
+      "Phones a candidate who has not picked one of the e-mailed interview times, when the Interview coordinator asks and a person approves: says it is an AI and books one of those times (or another the interviewers are free for) — never changes the interview, never discusses pay or results.",
+  },
+  {
+    type: "negotiation_call",
+    label: "Negotiation call agent",
+    phase: 4,
+    description:
+      "Phones a candidate about the pay for their offer, when the Offer agent or TA asks and the HR head approves: says it is an AI, reads out the approved figure and extras, may offer one pre-approved improved figure after a no, and brings their answer back — never says the ceiling, never agrees anything; a person confirms.",
+  },
+  {
+    type: "labour_policy",
+    label: "Labour law & policy agent",
+    phase: 4,
+    description:
+      "Every week reads the organisation's approved official sources (government, regulator and gazette pages) for each place it hires, and brings each change that matters to hiring — notice and probation limits, minimum wage, contract rules, pay transparency, what may not be asked, data and AI-call rules — to the HR head with the source's exact words. Only an approved change becomes a rule every agent works within; offers are checked against it before approval, and AI calls follow it where they work. Not legal advice.",
+  },
+  {
+    type: "voice_guard",
+    label: "Voice Guard",
+    phase: 3,
+    description:
+      "Silently reviews every answered AI phone call after it ends — what was said against the call's rules and facts, what was recorded against what the candidate said, and how the call went on the line — and lists its findings, with the words quoted, under Call reviews. It never takes part in a call and changes nothing: a person decides what to do. On whenever an AI phone agent is on.",
+  },
+
+  {
+    type: "followup",
+    label: "Follow-up agent",
+    phase: 2,
+    description:
+      "Nudges approvers and interviewers past their deadline and drafts candidate follow-ups.",
+  },
+  {
+    type: "interview",
+    label: "Interview coordinator",
+    phase: 3,
+    description:
+      "Proposes panels, finds slots, books meetings, invites candidates and chases scorecards.",
+  },
+  {
+    type: "evaluation",
+    label: "Evaluation agent",
+    phase: 3,
+    description:
+      "Writes the interview debrief, flags disagreements, recommends a decision and runs a bias check.",
+  },
+  {
+    type: "offer",
+    label: "Offer agent",
+    phase: 4,
+    description:
+      "Proposes pay within the band, drafts the offer and letter, and prepares the approval brief.",
+  },
+  {
+    type: "onboarding",
+    label: "Pre-onboarding & release agent",
+    phase: 4,
+    description: "Requests and cross-checks documents and prepares the offer release for HR.",
+  },
+];
+
+export const AUTONOMY_OPTIONS: { value: AgentAutonomy; label: string; hint: string }[] = [
+  {
+    value: "suggest",
+    label: "Suggest",
+    hint: "Every change and every message waits for your approval.",
+  },
+  {
+    value: "act_and_notify",
+    label: "Act and notify",
+    hint: "Internal changes run and you are told about each one. Candidate messages send on their own only for the templates ticked below; job-board posts wait for the HR head.",
+  },
+  {
+    value: "autonomous",
+    label: "Autonomous",
+    hint: "Internal changes run silently (still in activity and the audit trail). Every candidate message template sends on its own. Job-board posts go out on their own only on the boards ticked below; otherwise the HR head approves them. Decisions always stay with people, at every level: approving requisitions and job descriptions, rejecting candidates, the hiring decision, approving and releasing offers, and validating documents.",
+  },
+];
+
+/**
+ * What an organisation may pre-approve for agents. Candidate emails apply from
+ * Act and notify (at Autonomous every template is allowed); job boards apply
+ * at Autonomous only. The offer release mail is deliberately absent: releasing
+ * an offer is always a human decision.
+ */
+export const WHITELISTABLE_TEMPLATES: {
+  id: string;
+  label: string;
+  group: "email" | "board";
+  /** The agents whose tools send it; the setting shows only for them. */
+  agents: AgentType[];
+}[] = [
+  // Sent by the system on stage events, not by an agent: kept so saved
+  // settings still validate, shown for no agent.
+  { id: "application_ack", label: "Application acknowledgement", group: "email", agents: [] },
+  { id: "stage_update", label: "Stage update", group: "email", agents: [] },
+  { id: "interview_invite", label: "Interview invitation", group: "email", agents: ["interview"] },
+  {
+    id: "interview_slots",
+    label: "Interview time choice (candidate picks)",
+    group: "email",
+    agents: ["interview"],
+  },
+  {
+    id: "assessment_invite",
+    label: "Assessment invitation (and reminder)",
+    group: "email",
+    agents: ["screening"],
+  },
+  {
+    id: "compensation_form",
+    label: "Pay & availability form (and reminder)",
+    group: "email",
+    agents: ["screening", "offer"],
+  },
+  {
+    id: "document_request",
+    label: "Pre-onboarding document request",
+    group: "email",
+    agents: ["onboarding"],
+  },
+  {
+    id: "role_invite",
+    label: "Invitation to apply (past candidates)",
+    group: "email",
+    agents: ["sourcing"],
+  },
+  // Internal: the silent panel agent's factual summary to the round's panel.
+  {
+    id: "panel_summary",
+    label: "Interview call summary (to the panel)",
+    group: "email",
+    agents: ["panel_l1", "panel_l2", "panel_l3"],
+  },
+  { id: "job_board:linkedin", label: "LinkedIn post", group: "board", agents: ["publishing"] },
+  { id: "job_board:naukri", label: "Naukri posting", group: "board", agents: ["publishing"] },
+  { id: "job_board:indeed", label: "Indeed posting", group: "board", agents: ["publishing"] },
+  { id: "job_board:jooble", label: "Jooble job feed", group: "board", agents: ["distribution"] },
+  { id: "job_board:adzuna", label: "Adzuna job feed", group: "board", agents: ["distribution"] },
+  { id: "job_board:jora", label: "Jora job feed", group: "board", agents: ["distribution"] },
+];
+
+/** The pre-approvable templates and boards an agent can actually send. */
+export function whitelistableFor(agent: string, group: "email" | "board") {
+  return WHITELISTABLE_TEMPLATES.filter(
+    (t) => t.group === group && t.agents.includes(agent as AgentType),
+  );
+}
+
+export const AGENT_LABEL: Record<string, string> = Object.fromEntries(
+  AGENT_CATALOG.map((a) => [a.type, a.label]),
+);
+
+export const ROLE_NAME: Record<string, string> = {
+  recruiter: "Recruiter",
+  hiring_manager: "Hiring manager",
+  department_head: "Department head",
+  hr_head: "HR head",
+  president_cbo: "President / CBO",
+};

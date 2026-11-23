@@ -1,0 +1,688 @@
+/**
+ * The organisation profile's lifecycle (docs/org-context-agent-plan.md, O0):
+ * a draft written by a person, submitted, then approved, declined or sent
+ * back by the HR head or the owner. Approved versions never change; the
+ * next change is a new draft. Every step is audited and every query is
+ * scoped to the actor's organisation.
+ *
+ * Pay figures and staff names / contacts are refused before anything is
+ * saved (src/lib/org-profile.ts), with the reason shown to the person.
+ */
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+
+import { db } from "../server/db";
+import { writeAudit } from "../server/audit";
+import {
+  agentRuns,
+  agentTasks,
+  auditLog,
+  hrmsEmployees,
+  orgMembers,
+  orgProfileVersions,
+  orgProfiles,
+  organizations,
+  userRoles,
+  users,
+} from "@db/schema";
+import { looksLikeInjection } from "../server/agents/injection";
+import { assertRole } from "./auth.middleware";
+import { checkSections, nameKeys, type OrgProfileSections, type Refusal } from "./org-profile";
+
+export type ProfileActor = { orgId: string; userId: string };
+type VersionRow = typeof orgProfileVersions.$inferSelect;
+
+/** Who may write and submit drafts (the owner always passes). */
+export const EDITORS = ["hr_head", "president_cbo"] as const;
+
+const OPEN = ["draft", "pending", "changes_requested"] as const;
+const EDITABLE = new Set(["draft", "changes_requested"]);
+
+async function audit(
+  actor: ProfileActor,
+  action: string,
+  versionId: string | null,
+  detail: Record<string, unknown> = {},
+) {
+  await writeAudit({
+    actor: `user:${actor.userId}`,
+    actorUserId: actor.userId,
+    orgId: actor.orgId,
+    action: `org_profile.${action}`,
+    entityType: "org_profile_version",
+    entityId: versionId,
+    detail,
+  });
+}
+
+async function versionOf(orgId: string, versionId: string): Promise<VersionRow> {
+  const [v] = await db
+    .select()
+    .from(orgProfileVersions)
+    .where(and(eq(orgProfileVersions.id, versionId), eq(orgProfileVersions.orgId, orgId)))
+    .limit(1);
+  if (!v) throw new Error("Profile version not found.");
+  return v;
+}
+
+/** The organisation's own and legal name: naming the organisation is not naming a person. */
+export async function orgNamesOf(orgId: string): Promise<string[]> {
+  const [o] = await db
+    .select({ name: organizations.name, legalName: organizations.legalName })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  return [o?.name, o?.legalName].filter((n): n is string => Boolean(n));
+}
+
+/** Full names of the organisation's people (members and HRMS employees), for the refusal. */
+export async function staffNameKeys(orgId: string): Promise<string[]> {
+  const members = await db
+    .select({ name: orgMembers.fullName, userName: users.fullName, email: orgMembers.email })
+    .from(orgMembers)
+    .leftJoin(users, eq(users.id, orgMembers.userId))
+    .where(eq(orgMembers.orgId, orgId));
+  const employees = await db
+    .select({ name: hrmsEmployees.fullName, email: hrmsEmployees.email })
+    .from(hrmsEmployees)
+    .where(eq(hrmsEmployees.orgId, orgId));
+  return nameKeys([
+    ...members.flatMap((m) => [
+      { name: m.name, email: m.email },
+      { name: m.userName, email: m.email },
+    ]),
+    ...employees,
+  ]);
+}
+
+export type ProfileState = {
+  requireProfile: boolean;
+  approved: VersionRow | null;
+  open: VersionRow | null;
+  history: Pick<
+    VersionRow,
+    "id" | "version" | "status" | "createdAt" | "submittedAt" | "decidedAt" | "decisionNote"
+  >[];
+};
+
+export async function profileState(orgId: string): Promise<ProfileState> {
+  const [profile] = await db
+    .select()
+    .from(orgProfiles)
+    .where(eq(orgProfiles.orgId, orgId))
+    .limit(1);
+  const approved = profile?.currentVersionId
+    ? await versionOf(orgId, profile.currentVersionId).catch(() => null)
+    : null;
+  const [open] = await db
+    .select()
+    .from(orgProfileVersions)
+    .where(and(eq(orgProfileVersions.orgId, orgId), inArray(orgProfileVersions.status, [...OPEN])))
+    .limit(1);
+  const history = await db
+    .select({
+      id: orgProfileVersions.id,
+      version: orgProfileVersions.version,
+      status: orgProfileVersions.status,
+      createdAt: orgProfileVersions.createdAt,
+      submittedAt: orgProfileVersions.submittedAt,
+      decidedAt: orgProfileVersions.decidedAt,
+      decisionNote: orgProfileVersions.decisionNote,
+    })
+    .from(orgProfileVersions)
+    .where(eq(orgProfileVersions.orgId, orgId))
+    .orderBy(desc(orgProfileVersions.version))
+    .limit(50);
+  return {
+    requireProfile: profile?.requireProfile ?? false,
+    approved,
+    open: open ?? null,
+    history,
+  };
+}
+
+/** The version being worked on, or a new draft copied from the approved one. */
+export async function startDraftCore(
+  actor: ProfileActor,
+  opts: {
+    /**
+     * Rework after a decline: start from the declined draft (when it is the
+     * newest version) instead of the approved one. A "not enough — go
+     * deeper" decline used to throw away everything the agent had built,
+     * and its next proposals landed in a near-empty draft.
+     */
+    continueDeclined?: boolean;
+  } = {},
+): Promise<VersionRow> {
+  await assertRole(
+    actor.userId,
+    actor.orgId,
+    [...EDITORS],
+    "Only the HR head, the CBO or an owner can change the organisation profile.",
+  );
+  const state = await profileState(actor.orgId);
+  if (state.open) return state.open;
+  const [{ max }] = (await db
+    .select({ max: sql<number>`coalesce(max(${orgProfileVersions.version}), 0)::int` })
+    .from(orgProfileVersions)
+    .where(eq(orgProfileVersions.orgId, actor.orgId))) as [{ max: number }];
+  let base = state.approved?.sections ?? {};
+  if (opts.continueDeclined) {
+    const [newest] = await db
+      .select({ status: orgProfileVersions.status, sections: orgProfileVersions.sections })
+      .from(orgProfileVersions)
+      .where(eq(orgProfileVersions.orgId, actor.orgId))
+      .orderBy(desc(orgProfileVersions.version))
+      .limit(1);
+    if (newest?.status === "declined" && newest.sections) base = newest.sections;
+  }
+  const [row] = await db
+    .insert(orgProfileVersions)
+    .values({
+      orgId: actor.orgId,
+      version: max + 1,
+      status: "draft",
+      sections: base,
+      createdBy: actor.userId,
+      updatedBy: actor.userId,
+    })
+    .onConflictDoNothing()
+    .returning();
+  // Someone else opened a draft at the same moment: use theirs.
+  const draft = row ?? (await profileState(actor.orgId)).open;
+  if (!draft) throw new Error("Could not start a draft; try again.");
+  if (row) await audit(actor, "draft_started", row.id, { version: row.version });
+  return draft;
+}
+
+export type SaveResult =
+  { ok: true; injectionFlagged: boolean } | { ok: false; refused: Refusal[]; problems: string[] };
+
+/**
+ * Save the draft's sections. Nothing is saved when an item is refused (pay
+ * figure, staff name or contact) — the reasons go back to the person.
+ */
+export async function saveDraftCore(
+  actor: ProfileActor,
+  input: { versionId: string; sections: OrgProfileSections },
+): Promise<SaveResult> {
+  await assertRole(
+    actor.userId,
+    actor.orgId,
+    [...EDITORS],
+    "Only the HR head, the CBO or an owner can change the organisation profile.",
+  );
+  const v = await versionOf(actor.orgId, input.versionId);
+  if (!EDITABLE.has(v.status))
+    throw new Error(
+      v.status === "pending"
+        ? "This version is waiting for approval; it can be changed once it is sent back."
+        : "Only a draft can be changed — start a new draft.",
+    );
+  const { sections, refused, problems } = checkSections(
+    input.sections,
+    await staffNameKeys(actor.orgId),
+    await orgNamesOf(actor.orgId),
+  );
+  if (refused.length || problems.length) {
+    await audit(actor, "items_refused", v.id, {
+      refused: refused.map((r) => ({ section: r.section, reason: r.reason })),
+      problems,
+    });
+    return { ok: false, refused, problems };
+  }
+  const injectionFlagged = Object.values(sections)
+    .flat()
+    .some((i) => looksLikeInjection(i.text));
+  const updated = await db
+    .update(orgProfileVersions)
+    .set({ sections, injectionFlagged, updatedBy: actor.userId, updatedAt: new Date() })
+    .where(
+      and(
+        eq(orgProfileVersions.id, v.id),
+        eq(orgProfileVersions.orgId, actor.orgId),
+        inArray(orgProfileVersions.status, ["draft", "changes_requested"]),
+      ),
+    )
+    .returning({ id: orgProfileVersions.id });
+  if (!updated.length) throw new Error("This version has moved on; refresh to see it.");
+  await audit(actor, "edited", v.id, {
+    version: v.version,
+    items: Object.values(sections).flat().length,
+    injection_flagged: injectionFlagged,
+  });
+  return { ok: true, injectionFlagged };
+}
+
+/** Send the draft to the HR head or owner for approval. */
+export async function submitDraftCore(
+  actor: ProfileActor,
+  input: { versionId: string },
+): Promise<void> {
+  await assertRole(
+    actor.userId,
+    actor.orgId,
+    [...EDITORS],
+    "Only the HR head, the CBO or an owner can submit the organisation profile.",
+  );
+  const v = await versionOf(actor.orgId, input.versionId);
+  if (!EDITABLE.has(v.status)) throw new Error("Only a draft can be submitted.");
+  if (!(v.sections["about"] ?? []).length)
+    throw new Error("Add at least one line under About before submitting.");
+  const now = new Date();
+  const updated = await db
+    .update(orgProfileVersions)
+    .set({ status: "pending", submittedBy: actor.userId, submittedAt: now, updatedAt: now })
+    .where(
+      and(
+        eq(orgProfileVersions.id, v.id),
+        eq(orgProfileVersions.orgId, actor.orgId),
+        inArray(orgProfileVersions.status, ["draft", "changes_requested"]),
+      ),
+    )
+    .returning({ id: orgProfileVersions.id });
+  if (!updated.length) throw new Error("This version has moved on; refresh to see it.");
+  await audit(actor, "submitted", v.id, { version: v.version });
+}
+
+/** Throw away a draft nobody has submitted (or one sent back). */
+export async function discardDraftCore(
+  actor: ProfileActor,
+  input: { versionId: string },
+): Promise<void> {
+  await assertRole(
+    actor.userId,
+    actor.orgId,
+    [...EDITORS],
+    "Only the HR head, the CBO or an owner can change the organisation profile.",
+  );
+  const v = await versionOf(actor.orgId, input.versionId);
+  if (!EDITABLE.has(v.status)) throw new Error("Only a draft can be discarded.");
+  await db
+    .delete(orgProfileVersions)
+    .where(
+      and(
+        eq(orgProfileVersions.id, v.id),
+        eq(orgProfileVersions.orgId, actor.orgId),
+        inArray(orgProfileVersions.status, ["draft", "changes_requested"]),
+      ),
+    );
+  await audit(actor, "draft_discarded", v.id, { version: v.version });
+}
+
+/**
+ * Everyone who wrote this version: who started, last edited and submitted it,
+ * plus every editor the audit trail recorded (intermediate edits).
+ */
+export async function authorsOf(orgId: string, v: VersionRow): Promise<Set<string>> {
+  const out = new Set<string>(
+    [v.createdBy, v.updatedBy, v.submittedBy].filter((x): x is string => Boolean(x)),
+  );
+  const rows = await db
+    .selectDistinct({ userId: auditLog.actorUserId })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.orgId, orgId),
+        eq(auditLog.entityId, v.id),
+        inArray(auditLog.action, [
+          "org_profile.draft_started",
+          "org_profile.edited",
+          "org_profile.submitted",
+        ]),
+      ),
+    );
+  for (const r of rows) if (r.userId) out.add(r.userId);
+  return out;
+}
+
+/** Active members who may approve the profile (owners and HR heads), as user ids. */
+async function approversOf(orgId: string): Promise<string[]> {
+  const owners = await db
+    .select({ userId: orgMembers.userId })
+    .from(orgMembers)
+    .where(
+      and(
+        eq(orgMembers.orgId, orgId),
+        eq(orgMembers.status, "active"),
+        eq(orgMembers.isOwner, true),
+      ),
+    );
+  const heads = await db
+    .select({ userId: userRoles.userId })
+    .from(userRoles)
+    .innerJoin(
+      orgMembers,
+      and(
+        eq(orgMembers.userId, userRoles.userId),
+        eq(orgMembers.orgId, userRoles.orgId),
+        eq(orgMembers.status, "active"),
+      ),
+    )
+    .where(and(eq(userRoles.orgId, orgId), eq(userRoles.role, "hr_head")));
+  return [...new Set([...owners, ...heads].map((r) => r.userId).filter(Boolean) as string[])];
+}
+
+export const TWO_PERSON_MESSAGE =
+  "You wrote or edited this version, so another HR head or an owner must approve it. Send it back or ask them to decide.";
+
+/**
+ * Two-person rule (docs/guardrails.md, P1-3): the profile feeds every
+ * agent's and the scorer's context, so whoever wrote a version may not also
+ * approve it — unless the organisation has no other owner or HR head, in
+ * which case the approval is recorded as a self-approval.
+ */
+export async function twoPersonCheck(
+  orgId: string,
+  approverId: string,
+  v: VersionRow,
+): Promise<{ selfApproved: boolean }> {
+  const authors = await authorsOf(orgId, v);
+  if (!authors.has(approverId)) return { selfApproved: false };
+  const others = (await approversOf(orgId)).filter((u) => !authors.has(u));
+  if (others.length) throw new Error(TWO_PERSON_MESSAGE);
+  return { selfApproved: true };
+}
+
+export type ProfileDecision =
+  | { decision: "approve"; note?: string | null }
+  | { decision: "decline" | "send_back"; note: string };
+
+/**
+ * The human decision on a submitted version — the HR head or the owner
+ * (the owner passes assertRole for hr_head). Never taken by an agent: the
+ * agent asks with request_approval and this runs as the person deciding.
+ */
+export async function decideVersionCore(
+  actor: ProfileActor,
+  input: { versionId: string } & ProfileDecision,
+): Promise<void> {
+  await assertRole(
+    actor.userId,
+    actor.orgId,
+    "hr_head",
+    "Only the HR head or an owner can approve the organisation profile.",
+  );
+  const v = await versionOf(actor.orgId, input.versionId);
+  if (v.status !== "pending")
+    throw new Error(`This version is ${v.status.replace("_", " ")}, not waiting for approval.`);
+  const note = input.note?.trim() || null;
+  if (input.decision !== "approve" && (!note || note.length < 3))
+    throw new Error(
+      input.decision === "send_back"
+        ? "Say what should change (at least a few words)."
+        : "Say why you are declining (at least a few words).",
+    );
+  const { selfApproved } =
+    input.decision === "approve"
+      ? await twoPersonCheck(actor.orgId, actor.userId, v)
+      : { selfApproved: false };
+  const now = new Date();
+  const status =
+    input.decision === "approve"
+      ? "approved"
+      : input.decision === "send_back"
+        ? "changes_requested"
+        : "declined";
+  await db.transaction(async (tx) => {
+    const moved = await tx
+      .update(orgProfileVersions)
+      .set({ status, decidedBy: actor.userId, decidedAt: now, decisionNote: note, updatedAt: now })
+      .where(
+        and(
+          eq(orgProfileVersions.id, v.id),
+          eq(orgProfileVersions.orgId, actor.orgId),
+          eq(orgProfileVersions.status, "pending"),
+        ),
+      )
+      .returning({ id: orgProfileVersions.id });
+    if (!moved.length) throw new Error("This version has already been decided.");
+    if (status !== "approved") return;
+    await tx
+      .update(orgProfileVersions)
+      .set({ status: "superseded", updatedAt: now })
+      .where(
+        and(
+          eq(orgProfileVersions.orgId, actor.orgId),
+          eq(orgProfileVersions.status, "approved"),
+          sql`${orgProfileVersions.id} <> ${v.id}`,
+        ),
+      );
+    await tx
+      .insert(orgProfiles)
+      .values({
+        orgId: actor.orgId,
+        currentVersionId: v.id,
+        updatedBy: actor.userId,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: orgProfiles.orgId,
+        set: { currentVersionId: v.id, updatedBy: actor.userId, updatedAt: now },
+      });
+  });
+  await audit(
+    actor,
+    input.decision === "approve"
+      ? "approved"
+      : input.decision === "send_back"
+        ? "sent_back"
+        : "declined",
+    v.id,
+    { version: v.version, note, ...(selfApproved ? { selfApproved: true } : {}) },
+  );
+  await closeGateTasks(actor.orgId, v.id, actor.userId, status, note);
+}
+
+/**
+ * Close agent approval requests for this version decided here, outside the
+ * inbox, so the waiting run carries on (as syncGateTasks does for
+ * requisitions). When the decision came from the inbox card, resolveTask
+ * takes the task over with the person's own words.
+ */
+async function closeGateTasks(
+  orgId: string,
+  versionId: string,
+  decidedBy: string,
+  outcome: string,
+  /** The decider's words — a decline or send-back is the agent's rework brief. */
+  note: string | null = null,
+) {
+  const open = await db
+    .select({ id: agentTasks.id, runId: agentTasks.runId })
+    .from(agentTasks)
+    .where(
+      and(
+        eq(agentTasks.orgId, orgId),
+        eq(agentTasks.status, "open"),
+        eq(agentTasks.kind, "gate"),
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'type' = 'org_profile'`,
+        sql`${agentTasks.proposedAction} -> 'args' -> 'subject' ->> 'versionId' = ${versionId}`,
+      ),
+    );
+  for (const t of open) {
+    const approved = outcome === "approved";
+    const at = new Date();
+    await db
+      .update(agentTasks)
+      .set({
+        status: approved ? "approved" : "rejected",
+        response: (approved
+          ? {
+              status: "approved",
+              comment: `Decided outside the inbox (now ${outcome})${note ? `: ${note}` : "."}`,
+            }
+          : {
+              status: "rejected",
+              // The note is the brief ("not enough — go deeper on culture"):
+              // without it the agent could only guess what to rework. The
+              // prefix is how the inbox recognises a card closed this way.
+              reason: `Decided outside the inbox (now ${outcome})${note ? `: ${note}` : "."}`,
+              ...(outcome === "changes_requested" ? { changes: true } : {}),
+            }) as never,
+        decidedBy,
+        decidedAt: at,
+        updatedAt: at,
+      })
+      .where(and(eq(agentTasks.id, t.id), eq(agentTasks.status, "open")));
+    const [stillOpen] = await db
+      .select({ id: agentTasks.id })
+      .from(agentTasks)
+      .where(and(eq(agentTasks.runId, t.runId), eq(agentTasks.status, "open")))
+      .limit(1);
+    if (!stillOpen)
+      await db
+        .update(agentRuns)
+        .set({ status: "queued", updatedAt: at })
+        .where(and(eq(agentRuns.id, t.runId), eq(agentRuns.status, "awaiting_human")));
+  }
+  // The agent carries on now (a send-back is reworked at once), not at the
+  // scheduler's next tick — the person is watching it on the Profile page.
+  if (open.length) {
+    const { kickAgents } = await import("../server/agents/orchestrator.server");
+    kickAgents(orgId);
+  }
+}
+
+/** The organisation's hard gate: no requisition until a profile is approved. */
+export async function setRequireProfileCore(
+  actor: ProfileActor,
+  input: { required: boolean },
+): Promise<void> {
+  await assertRole(
+    actor.userId,
+    actor.orgId,
+    "hr_head",
+    "Only the HR head or an owner can change this setting.",
+  );
+  const now = new Date();
+  await db
+    .insert(orgProfiles)
+    .values({
+      orgId: actor.orgId,
+      requireProfile: input.required,
+      updatedBy: actor.userId,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: orgProfiles.orgId,
+      set: { requireProfile: input.required, updatedBy: actor.userId, updatedAt: now },
+    });
+  await audit(actor, "require_changed", null, { required: input.required });
+}
+
+/** Whether the organisation has an approved profile, and whether it insists on one. */
+export async function profileGate(
+  orgId: string,
+): Promise<{ approved: boolean; required: boolean }> {
+  const [p] = await db
+    .select({ current: orgProfiles.currentVersionId, required: orgProfiles.requireProfile })
+    .from(orgProfiles)
+    .where(eq(orgProfiles.orgId, orgId))
+    .limit(1);
+  return { approved: Boolean(p?.current), required: p?.required ?? false };
+}
+
+export const PROFILE_REQUIRED_MESSAGE =
+  "Your organisation requires an approved organisation profile before a role is raised. Ask the HR head or an owner to approve it in Organisation → Profile.";
+
+/**
+ * Delete the whole profile and start from nothing: every version (draft,
+ * pending, approved), the approved pointer, the require-profile switch, the
+ * saved website and its read pages, and the uploaded documents (files
+ * removed from storage; source rows hidden so the audit stays whole). The
+ * agent's open runs stop and its chat starts fresh. HR head or owner only,
+ * with a reason; audited.
+ */
+export async function resetProfileCore(
+  actor: ProfileActor,
+  input: { reason: string },
+): Promise<{ versions: number }> {
+  await assertRole(
+    actor.userId,
+    actor.orgId,
+    "hr_head",
+    "Only the HR head or an owner can delete the organisation profile.",
+  );
+  const reason = input.reason.trim();
+  if (reason.length < 3)
+    throw new Error(
+      "Say why you are deleting the profile — the reason is kept in the audit trail.",
+    );
+  const { cancelRun } = await import("../server/agents/runtime.server");
+  const open = await db
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.orgId, actor.orgId),
+        eq(agentRuns.agentType, "org_context"),
+        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
+      ),
+    );
+  for (const r of open) await cancelRun({ orgId: actor.orgId, runId: r.id, userId: actor.userId });
+  // The conversation starts fresh too: the old thread (with the agent's
+  // proposals about a now-deleted profile) is hidden, restorable for 30 days.
+  const { hiringConversations } = await import("@db/schema");
+  await db
+    .update(hiringConversations)
+    .set({ deletedAt: new Date(), deletedBy: actor.userId, updatedAt: new Date() })
+    .where(
+      and(eq(hiringConversations.orgId, actor.orgId), eq(hiringConversations.kind, "org_profile")),
+    );
+  const rows = await db
+    .delete(orgProfileVersions)
+    .where(eq(orgProfileVersions.orgId, actor.orgId))
+    .returning({ id: orgProfileVersions.id });
+  // Delete means a clean slate: the saved website, its read pages and the
+  // uploaded documents go too (files removed from storage; source rows kept,
+  // hidden, so the audit story stays in one place).
+  const { orgContextSources } = await import("@db/schema");
+  const { deleteObject } = await import("../server/storage");
+  const sources = await db
+    .select({ id: orgContextSources.id, fileKey: orgContextSources.fileKey })
+    .from(orgContextSources)
+    .where(and(eq(orgContextSources.orgId, actor.orgId), isNull(orgContextSources.deletedAt)));
+  const now = new Date();
+  for (const s of sources) {
+    if (s.fileKey) await deleteObject(s.fileKey);
+    await db
+      .update(orgContextSources)
+      .set({ deletedAt: now, deletedBy: actor.userId })
+      .where(eq(orgContextSources.id, s.id));
+  }
+  await db
+    .update(orgProfiles)
+    .set({
+      currentVersionId: null,
+      requireProfile: false,
+      websiteUrl: null,
+      websiteConfirmedBy: null,
+      websiteConfirmedAt: null,
+      lastRereadAt: null,
+      lastRereadStatus: null,
+      rereadFailures: 0,
+      nextRereadAt: null,
+      updatedBy: actor.userId,
+      updatedAt: now,
+    })
+    .where(eq(orgProfiles.orgId, actor.orgId));
+  await audit(actor, "reset", null, {
+    reason,
+    versions: rows.length,
+    sources: sources.length,
+  });
+  return { versions: rows.length };
+}
+
+/** Refuse to raise a requisition while the organisation insists on an approved profile it lacks. */
+export async function assertProfileAllowsRequisition(orgId: string): Promise<void> {
+  const gate = await profileGate(orgId);
+  if (gate.required && !gate.approved) throw new Error(PROFILE_REQUIRED_MESSAGE);
+}
+
+/** For the approval card (gateFor): a pending version, by id, in this organisation. */
+export async function pendingVersion(orgId: string, versionId: string) {
+  const v = await versionOf(orgId, versionId).catch(() => null);
+  const state = v ? await profileState(orgId) : null;
+  return v ? { version: v, approved: state?.approved ?? null } : null;
+}

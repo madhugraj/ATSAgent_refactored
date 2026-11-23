@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege for the workflow token (apps/web/docs/guardrails.md P2-3).
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:14 # same major as production (Cloud SQL POSTGRES_14)
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: atsiq_ci
+        ports: ["54333:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:54333/atsiq_ci
+      SESSION_SECRET: ci-only-session-secret-0123456789abcdef
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Type check (turbo, per package)
+        run: bunx turbo run typecheck
+      - name: Lint (app + scripts)
+        run: bun run lint
+      - name: Format check
+        run: bunx prettier --check .
+      - name: Dependency audit (high+ blocks)
+        run: bun audit --audit-level=high
+        continue-on-error: false
+      - name: Secrets scan
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # table-owners runs here; graph+inventory run locally against the source
+      # checkout (they map source paths, which don't exist in this repo).
+      - name: Refactor invariants (every table owned)
+        run: node scripts/refactor/table-owners.mjs
+      - name: Apply database schema
+        run: node scripts/migrate-pg.mjs
+
+      # One bun process per file: bun's mock.module is process-global, so a
+      # combined `bun test scripts/` run would leak one file's mocks into
+      # every later file (empty agent registry, fake db).
+      - name: Tests (every scripts/*.test.ts, one bun process per file)
+        # Collect every failing file instead of stopping at the first, so one
+        # CI run shows the full failure set.
+        run: |
+          fails=""
+          for f in scripts/*.test.ts; do bun test "$f" || fails="$fails $f"; done
+          if [ -n "$fails" ]; then echo "failed test files:$fails"; exit 1; fi
+      - name: Agents lock matches manifests
+        run: bun run agents:lock && git diff --exit-code scripts/agents.lock.json
+      - name: Build (turbo)
+        run: bunx turbo run build

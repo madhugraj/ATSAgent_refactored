@@ -1,0 +1,67 @@
+/**
+ * Agent definitions and tools register here, so every entry point that
+ * drives or inspects agents sees the same set (docs/agentic-plan.md §10).
+ */
+import { getAgent } from "./registry";
+import {
+  registerPhase1Agents,
+  registerPhase2Agents,
+  registerPhase3Agents,
+  registerPhase4Agents,
+  registerPhase6Agents,
+  registerOrgAgents,
+  registerLabourAgents,
+  registerExpertAgents,
+  registerPanelAgents,
+  registerVoiceGuardAgent,
+} from "./definitions";
+import { registerPhase1Tools } from "./tools";
+import { registerPhase2Tools } from "./tools-phase2";
+import { registerPhase3Tools } from "./tools-phase3";
+import { registerPhase4Tools } from "./tools-phase4";
+import { registerSourcingTools } from "./tools-sourcing";
+import { registerDistributionTools } from "./tools-distribution";
+import { registerOrgTools } from "./tools-org";
+import { registerLabourTools } from "./tools-labour";
+import { registerExpertTools } from "./tools-expert";
+import { registerPanelTools } from "./tools-panel";
+import { registerOntologyTools } from "./tools-ontology";
+import { registerVoiceGuardTools } from "./tools-voice-guard";
+import type { AgentType } from "@db/schema";
+
+let registered = false;
+
+/** Idempotent: register the built-in agents and tools once per process. */
+export function ensureAgentsRegistered(): void {
+  if (registered) return;
+  registered = true;
+  registerPhase1Tools();
+  registerPhase2Tools();
+  registerPhase3Tools();
+  registerPhase4Tools();
+  registerSourcingTools();
+  registerDistributionTools();
+  registerOrgTools();
+  registerLabourTools();
+  registerExpertTools();
+  registerPanelTools();
+  registerOntologyTools();
+  registerVoiceGuardTools();
+  registerPhase1Agents();
+  registerPhase2Agents();
+  registerPhase3Agents();
+  registerPhase4Agents();
+  registerPhase6Agents();
+  registerOrgAgents();
+  registerLabourAgents();
+  registerExpertAgents();
+  registerPanelAgents();
+  registerVoiceGuardAgent();
+}
+
+ensureAgentsRegistered();
+
+/** Whether an agent type has a definition in this build. */
+export function isAgentLive(type: AgentType): boolean {
+  return getAgent(type) !== undefined;
+}

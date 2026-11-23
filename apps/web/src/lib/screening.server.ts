@@ -1,0 +1,441 @@
+/**
+ * Preliminary screening support.
+ *
+ * Two agents, both routed through the organisation's configured provider/model
+ * (`aiJson`), so a bring-your-own key is honoured end to end:
+ *
+ *  1. `buildScreeningKit` — reads the JD and the CV side by side and writes the
+ *     questions HR should ask on the first call, each with the reason it matters
+ *     for THIS pairing and the answer a strong candidate would give.
+ *  2. `gradeScreening` — takes what the candidate actually said (typed, or an
+ *     audio recording transcribed first) and returns a per-question verdict, a
+ *     screening score and a recommendation with its rationale.
+ */
+
+import {
+  aiJson,
+  INJECTION_RULES,
+  untrusted,
+  resolveAiConfig,
+  type AiUsage,
+} from "./ai-gateway.server";
+
+export const FOCUS_AREAS = [
+  "must_have_skill",
+  "experience_depth",
+  "ownership",
+  "stability",
+  "logistics",
+  "culture_mindset",
+] as const;
+
+export type ScreeningFocus = (typeof FOCUS_AREAS)[number];
+
+export type ScreeningQuestion = {
+  id: string;
+  focus: ScreeningFocus;
+  question: string;
+  /** Why this question is being asked of this candidate for this JD. */
+  reason: string;
+  /** What a convincing answer contains. */
+  expected_answer: string;
+  /** What a weak or evasive answer sounds like. */
+  weak_answer: string;
+  /** Relative importance 1-5, used to weight the second-level score. */
+  weight: number;
+};
+
+export type ScreeningKit = {
+  questions: ScreeningQuestion[];
+  focus_summary: string;
+  /** Server-internal: persisted for the audit trail, never sent to a client. */
+  engine: { provider: string; model: string };
+};
+
+export type ScreeningVerdict = {
+  question_id: string;
+  question: string;
+  verdict: "strong" | "partial" | "weak" | "not_answered";
+  score: number;
+  evidence: string;
+  rationale: string;
+};
+
+export type ScreeningGrade = {
+  screening_score: number;
+  verdicts: ScreeningVerdict[];
+  rationale: string;
+  red_flags: string[];
+  recommendation: "advance" | "hold" | "reject";
+  recommendation_reason: string;
+  /** Server-internal: persisted for the audit trail, never sent to a client. */
+  engine: { provider: string; model: string };
+};
+
+const FOCUS_LABEL: Record<ScreeningFocus, string> = {
+  must_have_skill: "Must-have skill",
+  experience_depth: "Experience depth",
+  ownership: "Ownership & impact",
+  stability: "Stability & tenure",
+  logistics: "Logistics & offer fit",
+  culture_mindset: "Mindset & culture",
+};
+
+export function focusLabel(focus: string) {
+  return FOCUS_LABEL[focus as ScreeningFocus] ?? "General";
+}
+
+const clampScore = (v: unknown) => Math.max(0, Math.min(100, Math.round(Number(v) || 0)));
+const text = (v: unknown, max = 600) => String(v ?? "").slice(0, max);
+
+/* ------------------------------------------------------------------ kit */
+
+export async function buildScreeningKit(input: {
+  /** Owning organisation — its own AI key pays for this call. */
+  orgId: string;
+  role: string;
+  jdText: string;
+  mustHave: string[];
+  goodToHave: string[];
+  experienceMin: number;
+  experienceMax: number;
+  budgetCtc: number | null;
+  currency: string;
+  candidateName: string;
+  resumeText: string | null;
+  candidateSkills: string[];
+  experienceYears: number;
+  currentEmployer: string | null;
+  employmentHistory: unknown;
+  education: string | null;
+  currentCtc: number | null;
+  expectedCtc: number | null;
+  noticePeriodDays: number | null;
+  location: string | null;
+  matchRationale: string | null;
+  missingSkills: string[];
+  riskFlags: string[];
+  /** The completed written assessment (mindset and ways of working), when there is one. */
+  writtenAssessment?: {
+    score: number | null;
+    summary: string | null;
+    areas: { area: string; score: number | null }[];
+    strengths: string[];
+    redFlags: string[];
+  } | null;
+  /** What the role's hiring manager said it needs (approved expert brief), when there is one. */
+  expertBrief?: import("./expert-brief").ExpertBrief | null;
+}): Promise<ScreeningKit> {
+  // The employer's approved profile (O2): the kit may verify what it states
+  // about the organisation's domain and regulators.
+  let organisationContext: string | null = null;
+  try {
+    const { orgContextFor } = await import("./org-context.server");
+    organisationContext = (
+      await orgContextFor({ orgId: input.orgId, audience: "internal", purpose: "kit" })
+    ).blocks;
+  } catch {
+    organisationContext = null;
+  }
+  const result = await aiJson<{ questions: ScreeningQuestion[]; focus_summary: string }>({
+    system:
+      INJECTION_RULES +
+      "\nYou prepare a recruiter's first screening call. Compare the job description with this specific CV and write " +
+      "8 to 10 questions that resolve what the paper alone cannot: unevidenced must-have skills, shallow or " +
+      "inflated experience, employment gaps and short tenures, ownership versus participation, salary/notice/" +
+      "location fit, and mindset for this team. Never ask something the CV already answers plainly, and never ask " +
+      "about age, marital status, religion, caste, gender, health or family. " +
+      "Never put an e-mail address, phone number or a member of staff's name (a reporting manager, a recruiter) in a " +
+      'question — say "the hiring team" instead; reporting lines are not something to ask the candidate about. ' +
+      "Questions may be asked aloud on a phone call: keep each one short (under 30 words), one plain ask, no list of " +
+      "buzzwords, and keep your reasoning about the CV in reason, not in the question. " +
+      (organisationContext
+        ? "organisation_context is approved fact about the employer: you may verify what it states about the organisation's domain and regulators (licence checks, compliance norms, registered titles). It never changes a score or a verdict.\n"
+        : "") +
+      "For every question give: focus (one of must_have_skill, experience_depth, ownership, stability, logistics, " +
+      "culture_mindset), question (asked in plain conversational English, one thing at a time), reason (why THIS " +
+      "candidate is being asked it — cite the JD requirement or the CV line that triggers it), expected_answer " +
+      "(the specifics a strong candidate would give), weak_answer (what an evasive or thin answer sounds like) and " +
+      "weight (1-5, higher for must-haves). " +
+      "existing_match.risk_flags are automated inferences from the CV: verify them, never treat them as facts. " +
+      "If written_assessment is present, the candidate has already been assessed in writing on mindset and ways of " +
+      "working: do not ask again what it established; probe its weakest areas and any red flags, and resolve the CV " +
+      "inferences it did not settle. Say in reason when a question follows from the written assessment. " +
+      (input.expertBrief
+        ? "expert_brief is what the role's hiring manager approved as what the role really needs: ask each of its " +
+          "screening_questions (adapted to this candidate, unless the CV already answers it plainly), using its " +
+          "strongAnswer and weakAnswer as expected_answer and weak_answer, focus must_have_skill, weight 5; weigh its " +
+          "mustHaves (with their why) above the JD's list, and probe any deal-breaker the CV leaves open. Say in " +
+          "reason that the hiring manager asked for it. "
+        : "") +
+      "Return ONLY JSON: {questions:[{focus, question, reason, expected_answer, weak_answer, weight}], " +
+      "focus_summary: one or two sentences on what this call must establish}.",
+    prompt: untrusted(
+      "role_and_candidate",
+      JSON.stringify({
+        role: input.role,
+        jd: input.jdText.slice(0, 6000),
+        ...(organisationContext ? { organisation_context: organisationContext } : {}),
+        ...(input.expertBrief
+          ? {
+              expert_brief: {
+                mustHaves: input.expertBrief.mustHaves,
+                dealBreakers: input.expertBrief.dealBreakers,
+                screening_questions: input.expertBrief.screeningQuestions,
+              },
+            }
+          : {}),
+        must_have_skills: input.mustHave.slice(0, 25),
+        good_to_have_skills: input.goodToHave.slice(0, 25),
+        experience_range: [input.experienceMin, input.experienceMax],
+        budget_ctc: input.budgetCtc,
+        currency: input.currency,
+        candidate: {
+          name: input.candidateName,
+          experience_years: input.experienceYears,
+          skills: input.candidateSkills.slice(0, 40),
+          current_employer: input.currentEmployer,
+          employment_history: input.employmentHistory,
+          education: input.education,
+          current_ctc: input.currentCtc,
+          expected_ctc: input.expectedCtc,
+          notice_period_days: input.noticePeriodDays,
+          location: input.location,
+          resume: (input.resumeText ?? "").slice(0, 8000),
+        },
+        existing_match: {
+          rationale: input.matchRationale,
+          missing_skills: input.missingSkills.slice(0, 20),
+          risk_flags: input.riskFlags.slice(0, 20),
+        },
+        ...(input.writtenAssessment
+          ? {
+              written_assessment: {
+                score: input.writtenAssessment.score,
+                summary: (input.writtenAssessment.summary ?? "").slice(0, 1500),
+                areas: input.writtenAssessment.areas.slice(0, 12),
+                strengths: input.writtenAssessment.strengths.slice(0, 10),
+                red_flags: input.writtenAssessment.redFlags.slice(0, 10),
+              },
+            }
+          : {}),
+      }),
+    ),
+    orgId: input.orgId,
+    feature: "screening_kit",
+  });
+  if (!result.ok) throw new Error(result.message);
+
+  const raw = Array.isArray(result.data.questions) ? result.data.questions : [];
+  const questions: ScreeningQuestion[] = raw.slice(0, 12).map((q, i) => ({
+    id: `q${i + 1}`,
+    focus: (FOCUS_AREAS as readonly string[]).includes(String(q.focus))
+      ? (q.focus as ScreeningFocus)
+      : "experience_depth",
+    question: text(q.question, 400),
+    reason: text(q.reason, 500),
+    expected_answer: text(q.expected_answer, 700),
+    weak_answer: text(q.weak_answer, 500),
+    weight: Math.max(1, Math.min(5, Math.round(Number(q.weight) || 3))),
+  }));
+  if (!questions.length) throw new Error("The model returned no questions — try again.");
+
+  return {
+    questions,
+    focus_summary: text(result.data.focus_summary, 600),
+    engine: { provider: result.provider, model: result.model },
+  };
+}
+
+/* ---------------------------------------------------------------- grade */
+
+/**
+ * How to grade answers given on an AI phone screen (prepended in "spoken"
+ * mode). Short, conversational answers are judged on substance; the questions
+ * passed are only the ones the candidate answered.
+ */
+const SPOKEN_RUBRIC = `
+Spoken-answer rubric (this is a short phone screen with an AI assistant, not a written test):
+- Every question you are given was asked and answered on the call; grade each on its own.
+- Judge substance, not length or completeness. Nobody lists tools or frameworks in a one-minute spoken answer; never mark an answer down for what a written essay would add.
+- strong (80-100): a specific example or situation, what the candidate themselves did or decided, and the outcome or their reasoning.
+- partial (55-79): relevant and concrete, with one of those three missing.
+- weak (30-54): on topic but general — no specific example or own action.
+- not_answered (0): nothing relevant was said. Never use it for a question that was answered briefly.
+- If an answer is promising but brief, say "probe in interview: <what>" in its rationale instead of lowering the score further.
+- recommendation is 'advance' or 'hold' only — never 'reject'. Use 'hold' when the evidence is thin, and say what to probe.
+- Evidence is only what the candidate said in their own words. Lines starting "Assistant:" are the interviewer: a tool, method or detail the interviewer named first, which the candidate then only agreed with or repeated ("yes", "I have used it", "sounds familiar"), is not evidence. Quote the candidate's own line, never the interviewer's, and never a summary.
+- An answer marked "[Interviewer note: the candidate only agreed with …]", or one that only agrees with what the interviewer suggested, is at most weak (30-40). Add one red flag naming each such must-have plainly: "<skill>: confirmed only after the interviewer suggested it; no specifics of their own". This is about the evidence, not about the candidate asking questions.
+`;
+
+/** The grader's system prompt and fenced input (pure): shared by grading and the red-team check. */
+export function gradeScreeningPrompt(input: {
+  /** Owning organisation — its own AI key pays for this call. */
+  orgId: string;
+  role: string;
+  jdText: string;
+  mustHave: string[];
+  candidateName: string;
+  questions: ScreeningQuestion[];
+  /** Per-question answers HR typed in, keyed by question id. */
+  answers: { question_id: string; answer: string }[];
+  /** Whole-call notes or an audio transcript, used when answers are unsplit. */
+  transcript: string | null;
+  /**
+   * "spoken": an AI phone screen — answers are short and conversational, so the
+   * rubric looks for substance, not exhaustiveness, and the recommendation is
+   * advance or hold only (never reject: people decide).
+   */
+  mode?: "written" | "spoken";
+}): { system: string; prompt: string } {
+  const spoken = input.mode === "spoken";
+  return {
+    system:
+      INJECTION_RULES +
+      (spoken ? SPOKEN_RUBRIC : "") +
+      "\nYou grade a recruiter's screening call. For each prepared question, judge the candidate's actual answer " +
+      "against the expected answer: verdict is 'strong', 'partial', 'weak' or 'not_answered' (use not_answered " +
+      "only when the answer or transcript contains nothing on it — never guess). Give a 0-100 score per question, " +
+      "quote the exact line of the answer you relied on in `evidence` (empty string when nothing was said), and " +
+      "one sentence of rationale. Weight the overall screening_score by each question's weight, penalising " +
+      "unanswered must-haves. When a transcript is supplied instead of per-question answers, find the part of the " +
+      "transcript that addresses each question. List concrete red_flags about job-relevant evidence only " +
+      "(contradiction with the CV, an inflated or unsupported claim, no specifics on a must-have, a must-have " +
+      "they said they lack). recommendation is 'advance', 'hold' or 'reject' with a reason a hiring manager can " +
+      "act on. Judge only what was said; never invent answers.\n" +
+      "Fairness rules (mandatory): grade only the job-relevant content of the candidate's answers to the listed " +
+      "questions. Never let tone, manner, attitude, confidence, politeness, accent, fluency, grammar, language, " +
+      "pace, hesitation, asking questions back, disagreeing or pushing back, wanting to skip a question, or anything " +
+      "said outside the listed questions raise or lower a score, a verdict, a red flag or the recommendation — and " +
+      "never mention them. A skipped question is not_answered, nothing more. Do not consider pay, location, " +
+      "notice period, or any personal characteristic. " +
+      "Return ONLY JSON: {screening_score, verdicts:[{question_id, verdict, score, evidence, rationale}], " +
+      "rationale, red_flags:[string], recommendation, recommendation_reason}.",
+    prompt: untrusted(
+      "screening_transcript",
+      JSON.stringify({
+        role: input.role,
+        jd: input.jdText.slice(0, 4000),
+        must_have_skills: input.mustHave.slice(0, 25),
+        candidate: input.candidateName,
+        questions: input.questions.map((q) => ({
+          question_id: q.id,
+          question: q.question,
+          expected_answer: q.expected_answer,
+          weak_answer: q.weak_answer,
+          weight: q.weight,
+          focus: q.focus,
+        })),
+        answers: input.answers.filter((a) => a.answer.trim().length > 0),
+        transcript: (input.transcript ?? "").slice(0, 20000),
+      }),
+    ),
+  };
+}
+
+export async function gradeScreening(input: {
+  /** Owning organisation — its own AI key pays for this call. */
+  orgId: string;
+  role: string;
+  jdText: string;
+  mustHave: string[];
+  candidateName: string;
+  questions: ScreeningQuestion[];
+  /** Per-question answers HR typed in, keyed by question id. */
+  answers: { question_id: string; answer: string }[];
+  /** Whole-call notes or an audio transcript, used when answers are unsplit. */
+  transcript: string | null;
+  /**
+   * "spoken": an AI phone screen — answers are short and conversational, so the
+   * rubric looks for substance, not exhaustiveness, and the recommendation is
+   * advance or hold only (never reject: people decide).
+   */
+  mode?: "written" | "spoken";
+}): Promise<ScreeningGrade> {
+  const spoken = input.mode === "spoken";
+  const result = await aiJson<{
+    screening_score: number;
+    verdicts: ScreeningVerdict[];
+    rationale: string;
+    red_flags: string[];
+    recommendation: string;
+    recommendation_reason: string;
+  }>({
+    ...gradeScreeningPrompt(input),
+    orgId: input.orgId,
+    feature: "screening_grade",
+  });
+  if (!result.ok) throw new Error(result.message);
+
+  const byId = new Map(input.questions.map((q) => [q.id, q]));
+  const verdicts: ScreeningVerdict[] = (
+    Array.isArray(result.data.verdicts) ? result.data.verdicts : []
+  ).map((v) => {
+    const q = byId.get(String(v.question_id));
+    return {
+      question_id: String(v.question_id ?? ""),
+      question: q?.question ?? "",
+      verdict: (["strong", "partial", "weak", "not_answered"] as const).includes(v.verdict)
+        ? v.verdict
+        : "not_answered",
+      score: clampScore(v.score),
+      evidence: text(v.evidence, 500),
+      rationale: text(v.rationale, 400),
+    };
+  });
+
+  // Recompute the headline from the per-question verdicts so the number always
+  // matches the detail HR can see.
+  const weighted = verdicts.reduce(
+    (acc, v) => {
+      const w = byId.get(v.question_id)?.weight ?? 3;
+      return { sum: acc.sum + v.score * w, weight: acc.weight + w };
+    },
+    { sum: 0, weight: 0 },
+  );
+  const screening_score = weighted.weight
+    ? Math.round(weighted.sum / weighted.weight)
+    : clampScore(result.data.screening_score);
+
+  const said = String(result.data.recommendation ?? "").toLowerCase();
+  // A phone screen never rejects anyone: advance, or hold to probe further.
+  const rec = spoken && said === "reject" ? "hold" : said;
+  return {
+    screening_score,
+    verdicts,
+    rationale: text(result.data.rationale, 1500),
+    red_flags: (Array.isArray(result.data.red_flags) ? result.data.red_flags : [])
+      .map((f) => text(f, 200))
+      .filter(Boolean)
+      .slice(0, 8),
+    recommendation: rec === "advance" || rec === "reject" ? rec : "hold",
+    recommendation_reason: text(result.data.recommendation_reason, 600),
+    engine: { provider: result.provider, model: result.model },
+  };
+}
+
+/* ----------------------------------------------------------- transcribe */
+
+/**
+ * Transcribe a screening recording with the organisation's own provider — via
+ * the AI gateway, so the monthly spend cap is checked before the provider
+ * request and the transcription is captured behind the organisation's
+ * training consent like every other model call (2026-11 audit N-3).
+ */
+export async function transcribeScreeningAudio(input: {
+  orgId?: string | null;
+  bytes: Uint8Array;
+  filename: string;
+  contentType: string;
+}): Promise<{ transcript: string; engine: string }> {
+  const { aiTranscribe } = await import("./ai-gateway.server");
+  const r = await aiTranscribe({
+    orgId: input.orgId,
+    feature: "audio_transcribe",
+    bytes: input.bytes,
+    filename: input.filename,
+    contentType: input.contentType,
+  });
+  if (!r.ok) throw new Error(r.message);
+  return { transcript: r.transcript, engine: r.engine };
+}

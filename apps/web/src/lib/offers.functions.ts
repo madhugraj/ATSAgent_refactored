@@ -1,0 +1,1049 @@
+/**
+ * Org-scoped offer lifecycle: raising an offer against an application and
+ * walking it through the HR → CBO → release → acceptance approval chain.
+ * Every read/write is predicated on the caller's verified organisation.
+ */
+import { and, eq } from "drizzle-orm";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
+import { z } from "zod";
+
+import { db } from "../server/db";
+import { applications, candidates, offers, organizations, requisitions } from "@db/schema";
+import { assertRole, requireOrg, requireRole, type AppRole } from "./auth.middleware";
+import { resolveAiConfig, aiJson } from "./ai-gateway.server";
+import { resolveTemplate, stripUnreplacedPlaceholders } from "./templates.server";
+
+const OfferStatus = z.enum([
+  "draft",
+  "pending_hr",
+  "pending_cbo",
+  "approved",
+  "released",
+  "accepted",
+  "declined",
+  "revoked",
+  "countered",
+]);
+
+/**
+ * Offer approval chain (HR → CBO → release), enforced server-side: each target
+ * status names the legal source statuses and the role that may make the hop.
+ */
+const OFFER_TRANSITIONS: Partial<
+  Record<(typeof OfferStatus.options)[number], { from: string[]; role?: AppRole | AppRole[] }>
+> = {
+  // A countered offer is revised (back to draft) and approved again.
+  draft: { from: ["draft", "declined", "revoked", "countered"] },
+  pending_hr: { from: ["draft"] },
+  pending_cbo: { from: ["pending_hr"], role: "hr_head" },
+  approved: { from: ["pending_cbo"], role: "president_cbo" },
+  released: { from: ["approved"], role: "hr_head" },
+  accepted: { from: ["released"] },
+  declined: { from: ["released"] },
+  revoked: { from: ["released", "accepted"], role: ["hr_head", "president_cbo"] },
+};
+
+/**
+ * Raise an offer: verify the application belongs to the caller's org, file the
+ * offer at "pending_hr", then park the candidate on "offer_pending". The
+ * legacy client ignored failures of that stage bump, so it stays best-effort.
+ */
+/** Shared by the server function and the agents (acting member in `actor`). */
+export const createOfferCore = createServerOnlyFn(async function createOfferCore(
+  actor: { orgId: string; userId: string; memberEmail: string },
+  data: { applicationId: string; offeredCtc: string; joiningDate?: string | null | undefined },
+  /** Agents start at "draft" so the letter is generated before approval. */
+  status: "draft" | "pending_hr" = "pending_hr",
+): Promise<{ ok: true; id: string }> {
+  // Raising an offer is a recruiting-team action — hiring managers and
+  // department heads consume offers through approvals, they don't create them.
+  await assertRole(
+    actor.userId,
+    actor.orgId,
+    ["recruiter", "hr_head", "president_cbo"],
+    "Only the recruiting team (recruiter, HR head or the CBO) can raise an offer.",
+  );
+
+  const [application] = await db
+    .select({ id: applications.id })
+    .from(applications)
+    .where(and(eq(applications.id, data.applicationId), eq(applications.orgId, actor.orgId)))
+    .limit(1);
+  if (!application) throw new Error("Application not found");
+
+  // Written in the role's pay terms (docs/pay-terms-plan.md, Phase 4).
+  const { offerTermsFor } = await import("./pay-context.server");
+  const terms = await offerTermsFor(actor.orgId, data.applicationId, data.joiningDate || null);
+  const [created] = await db
+    .insert(offers)
+    .values({
+      applicationId: data.applicationId,
+      orgId: actor.orgId,
+      offeredCtc: String(Number(data.offeredCtc) || 0),
+      joiningDate: data.joiningDate || null,
+      ...terms,
+      status,
+    })
+    .returning({ id: offers.id });
+
+  // Raising the offer is what puts the candidate in "offer pending approval".
+  try {
+    const { recordOfferStageCore } = await import("./pipeline.server");
+    await recordOfferStageCore(actor, {
+      applicationId: data.applicationId,
+      toStage: "offer_pending",
+    });
+  } catch (e) {
+    /* stage bump is best-effort, exactly as before */
+    console.error("[offers] stage update failed (offer unaffected):", e);
+  }
+  return { ok: true as const, id: created!.id };
+});
+
+export const createOffer = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((data: unknown) =>
+    z
+      .object({
+        applicationId: z.string().uuid(),
+        offeredCtc: z.string().min(1),
+        joiningDate: z.string().nullish(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data, context }) =>
+    createOfferCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
+      data,
+    ),
+  );
+
+/**
+ * Advance an offer one step: append the trail entry and set the next status.
+ * The step that submits the creator's offer for its first approval
+ * (pending_hr → pending_cbo) requires a generated offer letter — the creator
+ * must have produced and reviewed one before the offer moves on. When the
+ * step also moves the candidate (release → offer_released, acceptance →
+ * offer_accepted) the caller passes `applicationStage` and the linked
+ * application is updated the same best-effort way as before.
+ */
+/**
+ * Email a released offer to the candidate: the letter as a PDF and the private
+ * link to answer it (one email per revision). Never throws — a failure is
+ * logged, and the release itself stands.
+ */
+export const emailReleasedOffer = createServerOnlyFn(async function emailReleasedOffer(
+  orgId: string,
+  offerId: string,
+  responseToken: string,
+): Promise<boolean> {
+  try {
+    const [offerRow] = await db
+      .select({
+        applicationId: offers.applicationId,
+        letter: offers.letter,
+        revision: offers.revision,
+        candidateEmail: candidates.email,
+        candidateName: candidates.fullName,
+        jobTitle: requisitions.title,
+        orgName: organizations.name,
+      })
+      .from(offers)
+      .innerJoin(applications, eq(offers.applicationId, applications.id))
+      .innerJoin(candidates, eq(applications.candidateId, candidates.id))
+      .innerJoin(requisitions, eq(applications.requisitionId, requisitions.id))
+      .innerJoin(organizations, eq(applications.orgId, organizations.id))
+      .where(and(eq(offers.id, offerId), eq(offers.orgId, orgId)))
+      .limit(1);
+    if (offerRow?.candidateEmail && offerRow.letter) {
+      const { enqueueEmail } = await import("./email-outbox.server");
+      const { buildOfferLetterPdf } = await import("./offer-letter-pdf");
+      const pdf = buildOfferLetterPdf(offerRow.letter as OfferLetterPayload);
+      await enqueueEmail({
+        orgId,
+        kind: "offer_released",
+        templateName: "offer_released",
+        toEmail: offerRow.candidateEmail,
+        applicationId: offerRow.applicationId,
+        templateData: {
+          candidateName: offerRow.candidateName,
+          orgName: offerRow.orgName,
+          jobTitle: offerRow.jobTitle,
+          respondUrl: `${(await import("../server/env")).env.PUBLIC_SITE_URL.replace(/\/$/, "")}/offer/${responseToken}`,
+          ...(offerRow.revision > 1 ? { revised: "yes" } : {}),
+        },
+        attachments: [
+          {
+            filename: `offer-letter-${offerId.slice(0, 8)}.pdf`,
+            contentBase64: Buffer.from(pdf.output("arraybuffer")).toString("base64"),
+            contentType: "application/pdf",
+          },
+        ],
+        // One email per release of each revision.
+        idempotencyKey: `offer-released:${offerId}:r${offerRow.revision}`,
+      });
+      return true;
+    }
+    return false;
+  } catch (err) {
+    const { log } = await import("../server/log");
+    log.warn("offer.release_email_failed", {
+      org_id: orgId,
+      offer_id: offerId,
+      error: err as Error,
+    });
+    return false;
+  }
+});
+
+/** Shared by the server function and the agents (acting member in `actor`). */
+export const advanceOfferCore = createServerOnlyFn(async function advanceOfferCore(
+  actor: { orgId: string; userId: string; memberEmail: string; via?: "agent" },
+  data: {
+    id: string;
+    status: z.infer<typeof OfferStatus>;
+    applicationStage?: "offer_released" | "offer_accepted" | undefined;
+  },
+) {
+  const [current] = await db
+    .select({
+      status: offers.status,
+      letter: offers.letter,
+      approvalTrail: offers.approvalTrail,
+      applicationId: offers.applicationId,
+      joiningDate: offers.joiningDate,
+    })
+    .from(offers)
+    .where(and(eq(offers.id, data.id), eq(offers.orgId, actor.orgId)))
+    .limit(1);
+  if (!current) throw new Error("Offer not found");
+
+  const rule = OFFER_TRANSITIONS[data.status];
+  if (!rule || !rule.from.includes(current.status)) {
+    throw new Error(`An offer cannot move from ${current.status} to ${data.status}.`);
+  }
+  if (rule.role) {
+    await assertRole(actor.userId, actor.orgId, rule.role);
+  }
+  if (data.status === "pending_hr" && !current.letter) {
+    throw new Error("Generate and review the offer letter before sending this offer for approval.");
+  }
+  // No offer goes to approvers, is approved or is released on terms the
+  // candidate never stated: expected CTC, notice period and a joining date.
+  if (TERMS_GATED.has(data.status)) {
+    const { offerTermsMissing, listWords } = await import("./compensation.server");
+    const missing = await offerTermsMissing(
+      actor.orgId,
+      current.applicationId,
+      current.joiningDate ? String(current.joiningDate) : null,
+    );
+    if (missing.length)
+      throw new Error(
+        data.status === "pending_hr"
+          ? `This offer cannot go for approval yet: ${listWords(missing)} ${missing.length > 1 ? "are" : "is"} missing. Send the candidate the pay & availability form (or enter it from a call) and set the joining date.`
+          : `This offer cannot be ${data.status === "released" ? "released" : "approved"} yet: ${listWords(missing)} ${missing.length > 1 ? "are" : "is"} missing. Send it back with that reason — the Offer agent collects them and redrafts.`,
+      );
+  }
+  // The offer check against the approved labour rules (docs/labour-policy-agent-plan.md,
+  // L3): current, and no fix left unless the HR head overrode it with a reason.
+  if (data.status === "pending_hr") {
+    const { offerCheckBlock } = await import("./offer-check.server");
+    const block = await offerCheckBlock(actor.orgId, data.id, {
+      autoRun: true,
+      actor: actor.memberEmail,
+    });
+    if (block) throw new Error(block);
+  }
+  // Release gate: pre-onboarding documents must be collected and validated
+  // before the letter goes out. The checklist is evaluated server-side.
+  if (data.status === "released") {
+    const [target] = await db
+      .select({ applicationId: offers.applicationId })
+      .from(offers)
+      .where(and(eq(offers.id, data.id), eq(offers.orgId, actor.orgId)))
+      .limit(1);
+    if (target) {
+      const { readinessFor, docTypeLabel } = await import("./onboarding.server");
+      const readiness = await readinessFor(actor.orgId, target.applicationId);
+      if (!readiness.ready) {
+        throw new Error(
+          `Pre-onboarding is incomplete — validate these documents first: ${readiness.missing
+            .map((m) => docTypeLabel(m))
+            .join(", ")}.`,
+        );
+      }
+    }
+  }
+  if (data.applicationStage === "offer_released" && data.status !== "released") {
+    throw new Error("The application stage can only move to offer_released on release.");
+  }
+  if (data.applicationStage === "offer_accepted" && data.status !== "accepted") {
+    throw new Error("The application stage can only move to offer_accepted on acceptance.");
+  }
+
+  // The approval trail is evidence — rebuilt server-side, never client-supplied.
+  const prior = Array.isArray(current.approvalTrail) ? current.approvalTrail : [];
+  const trail = [
+    ...prior,
+    {
+      from: current.status,
+      to: data.status,
+      actor: actor.memberEmail,
+      decision: data.status,
+      ...(actor.via ? { via: actor.via } : {}),
+      at: new Date().toISOString(),
+    },
+  ];
+
+  // Released: a fresh private link for the candidate's answer (accept / decline
+  // / ask for changes); a revision gets a new one.
+  const responseToken =
+    data.status === "released"
+      ? `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, "")
+      : null;
+  await db
+    .update(offers)
+    .set({
+      status: data.status,
+      approvalTrail: trail as never,
+      ...(responseToken ? { responseToken, respondedAt: null } : {}),
+    })
+    .where(and(eq(offers.id, data.id), eq(offers.orgId, actor.orgId)));
+  // Approved: its exchange rate to the reporting currency is fixed now (Phase 4).
+  if (data.status === "approved") {
+    const { lockOfferRate } = await import("./pay-context.server");
+    await lockOfferRate(actor.orgId, data.id);
+  }
+
+  if (data.applicationStage) {
+    try {
+      const { recordOfferStageCore } = await import("./pipeline.server");
+      await recordOfferStageCore(actor, {
+        applicationId: current.applicationId,
+        toStage: data.applicationStage,
+      });
+    } catch (e) {
+      /* stage bump is best-effort, exactly as before */
+      console.error("[offers] stage update failed (offer change unaffected):", e);
+    }
+  }
+
+  /* The released offer goes to the candidate with the letter attached.
+   * Best-effort: release must not fail because the email could not be queued. */
+  if (data.status === "released" && responseToken)
+    await emailReleasedOffer(actor.orgId, data.id, responseToken);
+  {
+    const [o] = await db
+      .select({ applicationId: offers.applicationId })
+      .from(offers)
+      .where(and(eq(offers.id, data.id), eq(offers.orgId, actor.orgId)))
+      .limit(1);
+    if (o) {
+      const { emitAgentEvent } = await import("../server/agents/events");
+      await emitAgentEvent({
+        orgId: actor.orgId,
+        type: "offer.status_changed",
+        subjectType: "offer",
+        subjectId: data.id,
+        actorUserId: actor.userId,
+        payload: {
+          from: current.status,
+          to: data.status,
+          applicationId: o.applicationId,
+          via: actor.via ?? null,
+        },
+      });
+    }
+  }
+  return { ok: true as const };
+});
+
+export const advanceOffer = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((data: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        status: OfferStatus,
+        applicationStage: z.enum(["offer_released", "offer_accepted"]).optional(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data, context }) => {
+    // Releasing an offer to the candidate needs a fresh password (step-up).
+    if (data.status === "released") {
+      const { assertStepUp } = await import("../server/step-up");
+      const { getRequest } = await import("@tanstack/react-start/server");
+      await assertStepUp(context.userId, getRequest());
+    }
+    return advanceOfferCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
+      data,
+    );
+  });
+
+/** Offer moves that need settled terms (expected CTC, notice, joining date). */
+const TERMS_GATED = new Set(["pending_hr", "pending_cbo", "approved", "released"]);
+
+/**
+ * Who may send an offer back from each step. An approved offer not yet
+ * released can still go back (HR head), e.g. when its terms were never
+ * agreed with the candidate; once released, only revoking applies.
+ */
+const SEND_BACK_ROLE: Record<string, AppRole> = {
+  pending_hr: "hr_head",
+  pending_cbo: "president_cbo",
+  approved: "hr_head",
+};
+
+/**
+ * An approver declines an offer: it goes back to draft with their reason on
+ * the trail (never stuck at an approval step), the desk thread hears it, and
+ * offer.status_changed (to "draft", sentBack) has the Offer agent revise it
+ * inside the band or ask a person.
+ */
+export const sendBackOfferCore = createServerOnlyFn(async function sendBackOfferCore(
+  actor: { orgId: string; userId: string; memberEmail: string; via?: "agent" },
+  input: { id: string; reason: string },
+): Promise<{ ok: true }> {
+  const reason = input.reason.replace(/\s+/g, " ").trim().slice(0, 1000);
+  if (reason.length < 3) throw new Error("Say why the offer is sent back.");
+  const [o] = await db
+    .select({
+      status: offers.status,
+      approvalTrail: offers.approvalTrail,
+      applicationId: offers.applicationId,
+    })
+    .from(offers)
+    .where(and(eq(offers.id, input.id), eq(offers.orgId, actor.orgId)))
+    .limit(1);
+  if (!o) throw new Error("Offer not found");
+  const role = SEND_BACK_ROLE[o.status];
+  if (!role) throw new Error(`An offer that is ${o.status} is not waiting for an approval.`);
+  await assertRole(actor.userId, actor.orgId, role);
+  const trail = [
+    ...(Array.isArray(o.approvalTrail) ? (o.approvalTrail as unknown[]) : []),
+    {
+      from: o.status,
+      to: "draft",
+      actor: actor.memberEmail,
+      decision: "sent_back",
+      comment: reason,
+      ...(actor.via ? { via: actor.via } : {}),
+      at: new Date().toISOString(),
+    },
+  ];
+  const done = await db
+    .update(offers)
+    .set({ status: "draft", approvalTrail: trail as never })
+    .where(and(eq(offers.id, input.id), eq(offers.orgId, actor.orgId), eq(offers.status, o.status)))
+    .returning({ id: offers.id });
+  if (!done.length) throw new Error("This offer has already moved on; refresh to see it.");
+  const { writeAudit } = await import("../server/audit");
+  await writeAudit({
+    actor: actor.memberEmail,
+    actorUserId: actor.userId,
+    orgId: actor.orgId,
+    action: "offer.sent_back",
+    entityType: "offer",
+    entityId: input.id,
+    detail: { from: o.status, reason },
+  });
+  // Training data: an approver's verdict on the terms the Offer agent proposed.
+  {
+    const [terms] = await db
+      .select({
+        ctc: offers.offeredCtc,
+        joiningDate: offers.joiningDate,
+        revision: offers.revision,
+      })
+      .from(offers)
+      .where(eq(offers.id, input.id))
+      .limit(1);
+    const t = await import("../server/training/capture.server");
+    await t.captureFeedback({
+      orgId: actor.orgId,
+      source: "offer_send_back",
+      label: "rejected",
+      reason,
+      original: { step: o.status, ...terms },
+      inferenceId: await t.latestInferenceFor({
+        orgId: actor.orgId,
+        features: ["agent_offer"],
+        applicationId: o.applicationId,
+      }),
+      applicationId: o.applicationId,
+      actorUserId: actor.userId,
+    });
+  }
+  const { emitAgentEvent } = await import("../server/agents/events");
+  await emitAgentEvent({
+    orgId: actor.orgId,
+    type: "offer.status_changed",
+    subjectType: "offer",
+    subjectId: input.id,
+    actorUserId: actor.userId,
+    payload: {
+      from: o.status,
+      to: "draft",
+      applicationId: o.applicationId,
+      sentBack: true,
+      comment: reason,
+    },
+  });
+  try {
+    const [a] = await db
+      .select({ requisitionId: applications.requisitionId, name: candidates.fullName })
+      .from(applications)
+      .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+      .where(eq(applications.id, o.applicationId))
+      .limit(1);
+    const desk = await import("../server/desk/desk.server");
+    const conv = a ? await desk.conversationForRequisition(actor.orgId, a.requisitionId) : null;
+    if (conv)
+      await desk.postMessage(conv, {
+        role: "desk",
+        body: `${actor.memberEmail} sent ${a!.name}'s offer back to draft ${
+          o.status === "approved"
+            ? "after its approval (it was not released)"
+            : `at the ${o.status === "pending_hr" ? "HR head" : "CBO"} step`
+        }: "${reason}". The Offer agent revises it inside the band or asks a person.`,
+      });
+  } catch {
+    /* the trail and audit are the record */
+  }
+  return { ok: true };
+});
+
+export const sendBackOffer = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((data: unknown) =>
+    z.object({ id: z.string().uuid(), reason: z.string().min(3).max(1000) }).parse(data),
+  )
+  .handler(async ({ data, context }) =>
+    sendBackOfferCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
+      data,
+    ),
+  );
+
+/* --------------------------------------------------------- offer letter */
+
+/** What the model composes. Legal boilerplate never passes through it. */
+export const OfferLetterBody = z.object({
+  subject: z.string().min(1).max(300),
+  greeting: z.string().min(1).max(200),
+  opening: z.string().min(1).max(4000),
+  sections: z
+    .array(
+      z.object({
+        heading: z.string().min(1).max(200),
+        body: z.string().min(1).max(4000),
+      }),
+    )
+    .min(1)
+    .max(16),
+  closing: z.string().min(1).max(1000),
+});
+export type OfferLetterBody = z.infer<typeof OfferLetterBody>;
+
+/** Persisted on the offer, returned by generateOfferLetter, and rendered by preview + PDF. */
+export const OfferLetterPayload = OfferLetterBody.extend({
+  version: z.literal(1),
+  generatedAt: z.string(),
+  templateId: z.string().uuid().nullable(),
+  templateName: z.string().nullable(),
+  hasLogo: z.boolean(),
+  /** Brand accent from the template — rule, headings, clause box. */
+  accentColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .default("#4f46e5"),
+  boilerplate: z.string().max(4000).nullable(),
+  /** Template letterhead lines; empty = derive from the organisation record. */
+  headerLines: z.array(z.string().max(200)).max(6).default([]),
+  /** Fixed page-footer lines from the template. */
+  footerLines: z.array(z.string().max(200)).max(4).default([]),
+  /** Reference number rendered near the date, from the template's refFormat. */
+  refText: z.string().max(120).nullish().default(null),
+  /** Named signatory from the template; null = generic signatory block. */
+  signatory: z
+    .object({ name: z.string().max(120), designation: z.string().max(120) })
+    .nullish()
+    .default(null),
+  letterhead: z.object({
+    orgName: z.string(),
+    legalName: z.string().nullable(),
+    hqCity: z.string().nullable(),
+    careersEmail: z.string().nullable(),
+  }),
+  candidate: z.object({
+    fullName: z.string(),
+    email: z.string().nullable(),
+    phone: z.string().nullable(),
+    location: z.string().nullable(),
+  }),
+  role: z.object({ title: z.string(), location: z.string().nullable() }),
+  ctc: z.string(),
+  joiningDate: z.string().nullable(),
+});
+export type OfferLetterPayload = z.infer<typeof OfferLetterPayload>;
+
+/** Letters live with the offer from the moment it is raised. */
+const CLOSED_OFFER_STATUSES = new Set(["declined", "revoked"]);
+
+/** What the creator may hand-correct on a stored letter. Facts (candidate,
+ * role, CTC, template identity) are not editable — regenerate instead. */
+export const EditableOfferLetter = z.object({
+  subject: z.string().min(1).max(300),
+  greeting: z.string().min(1).max(200),
+  opening: z.string().min(1).max(4000),
+  sections: z
+    .array(
+      z.object({
+        heading: z.string().min(1).max(200),
+        body: z.string().min(1).max(6000),
+      }),
+    )
+    .min(1)
+    .max(20),
+  closing: z.string().min(1).max(1000),
+  boilerplate: z.string().max(4000).nullish(),
+  headerLines: z.array(z.string().max(200)).max(6).default([]),
+  footerLines: z.array(z.string().max(200)).max(4).default([]),
+  refText: z.string().max(120).nullish().default(null),
+});
+export type EditableOfferLetter = z.infer<typeof EditableOfferLetter>;
+
+/**
+ * Persist hand corrections to the stored letter. The stored payload stays the
+ * base — facts and template identity come from it — so the edited letter
+ * remains exactly what preview and PDF render.
+ */
+export const updateOfferLetter = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((data: unknown) =>
+    z.object({ offerId: z.string().uuid(), letter: EditableOfferLetter }).parse(data),
+  )
+  .handler(async ({ data, context }): Promise<OfferLetterPayload> => {
+    const [row] = await db
+      .select({ letter: offers.letter, status: offers.status })
+      .from(offers)
+      .where(and(eq(offers.id, data.offerId), eq(offers.orgId, context.orgId)))
+      .limit(1);
+    if (!row) throw new Error("Offer not found");
+    if (CLOSED_OFFER_STATUSES.has(row.status)) {
+      throw new Error("This offer was declined or revoked — its letter can no longer be edited.");
+    }
+    const stored = OfferLetterPayload.safeParse(row.letter);
+    if (!stored.success) throw new Error("Generate the letter before editing it.");
+
+    const updated: OfferLetterPayload = {
+      ...stored.data,
+      subject: data.letter.subject,
+      greeting: data.letter.greeting,
+      opening: data.letter.opening,
+      sections: data.letter.sections,
+      closing: data.letter.closing,
+      boilerplate: data.letter.boilerplate?.trim() || null,
+      headerLines: data.letter.headerLines,
+      footerLines: data.letter.footerLines,
+      refText: data.letter.refText,
+    };
+    await db
+      .update(offers)
+      .set({ letter: updated })
+      .where(and(eq(offers.id, data.offerId), eq(offers.orgId, context.orgId)));
+    return updated;
+  });
+
+const DEFAULT_LETTER_SECTIONS = [
+  "Role and Responsibilities",
+  "Compensation and Benefits",
+  "Terms of Employment",
+  "Next Steps",
+];
+
+/** Deterministic "17 October 2026" from an ISO date — no ICU/TZ drift. */
+export const fmtLetterDate = (iso: string | null | undefined) => {
+  if (!iso) return null;
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d || m > 12 || d > 31) return null;
+  return `${d} ${MONTHS[m - 1]} ${y}`;
+};
+
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+/** Offer stages past which a letter may no longer be destroyed. */
+const LETTER_LOCKED_STATUSES = new Set(["released", "accepted", "declined", "revoked"]);
+
+/**
+ * Governed deletion of a stored letter: HR-head or above only (owners pass),
+ * a reason is mandatory, and the deletion is audited in the approval trail.
+ * A letter that has already gone out (released+) is not deletable — the
+ * offer itself must be revoked instead.
+ */
+export const deleteOfferLetter = createServerFn({ method: "POST" })
+  .middleware([requireRole("hr_head")])
+  .validator((data: unknown) =>
+    z.object({ offerId: z.string().uuid(), reason: z.string().trim().min(8).max(400) }).parse(data),
+  )
+  .handler(async ({ data, context }) => {
+    const [row] = await db
+      .select({ letter: offers.letter, status: offers.status, trail: offers.approvalTrail })
+      .from(offers)
+      .where(and(eq(offers.id, data.offerId), eq(offers.orgId, context.orgId)))
+      .limit(1);
+    if (!row) throw new Error("Offer not found");
+    if (!row.letter) throw new Error("This offer has no letter to delete.");
+    if (LETTER_LOCKED_STATUSES.has(row.status)) {
+      throw new Error(
+        "The letter can no longer be deleted at this stage — revoke the offer instead.",
+      );
+    }
+
+    const trail = Array.isArray(row.trail) ? [...row.trail] : [];
+    trail.push({
+      action: "letter_deleted",
+      reason: data.reason,
+      by: context.userId,
+      at: new Date().toISOString(),
+    });
+
+    await db
+      .update(offers)
+      .set({ letter: null, letterTemplateId: null, approvalTrail: trail })
+      .where(and(eq(offers.id, data.offerId), eq(offers.orgId, context.orgId)));
+    return { ok: true as const };
+  });
+
+/**
+ * Compose the offer letter for a live offer against an offer_letter template —
+ * the explicitly chosen one, else the org default, else the built-in structure.
+ * The model writes the prose; fixed clause text (template boilerplate) is
+ * injected here so it reaches the letter verbatim. The composed payload is
+ * persisted on the offer and returned for the creator to review before the
+ * offer advances to the next approval level.
+ */
+/** Shared by the server function and the agents (acting member in `actor`). */
+export const generateOfferLetterCore = createServerOnlyFn(async function generateOfferLetterCore(
+  actor: { orgId: string; userId: string; memberEmail: string },
+  data: { offerId: string; templateId?: string | null | undefined },
+): Promise<OfferLetterPayload> {
+  const [row] = await db
+    .select({
+      offer: offers,
+      candidate: candidates,
+      requisition: requisitions,
+      org: organizations,
+    })
+    .from(offers)
+    .innerJoin(applications, eq(applications.id, offers.applicationId))
+    .innerJoin(candidates, eq(candidates.id, applications.candidateId))
+    .innerJoin(requisitions, eq(requisitions.id, applications.requisitionId))
+    .innerJoin(organizations, eq(organizations.id, offers.orgId))
+    .where(and(eq(offers.id, data.offerId), eq(offers.orgId, actor.orgId)))
+    .limit(1);
+  if (!row) throw new Error("Offer not found");
+  if (CLOSED_OFFER_STATUSES.has(row.offer.status)) {
+    throw new Error("This offer was declined or revoked — its letter can no longer be generated.");
+  }
+
+  const template = await resolveTemplate(actor.orgId, "offer_letter", data.templateId ?? null);
+  if (data.templateId && !template) {
+    throw new Error("That offer-letter template is no longer available — pick another.");
+  }
+  const headings = template?.config.sections.length
+    ? template.config.sections.map((s) => s.heading)
+    : DEFAULT_LETTER_SECTIONS;
+
+  const system = template
+    ? // Template chosen — the letter must read like the organisation's own
+      // template: its headings, its brief (instructions), its fixed language.
+      `You are an HR offer-letter writer for ${row.org.name}. Draft the offer letter so it ` +
+      "reads like this organisation's own offer-letter template, using ONLY the supplied JSON " +
+      "data for names, dates and figures. Return ONLY a JSON object with keys subject, greeting, " +
+      "opening, sections, closing. sections is an array of {heading, body} — use EXACTLY these " +
+      `headings, in this order: ${headings.join(" | ")}.\n` +
+      "Follow the template's writing brief (supplied as templateInstructions) faithfully: fixed " +
+      "phrases, clause lists, annexure references, acceptance lines, salary-structure notes and " +
+      "the signature block it specifies belong in the letter under the matching heading, in the " +
+      "template's own wording wherever the brief gives it. A section body may be several short " +
+      "paragraphs or a plain-text list; separate paragraphs and list items with a single newline " +
+      'character and start list lines with "- ".\n' +
+      "Never invent numbers, dates, names or salary figures beyond the data and the brief; when " +
+      "stating compensation use compensation.formatted exactly, and for a contract its kind and end " +
+      "date as supplied. No markdown syntax, no emojis, no " +
+      "{{placeholder}} tokens — replace each placeholder with the real value or drop the sentence. " +
+      "The letterhead address block, reference number, page footer and signature block are fixed " +
+      "furniture rendered by the system — never write company addresses, ref numbers or a " +
+      "sign-off signature block yourself. Fixed legal boilerplate is appended automatically after " +
+      "your sections; do not duplicate it."
+    : // Built-in fallback — keep the letter short and generic.
+      `You are an HR offer-letter writer for ${row.org.name}. Write a formal, warm offer letter ` +
+      "using ONLY the supplied JSON data. Return ONLY a JSON object with keys subject, greeting, " +
+      "opening, sections, closing. sections is an array of {heading, body} — use EXACTLY these " +
+      `headings, in this order: ${headings.join(" | ")}. Each heading's body is 1-3 plain-text ` +
+      "sentences; when stating compensation use the supplied compensation.formatted figure exactly " +
+      '(e.g. "INR 20,00,000 per annum" or "EUR 52,000 per annum"), never the raw amount digits; for a ' +
+      "contract, state its kind and its end date (compensation.contractEndFormatted) as supplied. Never invent numbers, " +
+      "dates or names beyond the data. No markdown, no emojis, no {{placeholder}} tokens. " +
+      'closing is a short sign-off line such as "Sincerely," — do not repeat the organisation ' +
+      "name there, the signature block already carries it. Do not add legal clauses or " +
+      "boilerplate — fixed clauses are appended automatically after your sections.";
+
+  const cfg = await resolveAiConfig(actor.orgId);
+  const result = await aiJson<unknown>({
+    orgId: actor.orgId,
+    config: cfg,
+    feature: "offer_letter",
+    system,
+    prompt: JSON.stringify({
+      candidate: {
+        name: row.candidate.fullName,
+        location: row.candidate.location,
+        email: row.candidate.email,
+      },
+      role: {
+        title: row.requisition.title,
+        location: row.requisition.location,
+        code: row.requisition.code,
+      },
+      organisation: {
+        name: row.org.name,
+        legalName: row.org.legalName,
+        city: row.org.hqCity,
+      },
+      // In the offer's own currency and basis (docs/pay-terms-plan.md, Phase 4).
+      compensation: offerCompensationWords({
+        amount: Number(row.offer.offeredCtc || 0),
+        currency: row.offer.currency,
+        payBasis: row.offer.payBasis,
+        kindOfWork: row.offer.kindOfWork,
+        contractEnd: row.offer.contractEnd,
+      }),
+      joiningDate: row.offer.joiningDate,
+      joiningDateFormatted: fmtLetterDate(row.offer.joiningDate),
+      templateInstructions: template?.instructions ?? null,
+    }),
+  });
+  if (!result.ok) throw new Error(result.message);
+
+  const parsed = OfferLetterBody.safeParse(result.data);
+  if (!parsed.success) {
+    throw new Error("The drafted letter could not be read — try generating again.");
+  }
+  const clean = (s: string) => stripUnreplacedPlaceholders(s).trim();
+  const body: OfferLetterBody = {
+    subject: clean(parsed.data.subject),
+    greeting: clean(parsed.data.greeting),
+    opening: clean(parsed.data.opening),
+    sections: parsed.data.sections.map((s) => ({
+      heading: clean(s.heading),
+      body: clean(s.body),
+    })),
+    closing: clean(parsed.data.closing),
+  };
+
+  // Fixed furniture from the template — substituted here, never model-written.
+  const tpl = template?.config;
+  const year = String(new Date().getFullYear());
+  const seq = row.offer.id.slice(0, 8).toUpperCase();
+  const refText =
+    tpl?.refFormat
+      ?.replaceAll("{year}", year)
+      .replaceAll("{seq}", seq)
+      .replaceAll("{candidate_name}", row.candidate.fullName) ?? null;
+  const salutation = tpl?.salutation?.replaceAll("{candidate_name}", row.candidate.fullName);
+
+  const payload: OfferLetterPayload = {
+    ...body,
+    greeting: salutation || body.greeting,
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    templateId: template?.id ?? null,
+    templateName: template?.name ?? null,
+    hasLogo: Boolean(template?.logoPath),
+    accentColor: tpl?.accentColor ?? "#4f46e5",
+    boilerplate: tpl?.boilerplate?.trim() || null,
+    headerLines: tpl?.headerLines ?? [],
+    footerLines: tpl?.footerLines ?? [],
+    refText,
+    signatory: tpl?.signatory ?? null,
+    letterhead: {
+      orgName: row.org.name,
+      legalName: row.org.legalName,
+      hqCity: row.org.hqCity,
+      careersEmail: row.org.careersEmail,
+    },
+    candidate: {
+      fullName: row.candidate.fullName,
+      email: row.candidate.email,
+      phone: row.candidate.phone,
+      location: row.candidate.location,
+    },
+    role: { title: row.requisition.title, location: row.requisition.location },
+    ctc: row.offer.offeredCtc,
+    joiningDate: row.offer.joiningDate,
+  };
+
+  await db
+    .update(offers)
+    .set({ letter: payload, letterTemplateId: template?.id ?? null })
+    .where(and(eq(offers.id, data.offerId), eq(offers.orgId, actor.orgId)));
+
+  return payload;
+});
+
+export const generateOfferLetter = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((data: unknown) =>
+    z
+      .object({
+        offerId: z.string().uuid(),
+        templateId: z.string().uuid().nullish(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data, context }): Promise<OfferLetterPayload> =>
+    generateOfferLetterCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
+      data,
+    ),
+  );
+
+/**
+ * Revise a countered offer: the next revision, back to draft with the new CTC
+ * and joining date and the reasoning on the trail; the letter is cleared so it
+ * is generated again, and the revision goes through approval again.
+ */
+export const reviseOfferCore = createServerOnlyFn(async function reviseOfferCore(
+  actor: { orgId: string; userId: string; memberEmail: string; via?: string | undefined },
+  input: { offerId: string; offeredCtc: number; joiningDate: string | null; rationale: string },
+): Promise<{ revision: number }> {
+  const [o] = await db
+    .select({
+      status: offers.status,
+      revision: offers.revision,
+      approvalTrail: offers.approvalTrail,
+      offeredCtc: offers.offeredCtc,
+      counter: offers.counter,
+      applicationId: offers.applicationId,
+    })
+    .from(offers)
+    .where(and(eq(offers.id, input.offerId), eq(offers.orgId, actor.orgId)))
+    .limit(1);
+  if (!o) throw new Error("Offer not found.");
+  // A candidate's counter, or a draft an approver sent back, can be revised.
+  if (o.status !== "countered" && o.status !== "draft")
+    throw new Error(`An offer that is ${o.status} cannot be revised.`);
+  const revision = o.revision + 1;
+  const trail = [
+    ...(Array.isArray(o.approvalTrail) ? (o.approvalTrail as unknown[]) : []),
+    {
+      from: o.status,
+      to: "draft",
+      actor: actor.memberEmail,
+      decision: "revised",
+      revision,
+      previousCtc: Number(o.offeredCtc),
+      offeredCtc: input.offeredCtc,
+      asked: o.counter ?? null,
+      comment: input.rationale,
+      ...(actor.via ? { via: actor.via } : {}),
+      at: new Date().toISOString(),
+    },
+  ];
+  await db
+    .update(offers)
+    .set({
+      status: "draft",
+      revision,
+      offeredCtc: String(input.offeredCtc),
+      ...(input.joiningDate ? { joiningDate: input.joiningDate } : {}),
+      ...(input.joiningDate
+        ? {
+            contractEnd: (
+              await (
+                await import("./pay-context.server")
+              ).offerTermsFor(actor.orgId, o.applicationId, input.joiningDate)
+            ).contractEnd,
+          }
+        : {}),
+      letter: null,
+      responseToken: null,
+      approvalTrail: trail as never,
+    })
+    .where(and(eq(offers.id, input.offerId), eq(offers.orgId, actor.orgId)));
+  const { writeAudit } = await import("../server/audit");
+  await writeAudit({
+    actor: actor.memberEmail,
+    actorUserId: actor.userId,
+    orgId: actor.orgId,
+    action: "offer.revised",
+    entityType: "offer",
+    entityId: input.offerId,
+    detail: { revision, from: Number(o.offeredCtc), to: input.offeredCtc },
+  });
+  return { revision };
+});
+
+const BASIS_LETTER: Record<string, string> = {
+  annual: "per annum",
+  monthly: "per month",
+  daily: "per day",
+  hourly: "per hour",
+};
+const KIND_LETTER: Record<string, string> = {
+  permanent: "permanent employment",
+  fixed_term: "fixed-term contract",
+  contract_hourly: "contract",
+  part_time: "part-time employment",
+  intern: "internship",
+};
+
+/**
+ * What the offer letter says about pay (pure; unit-tested): the amount in the
+ * offer's own currency with its code ("INR 20,00,000 per annum", "EUR 52,000 per
+ * annum", "USD 65 per hour"), the kind of work, and a contract's end date.
+ */
+export function offerCompensationWords(o: {
+  amount: number;
+  currency: string;
+  payBasis: string;
+  kindOfWork: string;
+  contractEnd: string | null;
+}) {
+  const digits =
+    o.currency === "INR"
+      ? o.amount.toLocaleString("en-IN", { maximumFractionDigits: 0 })
+      : o.amount.toLocaleString("en-GB", {
+          maximumFractionDigits: Number.isInteger(o.amount) ? 0 : 2,
+          minimumFractionDigits: Number.isInteger(o.amount) ? 0 : 2,
+        });
+  return {
+    amount: o.amount,
+    currency: o.currency,
+    basis: o.payBasis,
+    formatted: `${o.currency} ${digits} ${BASIS_LETTER[o.payBasis] ?? "per annum"}`,
+    // Kept for templates written before pay terms (INR, annual roles read the same).
+    annualCtcInr: o.currency === "INR" && o.payBasis === "annual" ? o.amount : null,
+    annualCtcFormatted: o.currency === "INR" && o.payBasis === "annual" ? digits : null,
+    kind: KIND_LETTER[o.kindOfWork] ?? o.kindOfWork,
+    contractEnd: o.contractEnd,
+    contractEndFormatted: o.contractEnd ? fmtLetterDate(o.contractEnd) : null,
+  };
+}

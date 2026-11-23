@@ -1,0 +1,811 @@
+/**
+ * Hiring desk server functions (docs/agentic-plan.md §13.2). A thread is
+ * visible to the person who started it and to HR leadership (HR head, CBO,
+ * owner); every query is predicated on the organisation.
+ */
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { z } from "zod";
+
+import { db } from "../server/db";
+import {
+  hiringConversations,
+  hiringMessages,
+  orgMembers,
+  requisitions,
+  userRoles,
+} from "@db/schema";
+import { requireOrg } from "./auth.middleware";
+
+const LEADERSHIP = ["hr_head", "president_cbo"] as const;
+
+const isLeadership = createServerOnlyFn(async function isLeadership(
+  userId: string,
+  orgId: string,
+  isOwner: boolean,
+) {
+  if (isOwner) return true;
+  const rows = await db
+    .select({ role: userRoles.role })
+    .from(userRoles)
+    .where(
+      and(
+        eq(userRoles.userId, userId),
+        eq(userRoles.orgId, orgId),
+        inArray(userRoles.role, [...LEADERSHIP]),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+});
+
+const accessible = createServerOnlyFn(async function accessible(
+  ctx: { orgId: string; userId: string; isOwner: boolean },
+  id: string,
+) {
+  const { loadConversation } = await import("../server/desk/desk.server");
+  const conv = await loadConversation(ctx.orgId, id);
+  if (conv.createdBy !== ctx.userId && !(await isLeadership(ctx.userId, ctx.orgId, ctx.isOwner)))
+    throw new Error("Conversation not found.");
+  return conv;
+});
+
+/**
+ * A button pressed in the thread, shown as the person's message — so the chat
+ * reads as what they asked for, not as the desk acting on its own.
+ */
+const echoClick = createServerOnlyFn(async function echoClick(
+  conv: { id: string; orgId: string },
+  text: string,
+) {
+  const { postMessage } = await import("../server/desk/desk.server");
+  await postMessage(conv, { role: "user", body: text });
+});
+
+const codeOf = createServerOnlyFn(async function codeOf(
+  orgId: string,
+  requisitionId: string,
+): Promise<string> {
+  const [r] = await db
+    .select({ code: requisitions.code })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, requisitionId), eq(requisitions.orgId, orgId)))
+    .limit(1);
+  return r?.code ?? "that role";
+});
+
+const needsAiKey = createServerOnlyFn(async function needsAiKey(orgId: string) {
+  const { resolveAiConfig } = await import("./ai-gateway.server");
+  const cfg = await resolveAiConfig(orgId);
+  if (!cfg.apiKey)
+    throw new Error("Add your organisation's AI model key on the Integrations page first.");
+});
+
+const registered = createServerOnlyFn(async function registered() {
+  const { ensureAgentsRegistered } = await import("../server/agents");
+  ensureAgentsRegistered();
+});
+
+export type DeskConversationSummary = {
+  id: string;
+  title: string;
+  status: string;
+  requisitionCode: string | null;
+  updatedAt: string;
+  mine: boolean;
+  /** Shared by the threads of one fan-out (parallel needs): the list groups them. */
+  splitGroupId: string | null;
+};
+
+export const listDeskConversations = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .handler(async ({ context }): Promise<DeskConversationSummary[]> => {
+    const all = await isLeadership(context.userId, context.orgId, context.isOwner);
+    const rows = await db
+      .select({
+        id: hiringConversations.id,
+        title: hiringConversations.title,
+        status: hiringConversations.status,
+        createdBy: hiringConversations.createdBy,
+        updatedAt: hiringConversations.updatedAt,
+        splitGroupId: hiringConversations.splitGroupId,
+        code: requisitions.code,
+      })
+      .from(hiringConversations)
+      .leftJoin(
+        requisitions,
+        and(
+          eq(requisitions.id, hiringConversations.requisitionId),
+          eq(requisitions.orgId, context.orgId),
+        ),
+      )
+      .where(
+        and(
+          eq(hiringConversations.orgId, context.orgId),
+          eq(hiringConversations.kind, "hiring"),
+          isNull(hiringConversations.deletedAt),
+          all ? undefined : eq(hiringConversations.createdBy, context.userId),
+        ),
+      )
+      .orderBy(desc(hiringConversations.updatedAt))
+      .limit(100);
+    return rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      status: r.status,
+      requisitionCode: r.code ?? null,
+      updatedAt: r.updatedAt.toISOString(),
+      mine: r.createdBy === context.userId,
+      splitGroupId: r.splitGroupId ?? null,
+    }));
+  });
+
+type Json = string | number | boolean | null | Json[] | { [k: string]: Json };
+export type DeskCardView = { type: string; [k: string]: Json };
+
+export type DeskMessageView = {
+  id: string;
+  role: "user" | "desk" | "agent";
+  agentType: string | null;
+  body: string;
+  card: DeskCardView | null;
+  at: string;
+};
+
+export type DeskConversationView = {
+  id: string;
+  title: string;
+  status: string;
+  slots: import("../server/desk/desk.server").DeskSlots;
+  requisition: {
+    id: string;
+    code: string;
+    status: string;
+    /** When the role's expert brief was approved (null: none yet). */
+    expertBriefAt: string | null;
+  } | null;
+  messages: DeskMessageView[];
+  /** Current status of every agent request shown in the thread. */
+  tasks: Record<string, string>;
+  /** Whether the viewer may decide each request, and who it waits for otherwise. */
+  deciders: Record<string, { canDecide: boolean; waitingFor: string | null }>;
+  /** What each request is about (requisition, jd, offer …), for cards posted before it was recorded. */
+  taskSubjects: Record<string, string>;
+  /** What each approval request would do, as label / value lines. */
+  taskDetails: Record<string, { label: string; value: string }[]>;
+  /** Why each ranked candidate scored as they did (live from their match score). */
+  reasoning: Record<string, import("../server/desk/desk.server").CandidateReasoning>;
+  /** Each ranked candidate's current stage (the list is a snapshot; this is live). */
+  stages: Record<string, string>;
+  /** Where the hire stands and what happens next. */
+  progress: import("../server/desk/desk.server").DeskProgress;
+  /** The agent working for this thread right now, with its latest steps. */
+  activity: import("../server/desk/desk.server").DeskActivity;
+  /** The current step can be started now (its agent is on and idle). */
+  canStart: boolean;
+  /** The viewer may change agent settings (budget, autonomy) — HR head / CBO / owner. */
+  canEditAgents: boolean;
+  /** What the dustbin would delete for this viewer now ("chat" / "draft" + code), or null. */
+  canDelete: { kind: "chat" } | { kind: "draft"; code: string } | null;
+  /** The other threads of the same fan-out (parallel hiring needs), with what needs the person. */
+  tracks: { id: string; title: string; status: string; needsYou: number; self: boolean }[];
+};
+
+export const getDeskConversation = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(({ data, context }) => deskConversationView(context, data.id));
+
+/**
+ * Side-by-side view: every pane in ONE poll. Polling each pane separately
+ * multiplied the calls by the panes and ran into the per-function rate
+ * limit — throttled panes silently stopped updating, so a reply (research,
+ * an approval) showed in one pane and not in another. A thread deleted
+ * elsewhere comes back as `missing`, so its pane drops out.
+ */
+export const getDeskThreads = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ ids: z.array(z.string().uuid()).min(1).max(3) }).parse(d))
+  .handler(async ({ data, context }) =>
+    Promise.all(
+      data.ids.map(async (id) => {
+        try {
+          return { id, view: await deskConversationView(context, id) };
+        } catch (e) {
+          if (e instanceof Error && /not found/i.test(e.message))
+            return { id, view: null, missing: true as const };
+          throw e;
+        }
+      }),
+    ),
+  );
+
+const deskConversationView = createServerOnlyFn(async function deskConversationView(
+  context: { orgId: string; userId: string; isOwner: boolean },
+  id: string,
+): Promise<DeskConversationView> {
+  let conv = await accessible(context, id);
+  // Self-heal: the role ended (closed / rejected elsewhere, perhaps before this
+  // thread followed it) but the thread did not — sync it now.
+  if (conv.requisitionId && conv.status !== "closed") {
+    const [r] = await db
+      .select({ status: requisitions.status })
+      .from(requisitions)
+      .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, context.orgId)))
+      .limit(1);
+    if (r && (r.status === "closed" || r.status === "rejected")) {
+      const { onRequisitionEnded } = await import("../server/desk/desk.server");
+      await onRequisitionEnded(context.orgId, conv.requisitionId, r.status, null);
+      conv = await accessible(context, id);
+    }
+  }
+  const msgs = await db
+    .select()
+    .from(hiringMessages)
+    .where(and(eq(hiringMessages.conversationId, conv.id), eq(hiringMessages.orgId, context.orgId)))
+    .orderBy(asc(hiringMessages.createdAt))
+    .limit(500);
+  const [req] = conv.requisitionId
+    ? await db
+        .select({
+          id: requisitions.id,
+          code: requisitions.code,
+          status: requisitions.status,
+          brief: requisitions.expertBrief,
+        })
+        .from(requisitions)
+        .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, context.orgId)))
+        .limit(1)
+    : [];
+  const taskIds = msgs
+    .map((m) => (m.card as { type?: string; taskId?: string } | null)?.taskId)
+    .filter((x): x is string => typeof x === "string");
+  const {
+    taskStatuses,
+    taskDetails,
+    deskProgress,
+    deskActivity,
+    startStage,
+    candidateReasoning,
+    tidyForPeople,
+    deskTimeZone,
+  } = await import("../server/desk/desk.server");
+  const timeZone = await deskTimeZone(context.orgId);
+  const rankedIds = msgs.flatMap((m) => {
+    const c = m.card as { type?: string; items?: { applicationId?: string }[] } | null;
+    return c?.type === "ranked_candidates"
+      ? (c.items ?? [])
+          .map((i) => i.applicationId)
+          .filter((x): x is string => typeof x === "string")
+      : [];
+  });
+  const statuses = await taskStatuses(context.orgId, taskIds);
+  const selfNeedsYou = Object.values(statuses as Record<string, string>).filter(
+    (s) => s === "open",
+  ).length;
+  return {
+    id: conv.id,
+    title: conv.title,
+    status: conv.status,
+    slots: conv.slots as import("../server/desk/desk.server").DeskSlots,
+    requisition: req
+      ? {
+          id: req.id,
+          code: req.code,
+          status: req.status,
+          expertBriefAt: req.brief?.approvedAt ?? null,
+        }
+      : null,
+    messages: msgs.map((m) => ({
+      id: m.id,
+      role: m.role,
+      agentType: m.agentType,
+      body: m.role === "user" ? m.body : tidyForPeople(m.body, timeZone),
+      card: (m.card as DeskMessageView["card"]) ?? null,
+      at: m.createdAt.toISOString(),
+    })),
+    tasks: statuses,
+    taskSubjects: await (async () => {
+      if (!taskIds.length) return {};
+      const { agentTasks } = await import("@db/schema");
+      const rows = await db
+        .select({ id: agentTasks.id, action: agentTasks.proposedAction })
+        .from(agentTasks)
+        .where(and(eq(agentTasks.orgId, context.orgId), inArray(agentTasks.id, taskIds)));
+      return Object.fromEntries(
+        rows.flatMap((t) => {
+          const type = (t.action as { args?: { subject?: { type?: string } } } | null)?.args
+            ?.subject?.type;
+          return type ? [[t.id, type]] : [];
+        }),
+      );
+    })(),
+    taskDetails: await taskDetails(context.orgId, taskIds),
+    deciders: await (
+      await import("../server/desk/desk.server")
+    ).taskDeciders(context.orgId, context.userId, context.isOwner, taskIds),
+    reasoning: await candidateReasoning(context.orgId, [...new Set(rankedIds)]),
+    stages: await liveStages(context.orgId, [...new Set(rankedIds)]),
+    progress: await deskProgress(conv),
+    activity: await deskActivity(conv),
+    canStart: Boolean(await startStage(conv, context.userId, { dryRun: true })),
+    canEditAgents: await canEditAgents(context.userId, context.orgId),
+    canDelete: await (async () => {
+      const { deletionAllowed } = await import("../server/desk/desk.server");
+      const d = await deletionAllowed(conv, context.userId);
+      return d
+        ? d.kind === "chat"
+          ? { kind: "chat" as const }
+          : { kind: "draft" as const, code: d.code }
+        : null;
+    })(),
+    tracks: await (async () => {
+      const { deskSiblings } = await import("../server/desk/desk.server");
+      const sibs = await deskSiblings(context.orgId, conv.id);
+      const self = {
+        id: conv.id,
+        title: conv.title,
+        status: conv.status,
+        needsYou: selfNeedsYou,
+        self: true,
+      };
+      return [self, ...sibs.map((s) => ({ ...s, self: false }))];
+    })(),
+  };
+});
+
+const Text = z.string().trim().min(1).max(2000);
+
+export const startDeskConversation = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ message: Text }).parse(d))
+  .handler(async ({ data, context }) => {
+    await needsAiKey(context.orgId);
+    await registered();
+    const [conv] = await db
+      .insert(hiringConversations)
+      .values({ orgId: context.orgId, createdBy: context.userId })
+      .returning();
+    const { handleUserMessage } = await import("../server/desk/desk.server");
+    await handleUserMessage(conv!, context.userId, data.message);
+    return { id: conv!.id };
+  });
+
+export const sendDeskMessage = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ id: z.string().uuid(), message: Text }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await needsAiKey(context.orgId);
+    await registered();
+    const { handleUserMessage } = await import("../server/desk/desk.server");
+    await handleUserMessage(conv, context.userId, data.message);
+    return { ok: true as const };
+  });
+
+const Choice = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("existing"), requisitionId: z.string().uuid() }),
+  z.object({ kind: z.literal("new"), reuseJdFrom: z.string().uuid().nullable().optional() }),
+]);
+
+export const chooseDeskRole = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ id: z.string().uuid(), choice: Choice }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    // A thread still in gathering with all required details present is
+    // simply one turn behind: accept the choice instead of failing silently
+    // behind a toast (the similar-roles card can be visible while the status
+    // flip has not landed).
+    if (conv.status !== "gathering" && conv.status !== "confirming")
+      throw new Error("The role has already been settled.");
+    await registered();
+    const desk = await import("../server/desk/desk.server");
+    const { assertRequisitionInOrg } = await import("../server/guards");
+    if (data.choice.kind === "existing") {
+      await assertRequisitionInOrg(data.choice.requisitionId, context.orgId);
+      await echoClick(
+        conv,
+        `Continue with ${await codeOf(context.orgId, data.choice.requisitionId)}`,
+      );
+      await desk.continueWithRole(conv, context.userId, data.choice.requisitionId);
+    } else {
+      if (data.choice.reuseJdFrom)
+        await assertRequisitionInOrg(data.choice.reuseJdFrom, context.orgId);
+      await echoClick(
+        conv,
+        data.choice.reuseJdFrom
+          ? `Create a new role, reusing ${await codeOf(context.orgId, data.choice.reuseJdFrom)}'s approved job description`
+          : "Create a new role",
+      );
+      await desk.createNewRole(conv, context.userId, {
+        reuseJdFrom: data.choice.reuseJdFrom ?? null,
+      });
+    }
+    return { ok: true as const };
+  });
+
+/**
+ * A team member tapped as the hiring manager on the desk's options card:
+ * the member is verified against the organisation, recorded as the system
+ * would resolve a typed name (no guessing), and gathering continues.
+ */
+export const chooseHiringManagerOption = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) =>
+    z.object({ id: z.string().uuid(), memberId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    if (conv.status !== "gathering")
+      throw new Error("The hiring manager is already settled for this role.");
+    const [member] = await db
+      .select({ name: orgMembers.fullName, email: orgMembers.email })
+      .from(orgMembers)
+      .where(
+        and(
+          eq(orgMembers.id, data.memberId),
+          eq(orgMembers.orgId, context.orgId),
+          eq(orgMembers.status, "active"),
+        ),
+      )
+      .limit(1);
+    if (!member) throw new Error("That person is not on your team.");
+    const name = member.name || member.email;
+    await echoClick(conv, `Hiring manager: ${name}`);
+    const { hiringConversations } = await import("@db/schema");
+    await db
+      .update(hiringConversations)
+      .set({
+        slots: {
+          ...(conv.slots as Record<string, unknown>),
+          hiringManager: name,
+          hiringManagerMemberId: data.memberId,
+        } as never,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(eq(hiringConversations.id, conv.id), eq(hiringConversations.orgId, context.orgId)),
+      );
+    const desk = await import("../server/desk/desk.server");
+    await desk.advanceGathering(
+      {
+        ...conv,
+        slots: {
+          ...(conv.slots as object),
+          hiringManager: name,
+          hiringManagerMemberId: data.memberId,
+        } as never,
+      },
+      "",
+      [{ label: "Hiring manager", value: name }],
+    );
+    return { ok: true as const };
+  });
+
+export const screenDeskCandidates = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        applicationIds: z.array(z.string().uuid()).min(1).max(20),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await registered();
+    const { screenCandidates } = await import("../server/desk/desk.server");
+    const n = await screenCandidates(conv, context.userId, data.applicationIds);
+    return { screening: n };
+  });
+
+export const closeDeskConversation = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await db
+      .update(hiringConversations)
+      .set({ status: "closed", updatedAt: new Date() })
+      .where(
+        and(eq(hiringConversations.id, conv.id), eq(hiringConversations.orgId, context.orgId)),
+      );
+    return { ok: true as const };
+  });
+
+/** Run a stopped agent of this thread again (same goal and role). */
+export const retryDeskRun = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ id: z.string().uuid(), runId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await registered();
+    const { retryRun } = await import("../server/desk/desk.server");
+    return { runId: await retryRun(conv, context.userId, data.runId) };
+  });
+
+/** Start the agent for the thread's current step (when it is on and idle). */
+export const startDeskStage = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await registered();
+    const { startStage } = await import("../server/desk/desk.server");
+    const runId = await startStage(conv, context.userId);
+    if (!runId) throw new Error("Nothing to start for this step right now.");
+    return { runId };
+  });
+
+/** Score the role's new applications (e.g. CVs just uploaded here) and post the ranked list. */
+export const scoreDeskCandidates = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await needsAiKey(context.orgId);
+    const { scoreAndRank } = await import("../server/desk/desk.server");
+    return { scored: await scoreAndRank(conv, context.userId) };
+  });
+
+/** Ask the Publishing agent to post the thread's role. */
+export const publishDeskRole = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await registered();
+    const { publishRole } = await import("../server/desk/desk.server");
+    return { runId: await publishRole(conv, context.userId) };
+  });
+
+/** Close / reject / delete the thread's role from the chat (role-checked by the lifecycle). */
+export const closeDeskRole = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) =>
+    z.object({ id: z.string().uuid(), reason: z.string().trim().min(3).max(500) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    const { closeRole } = await import("../server/desk/desk.server");
+    return closeRole(conv, context.userId, data.reason);
+  });
+
+/** Accept the desk's latest researched proposal (skills / experience / budget). */
+export const acceptDeskProposal = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await needsAiKey(context.orgId);
+    await echoClick(conv, "Use these");
+    const { applyProposal } = await import("../server/desk/desk.server");
+    await applyProposal(conv);
+    return { ok: true as const };
+  });
+
+/** Ask the role's hiring manager what the role really needs (Role expert interview agent). */
+export const startDeskExpertInterview = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await needsAiKey(context.orgId);
+    await registered();
+    await echoClick(conv, "Ask the hiring manager what this role needs");
+    const { startExpertInterview } = await import("../server/desk/desk.server");
+    return { runId: await startExpertInterview(conv, context.userId) };
+  });
+
+/** Ask the desk to research details from the market instead of typing them. */
+export const researchDeskRole = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        fields: z
+          .array(z.enum(["skills", "experience", "budget"]))
+          .min(1)
+          .max(3),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await needsAiKey(context.orgId);
+    const words = { skills: "the skills", experience: "the experience", budget: "the budget" };
+    const asked = data.fields.map((f) => words[f]);
+    await echoClick(
+      conv,
+      `Research ${asked.length > 1 ? `${asked.slice(0, -1).join(", ")} and ${asked.at(-1)}` : asked[0]} from the market`,
+    );
+    const { researchRole } = await import("../server/desk/desk.server");
+    await researchRole(conv, data.fields);
+    return { ok: true as const };
+  });
+
+const AGENT_SETTINGS_ROLES = ["hr_head", "president_cbo"] as const;
+
+async function canEditAgents(userId: string, orgId: string): Promise<boolean> {
+  const { assertRole } = await import("./auth.middleware");
+  return assertRole(userId, orgId, [...AGENT_SETTINGS_ROLES]).then(
+    () => true,
+    () => false,
+  );
+}
+
+/**
+ * Raise the monthly token budget of the agent this thread is paused on, to
+ * the suggested amount, and continue its parked run now. HR head / CBO /
+ * owner only (as on Agent settings); audited.
+ */
+export const raiseDeskAgentBudget = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(
+      context.userId,
+      context.orgId,
+      [...AGENT_SETTINGS_ROLES],
+      "Only the HR head, the CBO or the organisation owner can change an agent's budget.",
+    );
+    const desk = await import("../server/desk/desk.server");
+    const progress = await desk.deskProgress(conv);
+    const agentType = progress.next?.agentType;
+    if (!agentType || !progress.next?.run?.paused)
+      throw new Error("No agent here is paused on its budget.");
+    const { suggested, limit } = await desk.budgetOf(context.orgId, agentType);
+    const { agentPolicies } = await import("@db/schema");
+    await db
+      .update(agentPolicies)
+      .set({ monthlyTokenBudget: suggested, updatedBy: context.userId, updatedAt: new Date() })
+      .where(
+        and(
+          eq(agentPolicies.orgId, context.orgId),
+          eq(agentPolicies.agentType, agentType as never),
+        ),
+      );
+    const { writeAudit } = await import("../server/audit");
+    await writeAudit({
+      actor: `user:${context.userId}`,
+      actorUserId: context.userId,
+      orgId: context.orgId,
+      action: "agent.policy.updated",
+      entityType: "agent_policy",
+      entityId: null,
+      detail: { agentType, monthlyTokenBudget: suggested, previous: limit, via: "hiring_desk" },
+    });
+    const { releaseBudgetPaused } = await import("../server/agents/runtime.server");
+    await releaseBudgetPaused(context.orgId, agentType);
+    const { kickAgents } = await import("../server/agents/orchestrator.server");
+    kickAgents(context.orgId);
+    return { monthlyTokenBudget: suggested };
+  });
+
+/**
+ * Switch an agent on from the thread (HR head / CBO / owner, as on Agent
+ * settings; audited) and start what it would have done for this role.
+ */
+export const enableDeskAgent = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        agentType: z.enum(["intake", "publishing", "sourcing", "distribution"]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(
+      context.userId,
+      context.orgId,
+      [...AGENT_SETTINGS_ROLES],
+      "Only the HR head, the CBO or the organisation owner can switch agents on.",
+    );
+    await registered();
+    const { enableAgentForThread } = await import("../server/desk/desk.server");
+    return { runId: await enableAgentForThread(conv, context.userId, data.agentType) };
+  });
+
+/** Re-score the role's active candidates against its current (approved) JD. */
+export const rescoreDeskCandidates = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await needsAiKey(context.orgId);
+    const { rescoreThread } = await import("../server/desk/desk.server");
+    return { scored: await rescoreThread(conv, context.userId) };
+  });
+
+/** Ask the Sourcing agent to check this role's supply and find more candidates. */
+export const startDeskSourcing = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await registered();
+    const { startSourcing } = await import("../server/desk/desk.server");
+    return { runId: await startSourcing(conv, context.userId) };
+  });
+
+/** Ask the Distribution agent to advertise this role across the job portals. */
+export const startDeskDistribution = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    await registered();
+    const { startDistribution } = await import("../server/desk/desk.server");
+    return { runId: await startDistribution(conv, context.userId) };
+  });
+
+const liveStages = createServerOnlyFn(async function liveStages(
+  orgId: string,
+  ids: string[],
+): Promise<Record<string, string>> {
+  if (!ids.length) return {};
+  const { applications } = await import("@db/schema");
+  const rows = await db
+    .select({ id: applications.id, stage: applications.stage })
+    .from(applications)
+    .where(and(eq(applications.orgId, orgId), inArray(applications.id, ids)));
+  return Object.fromEntries(rows.map((r) => [r.id, r.stage]));
+});
+
+/** Delete a chat still gathering details (or with its unused draft) — restorable for 30 days. */
+export const deleteDeskConversation = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        reason: z.string().max(500).default(""),
+        /**
+         * "split": also delete the other tracks of this fan-out. Deleting one
+         * track used to leave its siblings behind — orphaned half-splits
+         * that kept piling up in the list under identical titles.
+         */
+        scope: z.enum(["track", "split"]).default("track"),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const conv = await accessible(context, data.id);
+    const { deleteThreads } = await import("../server/desk/desk.server");
+    return deleteThreads(conv, context.userId, data.reason, data.scope);
+  });
+
+/** Chats deleted in the last 30 days — owners only (they restore them). */
+export const listDeletedDeskConversations = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .handler(async ({ context }) => {
+    if (!context.isOwner) return [];
+    const { deletedThreads, RESTORE_DAYS } = await import("../server/desk/desk.server");
+    const now = Date.now();
+    return (await deletedThreads(context.orgId)).map((t) => ({
+      id: t.id,
+      title: t.title,
+      reason: t.reason,
+      daysLeft: Math.max(
+        0,
+        Math.ceil((t.deletedAt!.getTime() + RESTORE_DAYS * 864e5 - now) / 864e5),
+      ),
+    }));
+  });
+
+export const restoreDeskConversation = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { restoreThread } = await import("../server/desk/desk.server");
+    return restoreThread(context.orgId, context.userId, data.id);
+  });

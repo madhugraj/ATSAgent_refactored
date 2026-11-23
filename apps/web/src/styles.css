@@ -1,0 +1,408 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Design system — aligned to the yavar.ai brand:
+ *   near-white dotted canvas, ink-black type, electric violet accent,
+ *   ink-black application chrome (sidebar) as on the product canvas.
+ *
+ * Never hardcode colours in components — extend these tokens instead.
+ */
+
+@theme inline {
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Sora", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  /* Book reader — the user manual's page type */
+  --font-book: Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface-2: var(--surface-2);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-ontology-healthy: var(--ontology-healthy);
+  --color-ontology-tightening: var(--ontology-tightening);
+  --color-ontology-scarce: var(--ontology-scarce);
+  --color-ontology-dormant: var(--ontology-dormant);
+  --color-ontology-zone: var(--ontology-zone);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  --radius: 0.625rem;
+
+  /* Canvas — yavar.ai: white dotted page, ink-black type */
+  --background: oklch(0.995 0 0);
+  --foreground: oklch(0.12 0 0);
+  --surface-2: oklch(0.954 0.007 261);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.12 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.12 0 0);
+
+  /* Electric violet accent from the yavar wordmark & CTA */
+  --primary: oklch(0.55 0.252 277);
+  --primary-foreground: oklch(1 0 0);
+
+  --secondary: oklch(0.954 0.007 261);
+  --secondary-foreground: oklch(0.18 0 0);
+  --muted: oklch(0.954 0.007 261);
+  --muted-foreground: oklch(0.5 0.005 261);
+  --accent: oklch(0.945 0.028 277);
+  --accent-foreground: oklch(0.4 0.2 277);
+
+  --destructive: oklch(0.58 0.22 22);
+  --destructive-foreground: oklch(0.99 0 0);
+  --success: oklch(0.58 0.14 158);
+  --success-foreground: oklch(0.99 0 0);
+  --warning: oklch(0.68 0.15 62);
+  --warning-foreground: oklch(0.2 0.03 62);
+
+  --border: oklch(0.905 0.005 261);
+  --input: oklch(0.89 0.005 261);
+  --ring: oklch(0.55 0.252 277);
+
+  --chart-1: oklch(0.55 0.252 277);
+  --chart-2: oklch(0.58 0.14 158);
+  --chart-3: oklch(0.68 0.15 62);
+  --chart-4: oklch(0.58 0.22 22);
+  --chart-5: oklch(0.45 0.04 285);
+  --ontology-healthy: oklch(0.55 0.252 277);
+  --ontology-tightening: oklch(0.68 0.15 62);
+  --ontology-scarce: oklch(0.58 0.22 22);
+  --ontology-dormant: oklch(0.67 0.01 261);
+  --ontology-zone: oklch(0.975 0.006 261);
+
+  /* Application chrome — the ink-black product canvas */
+  --sidebar: oklch(0.13 0 0);
+  --sidebar-foreground: oklch(0.97 0.002 285);
+  --sidebar-primary: oklch(0.72 0.17 277);
+  --sidebar-primary-foreground: oklch(0.13 0 0);
+  --sidebar-accent: oklch(0.26 0.02 282);
+  --sidebar-accent-foreground: oklch(0.99 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.55 0.252 277);
+}
+
+/* Soft — the light theme with less glare: dimmer canvas and surfaces. */
+.soft {
+  --background: oklch(0.93 0.006 261);
+  --surface-2: oklch(0.9 0.008 261);
+  --card: oklch(0.965 0.004 261);
+  --popover: oklch(0.965 0.004 261);
+  --secondary: oklch(0.9 0.008 261);
+  --muted: oklch(0.9 0.008 261);
+  --muted-foreground: oklch(0.45 0.008 261);
+  --accent: oklch(0.9 0.03 277);
+  --border: oklch(0.86 0.006 261);
+  --input: oklch(0.84 0.006 261);
+  --ontology-zone: oklch(0.92 0.007 261);
+}
+
+.dark {
+  --background: oklch(0.15 0.008 285);
+  --foreground: oklch(0.97 0.002 285);
+  --surface-2: oklch(0.2 0.01 285);
+  --card: oklch(0.19 0.01 285);
+  --card-foreground: oklch(0.97 0.002 285);
+  --popover: oklch(0.19 0.01 285);
+  --popover-foreground: oklch(0.97 0.002 285);
+  --primary: oklch(0.66 0.2 276);
+  --primary-foreground: oklch(0.15 0.008 285);
+  --secondary: oklch(0.25 0.015 285);
+  --secondary-foreground: oklch(0.97 0.002 285);
+  --muted: oklch(0.25 0.015 285);
+  --muted-foreground: oklch(0.7 0.015 285);
+  --accent: oklch(0.28 0.05 278);
+  --accent-foreground: oklch(0.95 0.02 278);
+  --destructive: oklch(0.68 0.19 22);
+  --destructive-foreground: oklch(0.99 0 0);
+  --success: oklch(0.68 0.15 158);
+  --success-foreground: oklch(0.15 0.008 285);
+  --warning: oklch(0.76 0.15 62);
+  --warning-foreground: oklch(0.18 0.03 62);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(0.66 0.2 276);
+  --ontology-healthy: oklch(0.66 0.2 276);
+  --ontology-tightening: oklch(0.76 0.15 62);
+  --ontology-scarce: oklch(0.68 0.19 22);
+  --ontology-dormant: oklch(0.55 0.01 285);
+  --ontology-zone: oklch(0.22 0.012 285);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    /* Dotted canvas, as on yavar.ai */
+    background-image: radial-gradient(var(--color-border) 1px, transparent 1px);
+    background-size: 22px 22px;
+    background-position: -1px -1px;
+    background-attachment: fixed;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    letter-spacing: 0;
+  }
+}
+
+@utility panel {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-card);
+  color: var(--color-card-foreground);
+}
+
+@utility dotted-canvas {
+  background-color: var(--color-background);
+  background-image: radial-gradient(var(--color-border) 1px, transparent 1px);
+  background-size: 22px 22px;
+  background-position: -1px -1px;
+}
+
+@utility num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* ---------- Surface polish: soft elevation used across dashboard & brain ---------- */
+
+@utility panel-lift {
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-card);
+  color: var(--color-card-foreground);
+  box-shadow:
+    0 1px 2px oklch(0.12 0 0 / 4%),
+    0 18px 40px -28px oklch(0.12 0 0 / 22%);
+  transition:
+    box-shadow 220ms ease,
+    transform 220ms ease,
+    border-color 220ms ease;
+}
+
+@utility panel-lift-hover {
+  box-shadow:
+    0 1px 2px oklch(0.12 0 0 / 5%),
+    0 26px 56px -26px oklch(0.4 0.2 277 / 26%);
+  border-color: color-mix(in oklab, var(--color-primary) 26%, var(--color-border));
+  transform: translateY(-1px);
+}
+
+/* Glossy agent card: lit top edge, soft depth, a sheen that sweeps across on hover. */
+@layer components {
+  .glass-card {
+    position: relative;
+    isolation: isolate;
+    border-radius: calc(var(--radius) + 8px);
+    border: 1px solid color-mix(in oklab, var(--color-border) 70%, white);
+    background:
+      linear-gradient(180deg, oklch(1 0 0 / 70%) 0%, oklch(1 0 0 / 0%) 42%),
+      linear-gradient(
+        160deg,
+        var(--color-card) 0%,
+        color-mix(in oklab, var(--color-primary) 4%, var(--color-card)) 100%
+      );
+    color: var(--color-card-foreground);
+    box-shadow:
+      inset 0 1px 0 oklch(1 0 0 / 90%),
+      inset 0 -1px 0 oklch(0.12 0 0 / 3%),
+      0 1px 2px oklch(0.12 0 0 / 5%),
+      0 12px 28px -18px oklch(0.4 0.2 277 / 28%);
+    transition:
+      box-shadow 240ms ease,
+      transform 240ms ease,
+      border-color 240ms ease;
+
+    &::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      border-radius: inherit;
+      background: linear-gradient(115deg, transparent 30%, oklch(1 0 0 / 55%) 48%, transparent 66%);
+      background-size: 250% 100%;
+      background-position: 120% 0;
+      opacity: 0;
+      transition:
+        background-position 700ms ease,
+        opacity 240ms ease;
+      pointer-events: none;
+    }
+
+    &:hover {
+      transform: translateY(-3px);
+      border-color: color-mix(in oklab, var(--color-primary) 30%, var(--color-border));
+      box-shadow:
+        inset 0 1px 0 oklch(1 0 0 / 95%),
+        0 2px 4px oklch(0.12 0 0 / 5%),
+        0 24px 48px -22px oklch(0.4 0.2 277 / 38%);
+    }
+
+    &:hover::before {
+      opacity: 1;
+      background-position: -20% 0;
+    }
+
+    :where(.dark) & {
+      border-color: oklch(1 0 0 / 10%);
+      background:
+        linear-gradient(180deg, oklch(1 0 0 / 7%) 0%, oklch(1 0 0 / 0%) 45%),
+        linear-gradient(
+          160deg,
+          var(--color-card) 0%,
+          color-mix(in oklab, var(--color-primary) 8%, var(--color-card)) 100%
+        );
+      box-shadow:
+        inset 0 1px 0 oklch(1 0 0 / 10%),
+        0 16px 36px -20px oklch(0 0 0 / 70%);
+    }
+
+    :where(.dark) &::before {
+      background-image: linear-gradient(
+        115deg,
+        transparent 30%,
+        oklch(1 0 0 / 8%) 48%,
+        transparent 66%
+      );
+    }
+  }
+}
+
+@utility graph-shell {
+  box-shadow:
+    0 1px 2px oklch(0.12 0 0 / 4%),
+    0 30px 70px -40px oklch(0.4 0.2 277 / 30%);
+}
+
+/* Slow violet bloom behind the ontology canvas. */
+@utility graph-bloom {
+  background:
+    radial-gradient(
+      620px 380px at 18% 12%,
+      color-mix(in oklab, var(--color-primary) 12%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(520px 340px at 88% 86%, var(--color-surface-2), transparent 72%);
+}
+
+@keyframes graph-ring-pulse {
+  0% {
+    opacity: 0.85;
+    transform: scale(0.94);
+  }
+  70% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+
+@keyframes graph-link-flow {
+  0%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0.22;
+  }
+  50% {
+    stroke-dashoffset: -18;
+    opacity: 0.52;
+  }
+}
+
+@keyframes graph-node-breathe {
+  0%,
+  100% {
+    transform: scale(0.97);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+}
+
+.graph-link {
+  stroke-dasharray: 3 7;
+  animation: graph-link-flow 4.8s ease-in-out infinite;
+}
+
+.graph-node {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: graph-node-breathe 5.6s ease-in-out infinite;
+}
+
+.graph-ring {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: graph-ring-pulse 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graph-ring,
+  .graph-link,
+  .graph-node {
+    animation: none;
+  }
+
+  .graph-ring {
+    opacity: 0.6;
+  }
+}

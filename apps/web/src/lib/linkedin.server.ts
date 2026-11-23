@@ -1,0 +1,356 @@
+/**
+ * Server-only LinkedIn plumbing — one connection per organisation.
+ *
+ * Each tenant authorises its own LinkedIn account: an HR admin presses
+ * "Connect LinkedIn", signs in on LinkedIn's own screen, and the resulting
+ * token is stored against that organisation only. Job posts then go out from
+ * that company's account — never from another tenant's, and never from the
+ * platform builder's account.
+ *
+ * ATSIQ registers a single LinkedIn developer app (client id + secret in the
+ * server environment); tenants never see or paste anything.
+ */
+import { createHmac, timingSafeEqual } from "crypto";
+import { eq } from "drizzle-orm";
+
+import { db } from "../server/db";
+import { env } from "../server/env";
+import { orgLinkedinConnections } from "@db/schema";
+import { assertAllowedOrigin } from "./oauth-state";
+
+const AUTH_URL = "https://www.linkedin.com/oauth/v2/authorization";
+const TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken";
+const API_URL = "https://api.linkedin.com";
+
+/** Overridable so the LinkedIn app only asks for the products it has been granted. */
+export function linkedinScopes(): string {
+  return env.LINKEDIN_SCOPES ?? "openid profile email w_member_social";
+}
+
+/** Thrown when the organisation's connection is unusable and only a re-connect fixes it. */
+export class LinkedinAuthError extends Error {
+  constructor() {
+    super("This organisation's LinkedIn connection has expired — press Connect LinkedIn again.");
+  }
+}
+
+/* -------------------------------------------------------------------- config */
+
+export function linkedinEnvConfigured(): boolean {
+  return Boolean(env.LINKEDIN_CLIENT_ID && env.LINKEDIN_CLIENT_SECRET);
+}
+
+/** The single redirect URI registered in the ATSIQ LinkedIn app. */
+export function redirectUri(): string {
+  return env.LINKEDIN_REDIRECT_URI ?? "https://atsiq.yavar.ai/api/public/linkedin/callback";
+}
+
+/* --------------------------------------------------------------------- state */
+
+type StatePayload = { orgId: string; userId: string; origin: string; ts: number };
+
+function stateKey(): string {
+  // Fail closed: an empty HMAC key would make LinkedIn connect-state forgeable.
+  const key = env.LINKEDIN_STATE_SECRET ?? env.OAUTH_STATE_SECRET;
+  if (!key || key.length < 32) {
+    throw new Error(
+      "LinkedIn connect is not configured: set LINKEDIN_STATE_SECRET (min 32 chars) in the server environment.",
+    );
+  }
+  return key;
+}
+
+function b64url(input: string): string {
+  return Buffer.from(input, "utf8").toString("base64url");
+}
+
+export function signState(payload: StatePayload): string {
+  const body = b64url(JSON.stringify(payload));
+  const mac = createHmac("sha256", stateKey()).update(body).digest("hex");
+  return `${body}.${mac}`;
+}
+
+export function verifyState(state: string | null): StatePayload | null {
+  if (!state || !state.includes(".")) return null;
+  const [body, mac] = state.split(".") as [string, string];
+  let expected: string;
+  try {
+    expected = createHmac("sha256", stateKey()).update(body).digest("hex");
+  } catch {
+    // Unconfigured/weak secret — fail closed, accept nothing.
+    return null;
+  }
+  if (mac.length !== expected.length) return null;
+  if (!timingSafeEqual(Buffer.from(mac), Buffer.from(expected))) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as StatePayload;
+    // 30-minute window: long enough for a slow sign-in, short enough to be safe.
+    if (!parsed.orgId || Date.now() - parsed.ts > 30 * 60 * 1000) return null;
+    // The origin captured at flow start becomes the post-auth redirect target —
+    // it must be one of ours, or the callback is an open redirect.
+    if (parsed.origin) {
+      new URL("/integrations", assertAllowedOrigin(parsed.origin));
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/* ---------------------------------------------------------------------- OAuth */
+
+export function authorizeUrl(state: string): string {
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: env.LINKEDIN_CLIENT_ID ?? "",
+    redirect_uri: redirectUri(),
+    state,
+    scope: linkedinScopes(),
+  });
+  return `${AUTH_URL}?${params.toString()}`;
+}
+
+export type TokenSet = {
+  access_token: string;
+  refresh_token: string | null;
+  expires_in: number;
+  scope: string | null;
+};
+
+async function tokenRequest(body: Record<string, string>): Promise<TokenSet> {
+  const res = await fetch(TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: env.LINKEDIN_CLIENT_ID ?? "",
+      client_secret: env.LINKEDIN_CLIENT_SECRET ?? "",
+      ...body,
+    }).toString(),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`LinkedIn sign-in failed [${res.status}]: ${text.slice(0, 300)}`);
+  const parsed = JSON.parse(text) as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+    scope?: string;
+  };
+  if (!parsed.access_token) throw new Error("LinkedIn did not return an access token.");
+  return {
+    access_token: parsed.access_token,
+    refresh_token: parsed.refresh_token ?? null,
+    expires_in: parsed.expires_in ?? 60 * 60 * 24 * 60,
+    scope: parsed.scope ?? null,
+  };
+}
+
+export function exchangeCode(code: string): Promise<TokenSet> {
+  return tokenRequest({ grant_type: "authorization_code", code, redirect_uri: redirectUri() });
+}
+
+export function refreshAccessToken(refreshToken: string): Promise<TokenSet> {
+  return tokenRequest({ grant_type: "refresh_token", refresh_token: refreshToken });
+}
+
+/* ------------------------------------------------------------ member identity */
+
+export async function fetchMember(accessToken: string): Promise<{
+  sub: string;
+  name: string | null;
+  email: string | null;
+}> {
+  const res = await fetch(`${API_URL}/v2/userinfo`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const text = await res.text();
+  if (res.status === 401) throw new LinkedinAuthError();
+  if (!res.ok)
+    throw new Error(`LinkedIn profile read failed [${res.status}]: ${text.slice(0, 300)}`);
+  const body = JSON.parse(text) as { sub?: string; name?: string; email?: string };
+  if (!body.sub) throw new Error("LinkedIn did not return a member id.");
+  return { sub: body.sub, name: body.name ?? null, email: body.email ?? null };
+}
+
+/* ------------------------------------------------------------------ publishing */
+
+/** Share a text post as the organisation's connected member. */
+export async function postAsMember(
+  accessToken: string,
+  memberSub: string,
+  text: string,
+): Promise<string | null> {
+  const res = await fetch(`${API_URL}/v2/ugcPosts`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      "X-Restli-Protocol-Version": "2.0.0",
+    },
+    body: JSON.stringify({
+      author: `urn:li:person:${memberSub}`,
+      lifecycleState: "PUBLISHED",
+      specificContent: {
+        "com.linkedin.ugc.PostContent": {
+          shareCommentary: { text },
+          shareMediaCategory: "NONE",
+        },
+      },
+      visibility: { "com.linkedin.ugc.MemberShareVisibility": "PUBLIC" },
+    }),
+  });
+  if (res.status === 201) return res.headers.get("x-restli-id") ?? res.headers.get("x-linkedin-id");
+  const bodyText = await res.text();
+  if (res.status === 401) throw new LinkedinAuthError();
+  if (res.status === 403)
+    throw new Error(
+      "LinkedIn declined publishing — the connected account may not be allowed to post from this app.",
+    );
+  if (res.status === 429)
+    throw new Error("LinkedIn rate limit reached — try again in a little while.");
+  throw new Error(`LinkedIn post failed [${res.status}]: ${bodyText.slice(0, 300)}`);
+}
+
+/* --------------------------------------------------------------- org token */
+
+/**
+ * Read the organisation's stored token, refreshing it when LinkedIn issued a
+ * refresh token and the access token is close to expiry. Shared by the
+ * client-reached LinkedIn functions and the board adapter layer.
+ */
+export async function linkedinOrgToken(
+  orgId: string,
+): Promise<{ accessToken: string; memberSub: string }> {
+  const { decryptSecret, encryptSecret } = await import("../server/crypto");
+  const [row] = await db
+    .select({
+      memberSub: orgLinkedinConnections.memberSub,
+      accessToken: orgLinkedinConnections.accessToken,
+      refreshToken: orgLinkedinConnections.refreshToken,
+      expiresAt: orgLinkedinConnections.expiresAt,
+    })
+    .from(orgLinkedinConnections)
+    .where(eq(orgLinkedinConnections.orgId, orgId))
+    .limit(1);
+  if (!row) throw new Error("This organisation has not connected LinkedIn yet.");
+
+  const expiresAt = row.expiresAt ? row.expiresAt.getTime() : 0;
+  if (expiresAt && expiresAt - Date.now() < 5 * 60 * 1000) {
+    if (!row.refreshToken) throw new LinkedinAuthError();
+    const next = await refreshAccessToken(decryptSecret(row.refreshToken));
+    await db
+      .update(orgLinkedinConnections)
+      .set({
+        accessToken: encryptSecret(next.access_token),
+        refreshToken: next.refresh_token ? encryptSecret(next.refresh_token) : row.refreshToken,
+        expiresAt: new Date(Date.now() + next.expires_in * 1000),
+        updatedAt: new Date(),
+      })
+      .where(eq(orgLinkedinConnections.orgId, orgId));
+    return { accessToken: next.access_token, memberSub: row.memberSub };
+  }
+  return { accessToken: decryptSecret(row.accessToken), memberSub: row.memberSub };
+}
+
+/* ---------------------------------------------------------------- capabilities */
+
+export type LinkedinCapability = {
+  id: "identity" | "publish" | "job_postings" | "applications";
+  label: string;
+  /** true = usable now, false = LinkedIn refused, null = could not be determined. */
+  ready: boolean | null;
+  detail: string;
+};
+
+export const REST_VERSION = "202401";
+
+async function probeRest(accessToken: string, path: string): Promise<number> {
+  const res = await fetch(`${API_URL}${path}`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "LinkedIn-Version": REST_VERSION,
+      "X-Restli-Protocol-Version": "2.0.0",
+    },
+  });
+  return res.status;
+}
+
+/**
+ * Asks LinkedIn itself what this organisation's connection is allowed to do,
+ * instead of guessing from the paperwork. Scope strings tell us what was
+ * granted at sign-in; the live probes tell us whether the Recruiter contract
+ * actually opens the job-posting and application endpoints.
+ */
+export async function probeCapabilities(
+  accessToken: string,
+  scope: string | null,
+): Promise<LinkedinCapability[]> {
+  const granted = (scope ?? "").split(/[\s,]+/).filter(Boolean);
+  const out: LinkedinCapability[] = [];
+
+  try {
+    const me = await fetchMember(accessToken);
+    out.push({
+      id: "identity",
+      label: "Sign-in is live",
+      ready: true,
+      detail: `LinkedIn recognises this connection as ${me.name ?? me.sub}.`,
+    });
+  } catch (e) {
+    out.push({
+      id: "identity",
+      label: "Sign-in is live",
+      ready: false,
+      detail: e instanceof Error ? e.message : "LinkedIn did not accept the stored sign-in.",
+    });
+    return out;
+  }
+
+  out.push(
+    granted.includes("w_member_social")
+      ? {
+          id: "publish",
+          label: "Publishing job posts",
+          ready: true,
+          detail: "ATSIQ can publish the designed post to this account's feed.",
+        }
+      : {
+          id: "publish",
+          label: "Publishing job posts",
+          ready: false,
+          detail:
+            "Posting permission was not granted at sign-in. Press Reconnect LinkedIn and accept the posting request.",
+        },
+  );
+
+  const jobStatus = await probeRest(
+    accessToken,
+    "/rest/jobPostings?q=criteria&start=0&count=1",
+  ).catch(() => 0);
+  out.push({
+    id: "job_postings",
+    label: "Structured job listings on the Jobs board",
+    ready: jobStatus === 200 ? true : jobStatus === 0 ? null : false,
+    detail:
+      jobStatus === 200
+        ? "Your contract opens the Jobs board, so ATSIQ can file listings there directly."
+        : jobStatus === 0
+          ? "LinkedIn did not answer the check — try again in a moment."
+          : `LinkedIn declined (${jobStatus}). This needs the Job Posting product on your contract; until then posts go out on the feed with your ATSIQ apply link.`,
+  });
+
+  const appStatus = await probeRest(
+    accessToken,
+    "/rest/simpleJobPostings?q=criteria&start=0&count=1",
+  ).catch(() => 0);
+  out.push({
+    id: "applications",
+    label: "Pulling applicants and CVs straight from LinkedIn",
+    ready: appStatus === 200 ? true : appStatus === 0 ? null : false,
+    detail:
+      appStatus === 200
+        ? "ATSIQ can read applicants from your LinkedIn jobs automatically."
+        : `LinkedIn declined (${appStatus || "no answer"}). Until that product is on your contract, CVs still arrive automatically through your ATSIQ apply link and your careers mailbox.`,
+  });
+
+  return out;
+}

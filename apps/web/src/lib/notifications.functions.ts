@@ -1,0 +1,780 @@
+import { and, asc, eq, ilike, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
+
+import { isPanelOnly, requireIdentity, type AppRole } from "./auth.middleware";
+import { db } from "../server/db";
+import { taskIsRemindable } from "../server/agents/task-liveness";
+import {
+  agentIssues,
+  agentPolicies,
+  agentRuns,
+  agentSteps,
+  agentTasks,
+  interviews,
+  offers,
+  orgMembers,
+  organizations,
+  notificationStates,
+  platformAdmins,
+  requisitions,
+  userRoles,
+} from "@db/schema";
+
+/**
+ * Action inbox for the signed-in user. Everything here is derived live from the
+ * database, so a notification disappears as soon as the work behind it is done.
+ */
+
+export type NotificationAction = {
+  id:
+    | "extend"
+    | "phone_screen"
+    | "decide_without"
+    | "remind"
+    | "move_l1"
+    | "hold"
+    | "reject"
+    | "pay_remind"
+    | "negotiation_outcome";
+  label: string;
+};
+
+export type Notification = {
+  id: string;
+  kind:
+    | "approval"
+    | "interview"
+    | "offer"
+    | "invite"
+    | "platform"
+    | "stale"
+    | "agent"
+    | "assessment"
+    | "pay";
+  title: string;
+  body: string;
+  to: string;
+  at: string | null;
+  severity: "info" | "warn" | "urgent";
+  /** Shown as an agent pop-up (unless snoozed or dismissed by this person). */
+  popup?: boolean;
+  /** The agent speaking in the pop-up. */
+  agent?: string;
+  /** What the person can do from the pop-up; each opens a short form. */
+  actions?: NotificationAction[];
+  subject?: {
+    assessmentId?: string;
+    /** A pay & availability form request. */
+    payRequestId?: string;
+    /** A pay discussion (offer negotiation). */
+    negotiationId?: string;
+    applicationId?: string;
+    candidate?: string;
+    dueAt?: string | null;
+  };
+  /** This person's choice on the pop-up. */
+  snoozedUntil?: string | null;
+  dismissed?: boolean;
+};
+
+export const myNotifications = createServerFn({ method: "GET" })
+  .middleware([requireIdentity])
+  .handler(async ({ context }): Promise<Notification[]> => {
+    const email = (context.claims?.["email"] as string | undefined)?.toLowerCase() ?? null;
+    const out: Notification[] = [];
+
+    // Platform super users: tenants waiting for approval.
+    if (email) {
+      const [isSuper] = await db
+        .select({ id: platformAdmins.id })
+        .from(platformAdmins)
+        .where(ilike(platformAdmins.email, email))
+        .limit(1);
+      if (isSuper) {
+        const pending = await db
+          .select({
+            id: organizations.id,
+            name: organizations.name,
+            createdAt: organizations.createdAt,
+          })
+          .from(organizations)
+          .where(eq(organizations.status, "pending"))
+          .orderBy(asc(organizations.createdAt));
+        for (const o of pending)
+          out.push({
+            id: `org:${o.id}`,
+            kind: "platform",
+            title: `${o.name} is awaiting approval`,
+            body: "Review the registration and approve or reject the organisation.",
+            to: "/platform",
+            at: o.createdAt.toISOString(),
+            severity: "urgent",
+          });
+      }
+    }
+
+    const [member] = await db
+      .select({ orgId: orgMembers.orgId, isOwner: orgMembers.isOwner })
+      .from(orgMembers)
+      .where(and(eq(orgMembers.userId, context.userId), eq(orgMembers.status, "active")))
+      .limit(1);
+
+    // A panel-only member's inbox is their interviews page, not the org's queues.
+    if (member && !(await isPanelOnly(context.userId, member.orgId, member.isOwner))) {
+      const orgId = member.orgId;
+      const now = Date.now();
+      const in7 = new Date(now + 7 * 864e5);
+
+      // The bell is an action inbox: an item may only appear for someone who can
+      // actually action it. Roles decide — org membership alone is not enough.
+      const roles = (
+        await db
+          .select({ role: userRoles.role })
+          .from(userRoles)
+          .where(and(eq(userRoles.userId, context.userId), eq(userRoles.orgId, orgId)))
+      ).map((r) => r.role);
+      const isAdmin = member.isOwner || roles.includes("president_cbo");
+      const APPROVAL_HOP: Record<string, AppRole> = {
+        pending_dh: "department_head",
+        pending_hr: "hr_head",
+        pending_cbo: "president_cbo",
+      };
+      const canApproveRequisition = (status: string) =>
+        isAdmin || (APPROVAL_HOP[status] !== undefined && roles.includes(APPROVAL_HOP[status]!));
+
+      // Freshly approved tenants: a one-time welcome notice so the owner hears
+      // the decision in-app (email already goes out; the 10s org poll covers
+      // the screen flip itself).
+      const [orgRow] = await db
+        .select({ status: organizations.status, approvedAt: organizations.approvedAt })
+        .from(organizations)
+        .where(eq(organizations.id, orgId))
+        .limit(1);
+      if (
+        member.isOwner &&
+        orgRow?.status === "active" &&
+        orgRow.approvedAt &&
+        now - orgRow.approvedAt.getTime() < 3 * 864e5
+      ) {
+        out.push({
+          id: "org:approved",
+          kind: "platform",
+          title: "Your organisation was approved",
+          body: "Your workspace is live. Invite your team from Users & roles and raise your first requisition.",
+          to: "/",
+          at: orgRow.approvedAt.toISOString(),
+          severity: "info",
+        });
+      }
+
+      const [reqs, ofrs, ivs, invites] = await Promise.all([
+        db
+          .select({
+            id: requisitions.id,
+            code: requisitions.code,
+            title: requisitions.title,
+            status: requisitions.status,
+            createdAt: requisitions.createdAt,
+          })
+          .from(requisitions)
+          .where(
+            and(
+              eq(requisitions.orgId, orgId),
+              inArray(requisitions.status, ["pending_dh", "pending_hr", "pending_cbo"]),
+            ),
+          ),
+        db
+          .select({ id: offers.id, status: offers.status, createdAt: offers.createdAt })
+          .from(offers)
+          .where(
+            and(eq(offers.orgId, orgId), inArray(offers.status, ["pending_hr", "pending_cbo"])),
+          ),
+        // Only the interviewer's own rounds — an email filter, not org-wide.
+        // No lower date bound on purpose: a past session without a scorecard is
+        // exactly what the assignee still owes.
+        email
+          ? db
+              .select({
+                id: interviews.id,
+                interviewer: interviews.interviewer,
+                scheduledAt: interviews.scheduledAt,
+                status: interviews.status,
+              })
+              .from(interviews)
+              .where(
+                and(
+                  eq(interviews.orgId, orgId),
+                  eq(interviews.status, "scheduled"),
+                  isNotNull(interviews.scheduledAt),
+                  lte(interviews.scheduledAt, in7),
+                  sql`lower(${interviews.interviewerEmail}) = ${email}`,
+                ),
+              )
+              .orderBy(asc(interviews.scheduledAt))
+          : Promise.resolve(
+              [] as {
+                id: string;
+                interviewer: string | null;
+                scheduledAt: Date | null;
+                status: string;
+              }[],
+            ),
+        member.isOwner
+          ? db
+              .select({
+                id: orgMembers.id,
+                email: orgMembers.email,
+                createdAt: orgMembers.createdAt,
+              })
+              .from(orgMembers)
+              .where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.status, "invited")))
+          : Promise.resolve([] as { id: string; email: string; createdAt: Date }[]),
+      ]);
+
+      for (const r of reqs.filter((r) => canApproveRequisition(r.status)))
+        out.push({
+          id: `req:${r.id}`,
+          kind: "approval",
+          title: `${r.code} · ${r.title} needs approval`,
+          body: `Requisition is waiting at ${r.status.replace("pending_", "").toUpperCase()}.`,
+          to: `/requisitions/${r.id}`,
+          at: r.createdAt.toISOString(),
+          severity: "urgent",
+        });
+
+      if (ofrs.length && (isAdmin || roles.includes("hr_head")))
+        out.push({
+          id: "offers:pending",
+          kind: "offer",
+          title: `${ofrs.length} offer(s) awaiting approval`,
+          body: "Review compensation and release the offer.",
+          to: "/offers",
+          at: ofrs[0]?.createdAt.toISOString() ?? null,
+          severity: "warn",
+        });
+
+      for (const iv of ivs.slice(0, 8)) {
+        const when = iv.scheduledAt;
+        const soon = when ? when.getTime() - now < 864e5 : false;
+        out.push({
+          id: `iv:${iv.id}`,
+          kind: "interview",
+          title: `Interview ${when ? when.toLocaleString() : "scheduled"}`,
+          body: `${iv.interviewer ?? "Interviewer"} — scorecard due after the session.`,
+          to: "/interviews/mine",
+          at: when ? when.toISOString() : null,
+          severity: soon ? "urgent" : "info",
+        });
+      }
+
+      for (const i of invites)
+        out.push({
+          id: `inv:${i.id}`,
+          kind: "invite",
+          title: `${i.email} has not signed in yet`,
+          body: "The invitation is still unclaimed.",
+          to: "/team",
+          at: i.createdAt.toISOString(),
+          severity: "info",
+        });
+
+      // Agent requests waiting on this person (docs/agentic-plan.md §5.3):
+      // their own action approvals, gates and questions routed to one of
+      // their roles; the owner sees every open request.
+      const agentAsks = await db
+        .select({
+          id: agentTasks.id,
+          kind: agentTasks.kind,
+          title: agentTasks.title,
+          createdAt: agentTasks.createdAt,
+        })
+        .from(agentTasks)
+        .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
+        .where(
+          and(
+            eq(agentTasks.orgId, orgId),
+            eq(agentTasks.status, "open"),
+            // Never pop up a request whose agent stopped or whose subject was deleted.
+            taskIsRemindable(),
+            member.isOwner
+              ? undefined
+              : or(
+                  eq(agentTasks.assigneeUserId, context.userId),
+                  roles.length ? inArray(agentTasks.assigneeRole, roles) : undefined,
+                ),
+          ),
+        )
+        .orderBy(asc(agentTasks.createdAt))
+        .limit(20);
+      // Agent health: serious / critical issues not yet acknowledged, and a
+      // stopped scheduler (only for orgs that switched an agent on).
+      if (member.isOwner || roles.includes("hr_head") || roles.includes("president_cbo")) {
+        const health = await db
+          .select({
+            id: agentIssues.id,
+            title: agentIssues.title,
+            severity: agentIssues.severity,
+            agentType: agentIssues.agentType,
+            firstSeenAt: agentIssues.firstSeenAt,
+          })
+          .from(agentIssues)
+          .where(
+            and(
+              eq(agentIssues.orgId, orgId),
+              eq(agentIssues.status, "open"),
+              inArray(agentIssues.severity, ["serious", "critical"]),
+            ),
+          )
+          .limit(10);
+        for (const i of health)
+          out.push({
+            id: `agent-issue:${i.id}`,
+            kind: "agent",
+            title: `Agent health: ${i.title}`,
+            body: `${i.agentType === "*" ? "Orchestrator" : `The ${i.agentType} agent`} — ${i.severity}. Review it on Agent observability.`,
+            to: "/agents/observability",
+            at: i.firstSeenAt.toISOString(),
+            severity: i.severity === "critical" ? "urgent" : "warn",
+          });
+        // Workflows the platform granted that cannot run here yet (until fixed).
+        const { grantedWorkflows, workflowReadiness } =
+          await import("../server/agents/workflows.server");
+        for (const w of await grantedWorkflows(orgId)) {
+          const r = await workflowReadiness(orgId, w.graph);
+          if (r.ready) continue;
+          const missing = r.items.filter((i) => !i.ok).map((i) => i.label);
+          out.push({
+            id: `workflow-ready:${w.id}:${w.version}`,
+            kind: "agent",
+            title: `Workflow "${w.name}" is not running yet`,
+            body: `It needs: ${missing.join(", ")}. Switch these on in Agent settings → Workflows.`,
+            to: "/agents/settings#workflows",
+            at: w.grantedAt.toISOString(),
+            severity: "warn",
+          });
+        }
+        const [anyOn] = await db
+          .select({ id: agentPolicies.id })
+          .from(agentPolicies)
+          .where(and(eq(agentPolicies.orgId, orgId), eq(agentPolicies.enabled, true)))
+          .limit(1);
+        if (anyOn) {
+          const { schedulerStatus } = await import("../server/agents/health.server");
+          const sched = await schedulerStatus();
+          if (!sched.healthy)
+            out.push({
+              id: "agent-scheduler",
+              kind: "agent",
+              title: "The agent scheduler is not running",
+              body:
+                sched.minutesSinceTick == null
+                  ? "No scheduler tick has ever been recorded — register /api/public/agent-tick in the scheduler."
+                  : `Last tick ${sched.minutesSinceTick} minutes ago — agents are not picking up work.`,
+              to: "/agents/observability",
+              at: sched.lastTickAt,
+              severity: "urgent",
+            });
+        }
+      }
+
+      // Agents paused at their monthly token budget — for whoever sets budgets.
+      if (member.isOwner || roles.includes("hr_head") || roles.includes("president_cbo")) {
+        const paused = await db
+          .select({ agentType: agentRuns.agentType, n: sql<number>`count(*)::int` })
+          .from(agentRuns)
+          .where(
+            and(
+              eq(agentRuns.orgId, orgId),
+              eq(agentRuns.status, "queued"),
+              eq(agentRuns.lastError, "Paused: this agent reached its monthly token budget."),
+            ),
+          )
+          .groupBy(agentRuns.agentType);
+        for (const p of paused)
+          out.push({
+            id: `agent-budget:${p.agentType}`,
+            kind: "agent",
+            title: `The ${p.agentType} agent reached its monthly token budget`,
+            body: `${p.n} run(s) are paused until next month or until you raise the budget in Agent settings.`,
+            to: "/agents/settings",
+            at: null,
+            severity: "warn",
+          });
+      }
+
+      for (const t of agentAsks)
+        out.push({
+          id: `agent:${t.id}`,
+          kind: "agent",
+          title: t.title,
+          body:
+            t.kind === "clarification"
+              ? "An agent has a question for you."
+              : t.kind === "gate"
+                ? "An agent prepared this for your decision."
+                : "An agent is waiting for your approval to act.",
+          to: "/agents",
+          at: t.createdAt.toISOString(),
+          severity: t.kind === "gate" ? "warn" : "info",
+        });
+
+      // "Act and notify": actions agents ran for this person, until marked seen.
+      const [acted] = await db
+        .select({
+          n: sql<number>`count(*)::int`,
+          last: sql<string | null>`max(${agentSteps.createdAt})::text`,
+        })
+        .from(agentSteps)
+        .innerJoin(agentRuns, eq(agentRuns.id, agentSteps.runId))
+        .where(
+          and(
+            eq(agentSteps.orgId, orgId),
+            eq(agentSteps.notifyState, "pending"),
+            eq(agentRuns.principalUserId, context.userId),
+          ),
+        );
+      if (acted && acted.n > 0)
+        out.push({
+          id: "agent-acted",
+          kind: "agent",
+          title: `Agents acted for you: ${acted.n} action(s)`,
+          body: "Agents set to act and notify made these changes on your behalf. Review them under Agent activity.",
+          to: "/agents",
+          at: acted.last ? new Date(acted.last).toISOString() : null,
+          severity: "info",
+        });
+    }
+
+    // Written assessments: waiting, overdue, reminder due, or waiting on a decision.
+    if (member) {
+      const roles = (
+        await db
+          .select({ role: userRoles.role })
+          .from(userRoles)
+          .where(and(eq(userRoles.userId, context.userId), eq(userRoles.orgId, member.orgId)))
+      ).map((r) => r.role);
+      if (
+        member.isOwner ||
+        roles.some((r) => r === "recruiter" || r === "hr_head" || r === "president_cbo")
+      )
+        out.push(
+          ...(await assessmentNudges(member.orgId)),
+          ...(await payNudges(member.orgId)),
+          ...(await negotiationNudges(member.orgId)),
+        );
+    }
+    // This person's pop-up choices (snoozed / dismissed).
+    const states = out.length
+      ? await db
+          .select()
+          .from(notificationStates)
+          .where(
+            and(
+              eq(notificationStates.userId, context.userId),
+              inArray(
+                notificationStates.notificationId,
+                out.map((n) => n.id),
+              ),
+            ),
+          )
+      : [];
+    for (const st of states) {
+      const n = out.find((x) => x.id === st.notificationId);
+      if (!n) continue;
+      n.snoozedUntil = st.snoozedUntil ? st.snoozedUntil.toISOString() : null;
+      n.dismissed = Boolean(st.dismissedAt);
+    }
+
+    const rank = { urgent: 0, warn: 1, info: 2 } as const;
+    return out.sort(
+      (a, b) => rank[a.severity] - rank[b.severity] || (a.at ?? "").localeCompare(b.at ?? ""),
+    );
+  });
+
+/**
+ * Assessment nudges, derived live (they disappear once acted on). IDs change
+ * as an item escalates, so snoozing "waiting" never hides "overdue".
+ */
+export const assessmentNudges = createServerOnlyFn(async function assessmentNudges(
+  orgId: string,
+): Promise<Notification[]> {
+  const { candidateAssessments, candidates, applications } = await import("@db/schema");
+  const tl = await import("./assessment-timeline.server");
+  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const tz = (await getOrgEmailSettings(orgId)).timezone;
+  const policy = await tl.assessmentPolicyOf(orgId);
+  const { loadPolicy, decideToolCall } = await import("../server/agents/policy");
+  const sp = await loadPolicy(orgId, "screening");
+  const autoRemind = sp.enabled && decideToolCall("external", sp, "assessment_invite") === "run";
+  const rows = await db
+    .select({
+      a: candidateAssessments,
+      name: candidates.fullName,
+      stage: applications.stage,
+    })
+    .from(candidateAssessments)
+    .innerJoin(candidates, eq(candidates.id, candidateAssessments.candidateId))
+    .leftJoin(applications, eq(applications.id, candidateAssessments.applicationId))
+    .where(
+      and(
+        eq(candidateAssessments.orgId, orgId),
+        or(
+          eq(candidateAssessments.status, "sent"),
+          and(eq(candidateAssessments.status, "completed"), eq(applications.stage, "shortlisted")),
+        ),
+      ),
+    );
+  const now = new Date();
+  const out: Notification[] = [];
+  for (const { a, name, stage } of rows) {
+    const subject = {
+      assessmentId: a.id,
+      ...(a.applicationId ? { applicationId: a.applicationId } : {}),
+      candidate: name,
+      dueAt: a.dueAt ? a.dueAt.toISOString() : null,
+    };
+    const to = a.applicationId ? `/candidates/${a.candidateId}` : "/";
+    const due = a.dueAt ? tl.dayText(a.dueAt, tz) : "soon";
+    if (a.status === "completed" && stage === "shortlisted") {
+      out.push({
+        id: `assessment:review:${a.id}`,
+        kind: "assessment",
+        title: `${name} completed the assessment${a.mindsetScore != null ? ` — ${a.mindsetScore}/100` : ""}`,
+        body: "Decide who moves on: an interview round, hold, or not taken further. The Screening agent's recommendation is on the candidate's page.",
+        to,
+        at: a.completedAt ? a.completedAt.toISOString() : null,
+        severity: "urgent",
+        popup: true,
+        agent: "Screening agent",
+        actions: [
+          { id: "move_l1", label: "Move to interview" },
+          { id: "hold", label: "Hold" },
+          { id: "reject", label: "Not taking further" },
+        ],
+        subject,
+      });
+    } else if (a.status === "sent" && a.overdueAt) {
+      out.push({
+        id: `assessment:overdue:${a.id}`,
+        kind: "assessment",
+        title: `${name}'s assessment is overdue`,
+        body: `It was due ${due}; the link closes ${a.closesAt ? tl.dayText(a.closesAt, tz) : "soon"}. Give more time, screen by phone, or decide without it.`,
+        to,
+        at: a.overdueAt.toISOString(),
+        severity: "warn",
+        popup: true,
+        agent: "Screening agent",
+        actions: [
+          { id: "extend", label: "Give more time" },
+          { id: "remind", label: "Send a reminder" },
+          { id: "phone_screen", label: "Screen by phone" },
+          { id: "decide_without", label: "Decide without it" },
+        ],
+        subject,
+      });
+    } else if (a.status === "sent" && !autoRemind && tl.reminderDue(a, policy, now, tz)) {
+      out.push({
+        id: `assessment:remind:${a.id}:${a.remindersSent + 1}`,
+        kind: "assessment",
+        title: `Remind ${name} about the assessment?`,
+        body: `It is due ${due}. Agents may not email candidates on their own here, so the reminder waits for you.`,
+        to,
+        at: now.toISOString(),
+        severity: "info",
+        popup: true,
+        agent: "Screening agent",
+        actions: [
+          { id: "remind", label: "Send the reminder" },
+          { id: "extend", label: "Give more time" },
+        ],
+        subject,
+      });
+    } else if (a.status === "sent") {
+      out.push({
+        id: `assessment:waiting:${a.id}`,
+        kind: "assessment",
+        title: `Waiting for ${name}'s assessment`,
+        body: `Due ${due}. Reminders go out automatically${autoRemind ? "" : " once you approve them"}; nothing is needed from you yet.`,
+        to,
+        at: a.createdAt.toISOString(),
+        severity: "info",
+        agent: "Screening agent",
+        actions: [{ id: "extend", label: "Change the due date" }],
+        subject,
+      });
+    }
+  }
+  return out;
+});
+
+/**
+ * Pay & availability forms past due, or a reminder waiting for a person
+ * (TA / HR only — the caller checks). No amounts appear in a nudge.
+ */
+export const payNudges = createServerOnlyFn(async function payNudges(
+  orgId: string,
+  now = new Date(),
+): Promise<Notification[]> {
+  const comp = await import("./compensation.server");
+  const tl = await import("./assessment-timeline.server");
+  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const tz = (await getOrgEmailSettings(orgId)).timezone;
+  const policy = await tl.assessmentPolicyOf(orgId);
+  const auto = await comp.payRemindersAutomatic(orgId);
+  const out: Notification[] = [];
+  for (const { r, name } of await comp.openPayRequests(orgId, now)) {
+    const subject = {
+      payRequestId: r.id,
+      applicationId: r.applicationId,
+      candidate: name,
+      dueAt: r.dueAt ? r.dueAt.toISOString() : null,
+    };
+    const to = `/candidates/${r.candidateId}`;
+    const due = r.dueAt ? tl.dayText(r.dueAt, tz) : "soon";
+    if (comp.payOverdue(r, policy.overdueAfterDays, now)) {
+      out.push({
+        id: `pay:overdue:${r.id}`,
+        kind: "pay",
+        title: `${name} has not shared their pay and availability`,
+        body: `The form was due ${due}; the link closes ${r.closesAt ? tl.dayText(r.closesAt, tz) : "soon"}. Remind them, or ask on a call and enter it on their page — the offer waits for it.`,
+        to,
+        at: r.dueAt ? r.dueAt.toISOString() : r.createdAt.toISOString(),
+        severity: "warn",
+        popup: true,
+        agent: "Offer agent",
+        actions: [{ id: "pay_remind", label: "Send a reminder" }],
+        subject,
+      });
+    } else if (
+      !auto &&
+      tl.nextStep(
+        {
+          sentAt: r.createdAt,
+          dueAt: r.dueAt ?? new Date(r.createdAt.getTime() + 3 * 864e5),
+          closesAt: r.closesAt ?? new Date(r.createdAt.getTime() + 7 * 864e5),
+          remindersSent: r.remindersSent,
+          lastRemindedAt: r.lastRemindedAt,
+          overdueAt: null,
+        },
+        policy,
+        now,
+        tz,
+      ) === "remind"
+    ) {
+      out.push({
+        id: `pay:remind:${r.id}:${r.remindersSent + 1}`,
+        kind: "pay",
+        title: `Remind ${name} about the pay & availability form?`,
+        body: `It is due ${due}. Agents may not email candidates on their own here, so the reminder waits for you.`,
+        to,
+        at: now.toISOString(),
+        severity: "info",
+        popup: true,
+        agent: "Screening agent",
+        actions: [{ id: "pay_remind", label: "Send the reminder" }],
+        subject,
+      });
+    }
+  }
+  return out;
+});
+
+/**
+ * Pay discussions that need a person (TA / HR only — the caller checks):
+ * prepared (call, or approve the message), a suggested figure, a call asked
+ * for, no answer past the due date, or a closed link. No amounts in a nudge.
+ */
+export const negotiationNudges = createServerOnlyFn(async function negotiationNudges(
+  orgId: string,
+  now = new Date(),
+): Promise<Notification[]> {
+  const { offerNegotiations, candidates } = await import("@db/schema");
+  const { negotiationOverdue } = await import("./negotiation.server");
+  const rows = await db
+    .select({ n: offerNegotiations, name: candidates.fullName })
+    .from(offerNegotiations)
+    .innerJoin(candidates, eq(candidates.id, offerNegotiations.candidateId))
+    .where(
+      and(
+        eq(offerNegotiations.orgId, orgId),
+        inArray(offerNegotiations.status, [
+          "open",
+          "countered",
+          "call_requested",
+          "message_sent",
+          "expired",
+        ]),
+        sql`${offerNegotiations.updatedAt} >= now() - interval '30 days'`,
+      ),
+    );
+  const out: Notification[] = [];
+  for (const { n, name } of rows) {
+    const subject = { negotiationId: n.id, applicationId: n.applicationId, candidate: name };
+    const base = {
+      kind: "offer" as const,
+      to: `/candidates/${n.candidateId}`,
+      at: n.updatedAt.toISOString(),
+      popup: true,
+      agent: "Offer agent",
+      actions: [{ id: "negotiation_outcome" as const, label: "Record the call" }],
+      subject,
+    };
+    // An AI pay call heard something: a person confirms (or records) it first.
+    if (n.callOutcome && !["agreed", "no_agreement", "cancelled"].includes(n.status))
+      out.push({
+        ...base,
+        id: `negotiation:aicall:${n.id}:${n.callOutcome.callId}`,
+        title: n.callOutcome.agreed
+          ? `${name} said yes on the AI pay call`
+          : `${name} wants the team to come back about pay`,
+        body: n.callOutcome.agreed
+          ? "Nothing is agreed until you confirm it — the form is filled in from the call."
+          : "Their words from the call are on their page. Call them or decide with the HR head.",
+        severity: "urgent",
+        ...(n.callOutcome.agreed
+          ? { actions: [{ id: "negotiation_outcome" as const, label: "Confirm" }] }
+          : {}),
+      });
+    else if (n.status === "open")
+      out.push({
+        ...base,
+        id: `negotiation:open:${n.id}`,
+        title: `Agree ${name}'s pay before the offer`,
+        body: "Their expectation is above the approved ceiling. Call them with the brief on their page, or the HR head approves the prepared message.",
+        severity: "warn",
+      });
+    else if (n.status === "countered")
+      out.push({
+        ...base,
+        id: `negotiation:countered:${n.id}`,
+        title: `${name} suggested another figure`,
+        body: "Call them or decide with the HR head; record what you agree. Above the ceiling needs the HR head (and the CBO above the band).",
+        severity: "urgent",
+      });
+    else if (n.status === "call_requested")
+      out.push({
+        ...base,
+        id: `negotiation:call:${n.id}`,
+        title: `${name} asked for a call about the offer`,
+        body: "The call brief is on their page. Record the outcome after the call.",
+        severity: "urgent",
+      });
+    else if (n.status === "message_sent" && negotiationOverdue(n, now))
+      out.push({
+        ...base,
+        id: `negotiation:waiting:${n.id}`,
+        title: `No answer from ${name} on the pay message`,
+        body: "A short call usually helps. Record the outcome after it.",
+        severity: "warn",
+      });
+    else if (n.status === "expired")
+      out.push({
+        ...base,
+        id: `negotiation:expired:${n.id}`,
+        title: `${name} did not answer the pay message`,
+        body: "Call them, or the HR head decides whether to raise the ceiling or stop.",
+        severity: "warn",
+      });
+  }
+  return out;
+});

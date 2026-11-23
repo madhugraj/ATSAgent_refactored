@@ -1,0 +1,307 @@
+/**
+ * Application pipeline cores shared by the server functions (people) and the
+ * Phase 2 agent tools: stage moves through the one sanctioned transition
+ * check, attaching talent-pool candidates, and candidate notes. Every core
+ * predicates on the organisation and applies the same role rules as the UI.
+ */
+import { sourceLabel } from "./job-channels";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+
+import { db } from "../server/db";
+import { applications, candidateNotes, candidates, requisitions, screeningCalls } from "@db/schema";
+import { assertRole } from "./auth.middleware";
+import { canMove, REASON_REQUIRED, STAGE_LABEL, type Stage } from "./lifecycle";
+import type { LifecycleActor } from "./requisitions.server";
+
+/** Offer and hiring stages are HR-controlled — not every org member may act. */
+export const HR_CONTROLLED_TARGETS = new Set<string>([
+  "offer_pending",
+  "offer_released",
+  "offer_accepted",
+  "offer",
+  "hired",
+  "joined",
+]);
+
+const actorLabel = (a: LifecycleActor) => (a.via ? `${a.memberEmail} (via agent)` : a.memberEmail);
+
+export async function moveStageCore(
+  actor: LifecycleActor,
+  input: { applicationId: string; toStage: Stage; reason?: string | null; note?: string | null },
+): Promise<{ from: Stage; to: Stage; unchanged: boolean }> {
+  const [app] = await db
+    .select({ id: applications.id, stage: applications.stage })
+    .from(applications)
+    .where(and(eq(applications.id, input.applicationId), eq(applications.orgId, actor.orgId)))
+    .limit(1);
+  if (!app) throw new Error("Application not found");
+  const from = app.stage as Stage;
+  if (from === input.toStage) return { from, to: input.toStage, unchanged: true };
+  if (!canMove(from, input.toStage)) {
+    throw new Error(
+      `${STAGE_LABEL[from]} → ${STAGE_LABEL[input.toStage]} is not an allowed transition. Park the candidate on hold or in the reserve pool first.`,
+    );
+  }
+  if (REASON_REQUIRED.includes(input.toStage) && !input.reason?.trim()) {
+    throw new Error(`A reason is required to move a candidate to ${STAGE_LABEL[input.toStage]}.`);
+  }
+  // Into an interview round while their screening call is still arranged (a
+  // callback they asked for, a retry, a call under way): refused, saying where
+  // it stands — the call would otherwise still ring after the move.
+  if (INTERVIEW_STAGES.includes(input.toStage) && PRE_INTERVIEW.includes(from)) {
+    const waiting = await openScreeningCall(actor.orgId, app.id);
+    if (waiting) throw new Error(waiting);
+  }
+  // Into an interview round with no screening on record: allowed, but only with
+  // a written reason — it is recorded as "Screening skipped".
+  let skipNote: string | null = null;
+  if (
+    INTERVIEW_STAGES.includes(input.toStage) &&
+    PRE_INTERVIEW.includes(from) &&
+    !(await screeningOnRecord(actor.orgId, app.id))
+  ) {
+    const why = (input.note?.trim() || input.reason?.trim() || "").trim();
+    if (!why)
+      throw new Error(
+        "No screening is on record for this candidate (no screening call, assessment or AI screen). To move them into an interview anyway, write why in the note — it is recorded as “Screening skipped”.",
+      );
+    skipNote = `Screening skipped: ${why}`;
+  }
+  if (HR_CONTROLLED_TARGETS.has(input.toStage)) {
+    await assertRole(
+      actor.userId,
+      actor.orgId,
+      ["hr_head", "president_cbo"],
+      "Only the HR head or an owner can move a candidate into an offer or hiring stage.",
+    );
+  }
+  await db
+    .update(applications)
+    .set({
+      stage: input.toStage,
+      stageReason: input.reason?.trim() || null,
+      stageNote: input.note?.trim() || null,
+      lastActivityAt: new Date(),
+    })
+    .where(eq(applications.id, app.id));
+  const { recordStageTransition } = await import("./stage-events.server");
+  await recordStageTransition({
+    orgId: actor.orgId,
+    applicationId: app.id,
+    fromStage: from,
+    toStage: input.toStage,
+    actor: actorLabel(actor),
+    reason: skipNote ?? (input.reason?.trim() || null),
+    note: input.note?.trim() || null,
+  });
+  return { from, to: input.toStage, unchanged: false };
+}
+
+/**
+ * A stage the offer workflow sets as a consequence of an offer action
+ * (raising, releasing, accepting). The offer action already checked the
+ * actor's role and the offer transition, so no funnel check runs here, but
+ * the move is recorded like any other: stage_events row, outcome capture and
+ * stale agent request cleanup.
+ */
+export async function recordOfferStageCore(
+  actor: LifecycleActor,
+  input: { applicationId: string; toStage: "offer_pending" | "offer_released" | "offer_accepted" },
+): Promise<{ from: Stage; to: Stage; unchanged: boolean } | null> {
+  const [app] = await db
+    .select({ id: applications.id, stage: applications.stage })
+    .from(applications)
+    .where(and(eq(applications.id, input.applicationId), eq(applications.orgId, actor.orgId)))
+    .limit(1);
+  if (!app) return null;
+  const from = app.stage as Stage;
+  if (from === input.toStage) return { from, to: input.toStage, unchanged: true };
+  await db
+    .update(applications)
+    .set({ stage: input.toStage, lastActivityAt: new Date() })
+    .where(and(eq(applications.id, app.id), eq(applications.orgId, actor.orgId)));
+  const { recordStageTransition } = await import("./stage-events.server");
+  await recordStageTransition({
+    orgId: actor.orgId,
+    applicationId: app.id,
+    fromStage: from,
+    toStage: input.toStage,
+    actor: actorLabel(actor),
+    cause: "offer",
+  });
+  return { from, to: input.toStage, unchanged: false };
+}
+
+/** Attach this organisation's candidates to one of its requisitions. */
+/**
+ * A CV a portal limited to the role it was for (job-channels.ts, migration
+ * 0045) is never added to another role — by a person or an agent.
+ */
+export function assertReusable(
+  rows: { name: string; poolUse: string; poolUseSource: string | null }[],
+): void {
+  const limited = rows.filter((r) => r.poolUse === "role_only");
+  if (!limited.length) return;
+  const via = limited[0]!.poolUseSource;
+  throw new Error(
+    `${limited.map((r) => r.name).join(", ")} came from ${via ? sourceLabel(via) : "a portal"}, whose terms limit the CV to the role it was for — it cannot be added to another role.`,
+  );
+}
+
+export async function addApplicationsCore(
+  actor: LifecycleActor,
+  input: { requisitionId: string; candidateIds: string[]; source: string },
+): Promise<{ added: number; skipped: { candidateId: string; name: string; reason: string }[] }> {
+  const [requisition] = await db
+    .select({ id: requisitions.id })
+    .from(requisitions)
+    .where(and(eq(requisitions.id, input.requisitionId), eq(requisitions.orgId, actor.orgId)))
+    .limit(1);
+  if (!requisition) throw new Error("Requisition not found");
+  const requestedIds = [...new Set(input.candidateIds)];
+  const owned = await db
+    .select({
+      id: candidates.id,
+      name: candidates.fullName,
+      poolUse: candidates.poolUse,
+      poolUseSource: candidates.poolUseSource,
+    })
+    .from(candidates)
+    .where(and(inArray(candidates.id, requestedIds), eq(candidates.orgId, actor.orgId)));
+  if (owned.length !== requestedIds.length) {
+    throw new Error("Some candidates are not in this organisation's talent pool.");
+  }
+  assertReusable(owned);
+  // Candidates already in this requisition's pipeline are skipped and
+  // reported, never a database error: the unique (requisition, candidate)
+  // index used to fail the whole batch, and the caller then retried it.
+  const existing = await db
+    .select({ candidateId: applications.candidateId })
+    .from(applications)
+    .where(
+      and(
+        eq(applications.requisitionId, input.requisitionId),
+        eq(applications.orgId, actor.orgId),
+        inArray(applications.candidateId, requestedIds),
+      ),
+    );
+  const existingIds = new Set(existing.map((e) => e.candidateId));
+  const fresh = requestedIds.filter((id) => !existingIds.has(id));
+  const names = new Map(owned.map((o) => [o.id, o.name]));
+  const skipped = requestedIds
+    .filter((id) => existingIds.has(id))
+    .map((id) => ({
+      candidateId: id,
+      name: names.get(id) ?? "Candidate",
+      reason: "Already in this requisition's pipeline",
+    }));
+  if (fresh.length) {
+    await db
+      .insert(applications)
+      .values(
+        fresh.map((candidateId) => ({
+          requisitionId: input.requisitionId,
+          candidateId,
+          orgId: actor.orgId,
+          source: input.source,
+        })),
+      )
+      .onConflictDoNothing();
+  }
+  return { added: fresh.length, skipped };
+}
+
+export async function addCandidateNoteCore(
+  actor: LifecycleActor,
+  input: { candidateId: string; body: string; authorName?: string | null },
+): Promise<{ id: string }> {
+  const [c] = await db
+    .select({ id: candidates.id })
+    .from(candidates)
+    .where(and(eq(candidates.id, input.candidateId), eq(candidates.orgId, actor.orgId)))
+    .limit(1);
+  if (!c) throw new Error("Candidate not found");
+  const [row] = await db
+    .insert(candidateNotes)
+    .values({
+      orgId: actor.orgId,
+      candidateId: c.id,
+      authorId: actor.userId,
+      authorName: input.authorName ?? actorLabel(actor),
+      body: input.body,
+    })
+    .returning({ id: candidateNotes.id });
+  return { id: row!.id };
+}
+
+const INTERVIEW_STAGES: Stage[] = ["l1", "l2", "l3"];
+const PRE_INTERVIEW: Stage[] = [
+  "sourced",
+  "applied",
+  "ai_screened",
+  "shortlisted",
+  "on_hold",
+  "reserve",
+];
+
+const CALL_WAITING = {
+  requested: "a screening call is waiting for approval",
+  approved: "a screening call is booked",
+  dialling: "the screening call is being placed right now",
+  in_progress: "the screening call is under way right now",
+  callback: "they asked to be called back",
+  no_answer: "the screening call went unanswered and will be retried",
+  failed: "the screening call did not connect and will be retried",
+} as const;
+type WaitingStatus = keyof typeof CALL_WAITING;
+
+/**
+ * Why the candidate cannot move into an interview yet because their screening
+ * call is still arranged — or null. Says when it is due, in the org's time zone.
+ */
+export async function openScreeningCall(
+  orgId: string,
+  applicationId: string,
+): Promise<string | null> {
+  const [call] = await db
+    .select({
+      status: screeningCalls.status,
+      dueAt: screeningCalls.dueAt,
+      name: candidates.fullName,
+    })
+    .from(screeningCalls)
+    .innerJoin(candidates, eq(candidates.id, screeningCalls.candidateId))
+    .where(
+      and(
+        eq(screeningCalls.orgId, orgId),
+        eq(screeningCalls.applicationId, applicationId),
+        eq(screeningCalls.purpose, "screening"),
+        inArray(screeningCalls.status, Object.keys(CALL_WAITING) as WaitingStatus[]),
+      ),
+    )
+    .orderBy(desc(screeningCalls.createdAt))
+    .limit(1);
+  if (!call) return null;
+  let when = "";
+  if (call.dueAt) {
+    const { getOrgEmailSettings, formatInOrgTZ } = await import("./email-outbox.server");
+    when = ` — due ${formatInOrgTZ(call.dueAt, (await getOrgEmailSettings(orgId)).timezone)}`;
+  }
+  const who = call.name?.split(" ")[0] || "The candidate";
+  return `Not moved: ${who}'s screening is not finished — ${CALL_WAITING[call.status as WaitingStatus]}${when}. Wait for the call, or cancel it on their Phone screening card first.`;
+}
+
+/** Screening evidence for an application: a screening call, a completed assessment or an AI screen. */
+export async function screeningOnRecord(orgId: string, applicationId: string): Promise<boolean> {
+  const [r] = (await db.execute(sql`
+    select (
+      exists (select 1 from screening_runs s where s.application_id = ${applicationId} and s.org_id = ${orgId})
+      or exists (select 1 from ai_interviews i where i.application_id = ${applicationId} and i.org_id = ${orgId})
+      or exists (
+        select 1 from candidate_assessments c join applications a
+          on a.candidate_id = c.candidate_id and a.requisition_id = c.requisition_id
+        where a.id = ${applicationId} and c.org_id = ${orgId} and c.status = 'completed'
+      )
+    ) as ok`)) as unknown as { ok: boolean }[];
+  return Boolean(r?.ok);
+}

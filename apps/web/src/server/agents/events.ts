@@ -1,0 +1,66 @@
+/**
+ * Domain events for the orchestrator (docs/agentic-plan.md §3.1). Written by
+ * the lifecycle cores after a successful change; never blocks the change.
+ */
+import { db } from "../db";
+import { agentEvents } from "@db/schema";
+import { log } from "../log";
+import { currentAgentRun } from "./context";
+
+export const AGENT_EVENT_TYPES = [
+  "requisition.created",
+  "requisition.status_changed",
+  "jd.submitted",
+  "jd.approved",
+  "jd.changes_requested",
+  "application.shortlisted",
+  "application.advanced",
+  "scorecard.submitted",
+  "hiring.selected",
+  "offer.status_changed",
+  "onboarding.document_received",
+  "onboarding.document_rejected",
+  "interview.missed",
+  "interview.panellist_unavailable",
+  "interview.slots_unanswered",
+  "interview.panel_times_rejected",
+  "interview.slots_no_reply",
+  "interview.transcript_ready",
+  "panel.review_due",
+  "assessment.completed",
+  "compensation.submitted",
+  "negotiation.agreed",
+  "negotiation.needs_call",
+  "screening_call.ended",
+] as const;
+
+export type AgentEventType = (typeof AGENT_EVENT_TYPES)[number];
+
+export async function emitAgentEvent(e: {
+  orgId: string;
+  type: AgentEventType;
+  subjectType: "requisition" | "jd" | "application" | "offer";
+  subjectId: string;
+  actorUserId: string | null;
+  payload?: Record<string, unknown>;
+}): Promise<void> {
+  // The run executing on this call chain published the event (a tool calling a
+  // lifecycle core); null when a person or the system did. Never cross orgs.
+  const run = currentAgentRun();
+  const sourceRunId = run && run.orgId === e.orgId ? run.runId : null;
+  try {
+    await db.insert(agentEvents).values({
+      orgId: e.orgId,
+      sourceRunId,
+      type: e.type,
+      subjectType: e.subjectType,
+      subjectId: e.subjectId,
+      actorUserId: e.actorUserId,
+      payload: e.payload ?? {},
+    });
+    const { kickAgents } = await import("./orchestrator.server");
+    kickAgents(e.orgId);
+  } catch (err) {
+    log.error("agent.event.emit_failed", { org_id: e.orgId, type: e.type, error: err as Error });
+  }
+}

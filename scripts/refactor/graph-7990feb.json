@@ -1,0 +1,7770 @@
+{
+ "src/components/AccountMenu.tsx": {
+  "lines": 240,
+  "deps": [
+   "src/lib/auth-client.ts",
+   "src/lib/password-policy.ts",
+   "src/hooks/useMe.ts",
+   "src/hooks/useOrg.ts",
+   "src/hooks/usePlatform.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/PasswordInput.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/dialog.tsx",
+   "src/components/ui/popover.tsx"
+  ],
+  "ext": [
+   "lucide-react",
+   "react",
+   "sonner"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/AgentDetailDrawer.tsx": {
+  "lines": 565,
+  "deps": [
+   "src/components/ui/badge.tsx",
+   "src/components/ui/sheet.tsx",
+   "src/components/ui/tabs.tsx",
+   "src/lib/agents-observability.functions.ts",
+   "src/lib/agents.catalog.ts"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/AgentMarkdown.tsx": {
+  "lines": 192,
+  "deps": [],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/AgentPopup.tsx": {
+  "lines": 308,
+  "deps": [
+   "src/lib/notifications.functions.ts",
+   "src/lib/nudges.functions.ts",
+   "src/lib/compensation.functions.ts",
+   "src/components/CompensationPanel.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/checkbox.tsx",
+   "src/components/ui/dialog.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/textarea.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "@tanstack/react-router",
+   "lucide-react",
+   "react",
+   "sonner"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/AgentUtilisation.tsx": {
+  "lines": 541,
+  "deps": [
+   "src/components/ui/collapsible.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/chart.tsx",
+   "src/lib/agents-observability.functions.ts",
+   "src/lib/agents.catalog.ts"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "@tanstack/react-router",
+   "react",
+   "sonner",
+   "lucide-react",
+   "recharts"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/AgreementFields.tsx": {
+  "lines": 104,
+  "deps": [
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/lib/legal/acceptance.ts",
+   "src/lib/legal/agreements.ts"
+  ],
+  "ext": [
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/AppShell.tsx": {
+  "lines": 259,
+  "deps": [
+   "src/components/ui/button.tsx",
+   "src/components/Copilot.tsx",
+   "src/components/NotificationBell.tsx",
+   "src/components/AgentPopup.tsx",
+   "src/components/AccountMenu.tsx",
+   "src/components/CommandPalette.tsx",
+   "src/hooks/useNavCtx.ts",
+   "src/hooks/useOrg.ts",
+   "src/hooks/useWorkMode.ts",
+   "src/components/nav-config.ts",
+   "src/components/Brand.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "react",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/AssessmentPolicyCard.tsx": {
+  "lines": 93,
+  "deps": [
+   "src/lib/nudges.functions.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/AuthGate.tsx": {
+  "lines": 812,
+  "deps": [
+   "src/lib/auth-client.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/lib/work-email.ts",
+   "src/lib/password-policy.ts",
+   "src/components/PasswordInput.tsx",
+   "src/lib/public-paths.ts",
+   "src/components/Brand.tsx"
+  ],
+  "ext": [
+   "react",
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/Brand.tsx": {
+  "lines": 67,
+  "deps": [
+   "../ATSAgent_refactored/scripts/refactor/UNRESOLVED:@/assets/yavar-logo.png"
+  ],
+  "ext": [
+   "@tanstack/react-router"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/CandidateCollab.tsx": {
+  "lines": 306,
+  "deps": [
+   "src/hooks/useMe.ts",
+   "src/lib/data.ts",
+   "src/lib/collaboration.functions.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/textarea.tsx",
+   "src/components/ui/badge.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/CommandPalette.tsx": {
+  "lines": 177,
+  "deps": [
+   "src/lib/data.ts",
+   "src/components/nav-config.ts",
+   "src/hooks/useNavCtx.ts",
+   "src/components/ats.tsx",
+   "src/components/ui/command.tsx",
+   "src/components/ui/dialog.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "react",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/CompensationPanel.tsx": {
+  "lines": 971,
+  "deps": [
+   "src/lib/compensation.functions.ts",
+   "src/lib/negotiation.functions.ts",
+   "src/lib/money.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/checkbox.tsx",
+   "src/components/ui/dialog.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/textarea.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "lucide-react",
+   "react",
+   "sonner"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/CompetencyRating.tsx": {
+  "lines": 95,
+  "deps": [
+   "src/lib/interview-plan.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/Copilot.tsx": {
+  "lines": 326,
+  "deps": [
+   "src/lib/copilot.functions.ts",
+   "src/lib/user-manual.ts",
+   "src/hooks/useMe.ts",
+   "src/hooks/useNavCtx.ts",
+   "src/hooks/useOrg.ts",
+   "src/components/ui/button.tsx"
+  ],
+  "ext": [
+   "react",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "lucide-react",
+   "@tanstack/react-router",
+   "sonner"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/HiringCost.tsx": {
+  "lines": 154,
+  "deps": [
+   "src/lib/hiring-cost.functions.ts",
+   "src/lib/cost-format.ts"
+  ],
+  "ext": [
+   "@tanstack/react-query"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/HiringManagerPicker.tsx": {
+  "lines": 71,
+  "deps": [
+   "src/components/ui/select.tsx",
+   "src/lib/role-hiring-manager.functions.ts"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/HrPerformance.tsx": {
+  "lines": 377,
+  "deps": [
+   "src/lib/hr-performance.functions.ts",
+   "src/hooks/useRoles.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ats.tsx"
+  ],
+  "ext": [
+   "react",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "sonner"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/InterviewPlanCard.tsx": {
+  "lines": 268,
+  "deps": [
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/lib/interview-plan.functions.ts",
+   "src/lib/interview-plan.ts"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/InterviewerProfileCell.tsx": {
+  "lines": 187,
+  "deps": [
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/checkbox.tsx",
+   "src/components/ui/dialog.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/switch.tsx",
+   "src/lib/interviewers.functions.ts"
+  ],
+  "ext": [
+   "react",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "sonner"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/LeadershipBoard.tsx": {
+  "lines": 182,
+  "deps": [
+   "src/lib/data.ts",
+   "src/lib/lifecycle.ts",
+   "src/components/ats.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "react",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/LegalPage.tsx": {
+  "lines": 72,
+  "deps": [
+   "src/components/Brand.tsx",
+   "src/lib/legal/agreements.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/MarketBenchmark.tsx": {
+  "lines": 438,
+  "deps": [
+   "src/lib/market.functions.ts",
+   "src/lib/comp-knowledge.functions.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ats.tsx"
+  ],
+  "ext": [
+   "react",
+   "@tanstack/react-start",
+   "sonner"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/NotificationBell.tsx": {
+  "lines": 89,
+  "deps": [
+   "src/lib/notifications.functions.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/popover.tsx",
+   "src/components/ui/badge.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "lucide-react",
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/OfferLetterDialog.tsx": {
+  "lines": 554,
+  "deps": [
+   "src/lib/data.ts",
+   "src/lib/offers.functions.ts",
+   "src/lib/offer-letter-pdf.ts",
+   "src/lib/templates.functions.ts",
+   "src/hooks/useRoles.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/dialog.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/select.tsx",
+   "src/components/ui/textarea.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "react",
+   "sonner"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/OnboardingWizard.tsx": {
+  "lines": 475,
+  "deps": [
+   "src/lib/auth-client.ts",
+   "src/lib/org.functions.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/AgreementFields.tsx",
+   "src/lib/legal/acceptance.ts"
+  ],
+  "ext": [
+   "react",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "lucide-react",
+   "sonner"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/OntologyGraph.tsx": {
+  "lines": 330,
+  "deps": [
+   "src/lib/ontology.server.ts"
+  ],
+  "ext": [
+   "react",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/OntologyGraph3D.tsx": {
+  "lines": 183,
+  "deps": [
+   "src/lib/ontology.server.ts"
+  ],
+  "ext": [
+   "react",
+   "three",
+   "three-spritetext",
+   "react-force-graph-3d"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/OrgAgentWorkspace.tsx": {
+  "lines": 994,
+  "deps": [
+   "src/lib/org-desk.functions.ts",
+   "src/lib/org-context.functions.ts",
+   "src/lib/org-profile.functions.ts",
+   "src/lib/agents.functions.ts",
+   "src/lib/org-profile.ts",
+   "src/components/AgentMarkdown.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/textarea.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/OrgGate.tsx": {
+  "lines": 283,
+  "deps": [
+   "src/lib/auth-client.ts",
+   "src/components/ui/button.tsx",
+   "src/hooks/useOrg.ts",
+   "src/hooks/usePlatform.ts",
+   "src/components/OnboardingWizard.tsx",
+   "src/lib/public-paths.ts",
+   "src/components/AgreementFields.tsx",
+   "src/lib/legal/acceptance.ts",
+   "src/lib/org-agreements.functions.ts",
+   "src/lib/legal/agreements.ts"
+  ],
+  "ext": [
+   "react",
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "lucide-react",
+   "sonner"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/OrgProfileNotice.tsx": {
+  "lines": 36,
+  "deps": [
+   "src/lib/org-profile.functions.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/PanelBriefView.tsx": {
+  "lines": 77,
+  "deps": [
+   "src/lib/panel-brief.ts"
+  ],
+  "ext": [
+   "react",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/PanelDirectory.tsx": {
+  "lines": 215,
+  "deps": [
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/lib/panelists.functions.ts"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/PasswordInput.tsx": {
+  "lines": 25,
+  "deps": [
+   "src/components/ui/input.tsx",
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "lucide-react",
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/PhoneScreeningCalls.tsx": {
+  "lines": 310,
+  "deps": [
+   "src/lib/phone-screening.functions.ts",
+   "src/lib/screening-calls.functions.ts",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/PhoneScreeningCard.tsx": {
+  "lines": 335,
+  "deps": [
+   "src/lib/phone-screening.functions.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/switch.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/PreOnboardingDialog.tsx": {
+  "lines": 716,
+  "deps": [
+   "src/lib/onboarding.functions.ts",
+   "src/lib/onboarding.catalogue.ts",
+   "src/components/ats.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/dialog.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/select.tsx",
+   "src/components/ui/textarea.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "react",
+   "sonner"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/RolePeek.tsx": {
+  "lines": 132,
+  "deps": [
+   "src/lib/data.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/dialog.tsx",
+   "src/components/ats.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ScreeningPanel.tsx": {
+  "lines": 500,
+  "deps": [
+   "src/lib/screening.functions.ts",
+   "src/lib/data.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/textarea.tsx",
+   "src/components/ats.tsx",
+   "src/lib/screening-coverage.ts",
+   "drizzle/schema.ts",
+   "src/components/PhoneScreeningCalls.tsx"
+  ],
+  "ext": [
+   "react",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ScreeningRationale.tsx": {
+  "lines": 244,
+  "deps": [
+   "src/components/ats.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/dialog.tsx",
+   "src/lib/screening-rationale.functions.ts"
+  ],
+  "ext": [
+   "react",
+   "@tanstack/react-query",
+   "@tanstack/react-router"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/SilentPanelCard.tsx": {
+  "lines": 130,
+  "deps": [
+   "src/lib/panel-agent.functions.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/checkbox.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/switch.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/StageMover.tsx": {
+  "lines": 214,
+  "deps": [
+   "src/lib/data.ts",
+   "src/lib/lifecycle.ts",
+   "src/lib/lifecycle.functions.ts",
+   "src/lib/step-up-client.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/dialog.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/select.tsx",
+   "src/components/ui/textarea.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/StepUpDialog.tsx": {
+  "lines": 96,
+  "deps": [
+   "src/components/ui/button.tsx",
+   "src/components/ui/dialog.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/lib/step-up-client.ts",
+   "src/lib/step-up.functions.ts"
+  ],
+  "ext": [
+   "react",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/TrainingDataCard.tsx": {
+  "lines": 136,
+  "deps": [
+   "src/lib/training.functions.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ats.tsx": {
+  "lines": 270,
+  "deps": [
+   "src/lib/utils.ts",
+   "src/components/ui/badge.tsx",
+   "src/lib/lifecycle.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/board-connect-panel.tsx": {
+  "lines": 325,
+  "deps": [
+   "src/lib/boards.functions.ts",
+   "src/lib/integrations.functions.ts",
+   "src/components/ui/button.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/board-enterprise-panel.tsx": {
+  "lines": 209,
+  "deps": [
+   "src/lib/boards.functions.ts",
+   "src/components/ui/button.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/job-card.tsx": {
+  "lines": 546,
+  "deps": [
+   "src/components/ui/button.tsx"
+  ],
+  "ext": [
+   "react",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/nav-config.ts": {
+  "lines": 292,
+  "deps": [
+   "src/hooks/useNavCtx.ts"
+  ],
+  "ext": [
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/pickers.tsx": {
+  "lines": 259,
+  "deps": [
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/select.tsx",
+   "src/lib/data.ts"
+  ],
+  "ext": [
+   "react",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/requisition-distribution.tsx": {
+  "lines": 448,
+  "deps": [
+   "src/lib/distribution.functions.ts",
+   "src/lib/job-channels.ts",
+   "src/hooks/useOrg.ts",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/dialog.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/textarea.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/requisition-job-boards.tsx": {
+  "lines": 195,
+  "deps": [
+   "src/lib/boards.functions.ts",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/salary-benchmark.tsx": {
+  "lines": 265,
+  "deps": [
+   "src/lib/data.ts",
+   "src/lib/salary-benchmark.functions.ts",
+   "src/lib/career-ladder.ts",
+   "src/components/ui/alert.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/collapsible.tsx",
+   "src/components/ui/table.tsx"
+  ],
+  "ext": [
+   "react",
+   "@tanstack/react-query",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/accordion.tsx": {
+  "lines": 52,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-accordion",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/alert-dialog.tsx": {
+  "lines": 116,
+  "deps": [
+   "src/lib/utils.ts",
+   "src/components/ui/button.tsx"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-alert-dialog"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/alert.tsx": {
+  "lines": 50,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "class-variance-authority"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/aspect-ratio.tsx": {
+  "lines": 6,
+  "deps": [],
+  "ext": [
+   "@radix-ui/react-aspect-ratio"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/avatar.tsx": {
+  "lines": 48,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-avatar"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/badge.tsx": {
+  "lines": 33,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "class-variance-authority"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/breadcrumb.tsx": {
+  "lines": 102,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-slot",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/button.tsx": {
+  "lines": 50,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-slot",
+   "class-variance-authority"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/calendar.tsx": {
+  "lines": 178,
+  "deps": [
+   "src/lib/utils.ts",
+   "src/components/ui/button.tsx"
+  ],
+  "ext": [
+   "react",
+   "lucide-react",
+   "react-day-picker"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/card.tsx": {
+  "lines": 56,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/carousel.tsx": {
+  "lines": 241,
+  "deps": [
+   "src/lib/utils.ts",
+   "src/components/ui/button.tsx"
+  ],
+  "ext": [
+   "react",
+   "embla-carousel-react",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/chart.tsx": {
+  "lines": 332,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "recharts"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/checkbox.tsx": {
+  "lines": 27,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-checkbox",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/collapsible.tsx": {
+  "lines": 12,
+  "deps": [],
+  "ext": [
+   "@radix-ui/react-collapsible"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/command.tsx": {
+  "lines": 144,
+  "deps": [
+   "src/lib/utils.ts",
+   "src/components/ui/dialog.tsx"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-dialog",
+   "cmdk",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/context-menu.tsx": {
+  "lines": 187,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-context-menu",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/dialog.tsx": {
+  "lines": 105,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-dialog",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/drawer.tsx": {
+  "lines": 99,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "vaul"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/dropdown-menu.tsx": {
+  "lines": 188,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-dropdown-menu",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/form.tsx": {
+  "lines": 172,
+  "deps": [
+   "src/lib/utils.ts",
+   "src/components/ui/label.tsx"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-label",
+   "@radix-ui/react-slot",
+   "react-hook-form"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/hover-card.tsx": {
+  "lines": 28,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-hover-card"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/input-otp.tsx": {
+  "lines": 74,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "input-otp",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/input.tsx": {
+  "lines": 23,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/label.tsx": {
+  "lines": 22,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-label",
+   "class-variance-authority"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/menubar.tsx": {
+  "lines": 229,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-menubar",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/navigation-menu.tsx": {
+  "lines": 121,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-navigation-menu",
+   "class-variance-authority",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/pagination.tsx": {
+  "lines": 99,
+  "deps": [
+   "src/lib/utils.ts",
+   "src/components/ui/button.tsx"
+  ],
+  "ext": [
+   "react",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/popover.tsx": {
+  "lines": 32,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-popover"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/progress.tsx": {
+  "lines": 26,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-progress"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/radio-group.tsx": {
+  "lines": 37,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-radio-group",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/resizable.tsx": {
+  "lines": 38,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "lucide-react",
+   "react-resizable-panels"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/scroll-area.tsx": {
+  "lines": 45,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-scroll-area"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/select.tsx": {
+  "lines": 153,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-select",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/separator.tsx": {
+  "lines": 25,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-separator"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/sheet.tsx": {
+  "lines": 123,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-dialog",
+   "class-variance-authority",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/sidebar.tsx": {
+  "lines": 745,
+  "deps": [
+   "src/hooks/use-mobile.tsx",
+   "src/lib/utils.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/separator.tsx",
+   "src/components/ui/sheet.tsx",
+   "src/components/ui/skeleton.tsx",
+   "src/components/ui/tooltip.tsx"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-slot",
+   "class-variance-authority",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/skeleton.tsx": {
+  "lines": 8,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/slider.tsx": {
+  "lines": 24,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-slider"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/sonner.tsx": {
+  "lines": 24,
+  "deps": [],
+  "ext": [
+   "sonner"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/switch.tsx": {
+  "lines": 28,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-switch"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/table.tsx": {
+  "lines": 95,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/tabs.tsx": {
+  "lines": 54,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-tabs"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/textarea.tsx": {
+  "lines": 22,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/toggle-group.tsx": {
+  "lines": 58,
+  "deps": [
+   "src/lib/utils.ts",
+   "src/components/ui/toggle.tsx"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-toggle-group",
+   "class-variance-authority"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/toggle.tsx": {
+  "lines": 43,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-toggle",
+   "class-variance-authority"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/components/ui/tooltip.tsx": {
+  "lines": 33,
+  "deps": [
+   "src/lib/utils.ts"
+  ],
+  "ext": [
+   "react",
+   "@radix-ui/react-tooltip"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/hooks/use-mobile.tsx": {
+  "lines": 20,
+  "deps": [],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/hooks/useMe.ts": {
+  "lines": 21,
+  "deps": [],
+  "ext": [
+   "@tanstack/react-query"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/hooks/useNavCtx.ts": {
+  "lines": 64,
+  "deps": [
+   "src/hooks/useOrg.ts",
+   "src/hooks/usePlatform.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/hooks/useOrg.ts": {
+  "lines": 38,
+  "deps": [
+   "src/lib/org.functions.ts"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "@tanstack/react-start"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/hooks/usePlatform.ts": {
+  "lines": 26,
+  "deps": [
+   "src/lib/platform.functions.ts"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "@tanstack/react-start"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/hooks/useRoles.ts": {
+  "lines": 35,
+  "deps": [
+   "src/hooks/useOrg.ts",
+   "src/lib/org.functions.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/hooks/useWorkMode.ts": {
+  "lines": 53,
+  "deps": [
+   "src/components/nav-config.ts",
+   "src/hooks/useMe.ts"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/agents-observability.functions.ts": {
+  "lines": 944,
+  "deps": [
+   "src/server/agents/run-messages.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/log.ts",
+   "src/server/agents/index.ts",
+   "src/server/agents/registry.ts",
+   "src/server/agents/manifest.server.ts",
+   "src/server/agents/policy.ts",
+   "src/server/agents/runtime.server.ts",
+   "src/server/agents/health.server.ts",
+   "src/server/audit.ts",
+   "src/server/agents/hitl.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/lib/eval-catalog.ts",
+   "src/server/agents/utilisation.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/agents-telemetry.functions.ts": {
+  "lines": 235,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/agents/otel.server.ts",
+   "src/server/crypto.ts",
+   "src/server/audit.ts",
+   "src/server/agents/alerts.server.ts",
+   "src/server/safe-fetch.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/agents.catalog.ts": {
+  "lines": 229,
+  "deps": [
+   "drizzle/schema.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/agents.functions.ts": {
+  "lines": 938,
+  "deps": [
+   "src/server/agents/run-messages.ts",
+   "src/server/agents/task-liveness.ts",
+   "src/server/db.ts",
+   "src/server/desk/desk.server.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/agents.catalog.ts",
+   "src/server/step-up.ts",
+   "src/server/agents/runtime.server.ts",
+   "src/server/agents/orchestrator.server.ts",
+   "src/server/redteam/check.server.ts",
+   "src/server/agents/autonomy.server.ts",
+   "src/server/agents/index.ts",
+   "src/server/agents/registry.ts",
+   "src/server/audit.ts",
+   "src/server/log.ts",
+   "src/server/agents/policy.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/server/agents/manifest.server.ts",
+   "src/server/agents/replay.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/ai-gateway.server.ts": {
+  "lines": 2409,
+  "deps": [
+   "src/server/db.ts",
+   "src/server/voice/debug.ts",
+   "drizzle/schema.ts",
+   "src/server/ai-usage.ts",
+   "src/server/crypto.ts",
+   "src/server/ai-spend-cap.ts",
+   "src/lib/prompt-echo.ts",
+   "src/server/log.ts",
+   "src/server/training/capture.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod",
+   "node:crypto"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/ai-settings.functions.ts": {
+  "lines": 246,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/server/ai-pricing.ts",
+   "src/server/ai-spend-cap.ts",
+   "src/server/audit.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/apply.functions.ts": {
+  "lines": 264,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/agents/injection.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/lib/job-channels.ts",
+   "src/server/distribution/distribution.server.ts",
+   "src/server/distribution/content.ts",
+   "src/lib/email-outbox.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/assessment-timeline.server.ts": {
+  "lines": 485,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/calendar-availability.server.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/server/desk/desk.server.ts",
+   "src/server/env.ts",
+   "src/server/audit.ts",
+   "src/lib/pipeline.server.ts",
+   "src/server/agents/context.ts",
+   "src/lib/screening.functions.ts",
+   "src/server/log.ts",
+   "src/server/agents/events.ts",
+   "src/server/agents/policy.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/assessment.functions.ts": {
+  "lines": 272,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/assessment.server.ts",
+   "src/lib/assessment-timeline.server.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/server/agents/context.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/assessment.server.ts": {
+  "lines": 110,
+  "deps": [
+   "src/lib/ai-gateway.server.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/auth-client.ts": {
+  "lines": 78,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/auth.middleware.ts": {
+  "lines": 222,
+  "deps": [
+   "src/server/claims.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/identity.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/autoscore.server.ts": {
+  "lines": 320,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/matching.server.ts",
+   "src/lib/logistics.ts",
+   "src/lib/stage-events.server.ts",
+   "src/server/ai-spend-cap.ts",
+   "src/server/agents/context.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/bias.server.ts": {
+  "lines": 80,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/boards.functions.ts": {
+  "lines": 412,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/integration-seeds.server.ts",
+   "src/server/boards/registry.ts",
+   "src/server/boards/publish.server.ts",
+   "src/server/crypto.ts",
+   "src/server/audit.ts",
+   "src/server/env.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod",
+   "node:crypto"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/calendar-availability.server.ts": {
+  "lines": 398,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/integrations.server.ts",
+   "src/lib/meetings.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/candidates.functions.ts": {
+  "lines": 172,
+  "deps": [
+   "src/lib/job-channels.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/erase.server.ts",
+   "src/lib/pipeline.server.ts",
+   "src/server/guards.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/capture.functions.ts": {
+  "lines": 128,
+  "deps": [
+   "src/server/db.ts",
+   "src/server/env.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/capture.server.ts",
+   "src/server/crypto.ts",
+   "src/server/audit.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "node:crypto"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/capture.server.ts": {
+  "lines": 442,
+  "deps": [
+   "src/lib/job-channels.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/lib/intake.server.ts",
+   "src/server/guards.ts",
+   "src/lib/cv-text.server.ts",
+   "src/lib/verification.server.ts",
+   "src/lib/social.server.ts",
+   "src/lib/autoscore.server.ts"
+  ],
+  "ext": [
+   "node:crypto",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/lib/career-ladder.ts": {
+  "lines": 95,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/career.ts": {
+  "lines": 240,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/catalogue-export.ts": {
+  "lines": 192,
+  "deps": [
+   "src/lib/catalogue.functions.ts",
+   "src/lib/product-catalogue.ts"
+  ],
+  "ext": [
+   "jspdf",
+   "jspdf-autotable",
+   "xlsx"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/catalogue.functions.ts": {
+  "lines": 122,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/product-catalogue.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/collaboration.functions.ts": {
+  "lines": 574,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/pipeline.server.ts",
+   "src/server/guards.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/collect.functions.ts": {
+  "lines": 126,
+  "deps": [
+   "src/server/db.ts",
+   "src/server/env.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/linkedin.server.ts",
+   "src/server/crypto.ts",
+   "src/lib/local-inbox.server.ts",
+   "src/lib/autoscore.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/comp-knowledge.functions.ts": {
+  "lines": 101,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/audit.ts",
+   "src/server/guards.ts",
+   "src/lib/comp-knowledge.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/comp-knowledge.server.ts": {
+  "lines": 85,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/compensation.functions.ts": {
+  "lines": 146,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/compensation.server.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/lib/assessment-timeline.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/compensation.server.ts": {
+  "lines": 812,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/server/desk/desk.server.ts",
+   "src/server/env.ts",
+   "src/lib/assessment-timeline.server.ts",
+   "src/server/audit.ts",
+   "src/server/agents/events.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/agents/policy.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/copilot.functions.ts": {
+  "lines": 229,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/user-manual.ts",
+   "src/lib/ai-gateway.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/cost-format.ts": {
+  "lines": 18,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/cv-extract.ts": {
+  "lines": 79,
+  "deps": [
+   "src/lib/document-hidden-text.ts"
+  ],
+  "ext": [
+   "pdfjs-dist",
+   "mammoth",
+   "fflate"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/cv-intake.ts": {
+  "lines": 87,
+  "deps": [
+   "src/lib/cv-extract.ts",
+   "src/lib/shortlist.ts",
+   "src/lib/intake.functions.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/cv-text.server.ts": {
+  "lines": 79,
+  "deps": [
+   "src/server/parser/client.ts",
+   "src/lib/document-hidden-text.ts"
+  ],
+  "ext": [
+   "pdfjs-dist",
+   "fflate"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/data.ts": {
+  "lines": 408,
+  "deps": [
+   "src/lib/queries.functions.ts",
+   "src/lib/screening-queue.functions.ts",
+   "src/lib/master.functions.ts",
+   "src/lib/salary-benchmark.functions.ts",
+   "src/lib/templates.functions.ts",
+   "src/lib/database.types.ts"
+  ],
+  "ext": [
+   "@tanstack/react-query"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/database.types.ts": {
+  "lines": 3262,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/dedupe.functions.ts": {
+  "lines": 170,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/agents/runtime.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/dedupe.ts": {
+  "lines": 226,
+  "deps": [
+   "src/lib/dedupe.functions.ts",
+   "src/lib/data.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/desk-view.ts": {
+  "lines": 65,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/distribution.functions.ts": {
+  "lines": 120,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/server/distribution/distribution.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/document-hidden-text.ts": {
+  "lines": 248,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-outbox.server.ts": {
+  "lines": 300,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/email-templates/send-email.ts",
+   "src/lib/email-settings.shared.ts",
+   "src/lib/local-inbox.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-settings.functions.ts": {
+  "lines": 91,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/email-settings.shared.ts",
+   "src/server/audit.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/email-settings.shared.ts": {
+  "lines": 21,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/application-ack.tsx": {
+  "lines": 42,
+  "deps": [
+   "src/lib/email-templates/registry.ts",
+   "src/lib/email-templates/email-layout.tsx"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/assessment-invite.tsx": {
+  "lines": 60,
+  "deps": [
+   "src/lib/email-templates/registry.ts",
+   "src/lib/email-templates/email-layout.tsx"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/compensation-form.tsx": {
+  "lines": 61,
+  "deps": [
+   "src/lib/email-templates/registry.ts",
+   "src/lib/email-templates/email-layout.tsx"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/document-request.tsx": {
+  "lines": 79,
+  "deps": [
+   "src/lib/email-templates/registry.ts",
+   "src/lib/email-templates/email-layout.tsx"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/email-layout.tsx": {
+  "lines": 82,
+  "deps": [],
+  "ext": [
+   "react",
+   "@react-email/components"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/interview-invite.tsx": {
+  "lines": 105,
+  "deps": [
+   "src/lib/email-templates/registry.ts",
+   "src/lib/email-templates/email-layout.tsx"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/interview-slots.tsx": {
+  "lines": 99,
+  "deps": [
+   "src/lib/email-templates/registry.ts",
+   "src/lib/email-templates/email-layout.tsx"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/interviewer-brief.tsx": {
+  "lines": 141,
+  "deps": [
+   "src/lib/email-templates/registry.ts",
+   "src/lib/email-templates/email-layout.tsx"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/member-invited.tsx": {
+  "lines": 149,
+  "deps": [
+   "src/lib/email-templates/registry.ts"
+  ],
+  "ext": [
+   "react",
+   "@react-email/components"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/member-reminder.tsx": {
+  "lines": 51,
+  "deps": [
+   "src/lib/email-templates/registry.ts",
+   "src/lib/email-templates/email-layout.tsx"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/offer-negotiation.tsx": {
+  "lines": 68,
+  "deps": [
+   "src/lib/email-templates/registry.ts",
+   "src/lib/email-templates/email-layout.tsx"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/offer-released.tsx": {
+  "lines": 66,
+  "deps": [
+   "src/lib/email-templates/registry.ts",
+   "src/lib/email-templates/email-layout.tsx"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/org-approved.tsx": {
+  "lines": 135,
+  "deps": [
+   "src/lib/email-templates/registry.ts"
+  ],
+  "ext": [
+   "react",
+   "@react-email/components"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/org-rejected.tsx": {
+  "lines": 132,
+  "deps": [
+   "src/lib/email-templates/registry.ts"
+  ],
+  "ext": [
+   "react",
+   "@react-email/components"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/panel-summary.tsx": {
+  "lines": 118,
+  "deps": [
+   "src/lib/email-templates/registry.ts",
+   "src/lib/email-templates/email-layout.tsx"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/recovery.tsx": {
+  "lines": 78,
+  "deps": [],
+  "ext": [
+   "react",
+   "@react-email/components"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/registry.ts": {
+  "lines": 81,
+  "deps": [
+   "src/lib/email-templates/signup.tsx",
+   "src/lib/email-templates/recovery.tsx",
+   "src/lib/email-templates/member-invited.tsx",
+   "src/lib/email-templates/org-approved.tsx",
+   "src/lib/email-templates/org-rejected.tsx",
+   "src/lib/email-templates/application-ack.tsx",
+   "src/lib/email-templates/stage-update.tsx",
+   "src/lib/email-templates/interview-invite.tsx",
+   "src/lib/email-templates/offer-released.tsx",
+   "src/lib/email-templates/assessment-invite.tsx",
+   "src/lib/email-templates/member-reminder.tsx",
+   "src/lib/email-templates/document-request.tsx",
+   "src/lib/email-templates/role-invite.tsx",
+   "src/lib/email-templates/interviewer-brief.tsx",
+   "src/lib/email-templates/interview-slots.tsx",
+   "src/lib/email-templates/compensation-form.tsx",
+   "src/lib/email-templates/offer-negotiation.tsx",
+   "src/lib/email-templates/screening-call-booked.tsx",
+   "src/lib/email-templates/panel-summary.tsx"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/role-invite.tsx": {
+  "lines": 63,
+  "deps": [
+   "src/lib/email-templates/registry.ts",
+   "src/lib/email-templates/email-layout.tsx"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/screening-call-booked.tsx": {
+  "lines": 77,
+  "deps": [
+   "src/lib/email-templates/registry.ts",
+   "src/lib/email-templates/email-layout.tsx"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/send-email.ts": {
+  "lines": 86,
+  "deps": [
+   "src/lib/email-templates/registry.ts"
+  ],
+  "ext": [
+   "react",
+   "@react-email/render",
+   "nodemailer"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/signup.tsx": {
+  "lines": 143,
+  "deps": [],
+  "ext": [
+   "react",
+   "@react-email/components"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/email-templates/stage-update.tsx": {
+  "lines": 57,
+  "deps": [
+   "src/lib/email-templates/registry.ts",
+   "src/lib/email-templates/email-layout.tsx"
+  ],
+  "ext": [
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/error-capture.ts": {
+  "lines": 114,
+  "deps": [
+   "src/server/request-context.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/error-page.ts": {
+  "lines": 45,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/errors.ts": {
+  "lines": 15,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/eval-catalog.ts": {
+  "lines": 604,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/expert-brief.ts": {
+  "lines": 51,
+  "deps": [],
+  "ext": [
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/external-links.ts": {
+  "lines": 15,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/hiring-cost.functions.ts": {
+  "lines": 46,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/server/guards.ts",
+   "src/server/agents/hiring-cost.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/hiring-desk.functions.ts": {
+  "lines": 812,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/desk/desk.server.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/server/agents/index.ts",
+   "src/server/guards.ts",
+   "src/server/audit.ts",
+   "src/server/agents/runtime.server.ts",
+   "src/server/agents/orchestrator.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/hr-performance.functions.ts": {
+  "lines": 208,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/lib/hr-performance.server.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/hr-performance.server.ts": {
+  "lines": 264,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/hrms.functions.ts": {
+  "lines": 237,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/integrations.server.ts",
+   "src/lib/hrms.server.ts",
+   "src/lib/hrms.ts",
+   "src/server/audit.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/hrms.server.ts": {
+  "lines": 532,
+  "deps": [
+   "src/server/db.ts",
+   "src/server/env.ts",
+   "src/server/audit.ts",
+   "src/server/safe-fetch.ts",
+   "drizzle/schema.ts",
+   "src/lib/hrms.ts",
+   "src/lib/integrations.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/hrms.ts": {
+  "lines": 81,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/ics.ts": {
+  "lines": 46,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/intake.functions.ts": {
+  "lines": 76,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/lib/intake.server.ts",
+   "src/server/agents/context.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/intake.server.ts": {
+  "lines": 431,
+  "deps": [
+   "src/lib/job-channels.ts",
+   "src/server/db.ts",
+   "src/server/agents/injection.ts",
+   "src/server/storage.ts",
+   "drizzle/schema.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/server/agents/context.ts",
+   "src/server/guards.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "crypto",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/integrations-oauth.functions.ts": {
+  "lines": 70,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/lib/meetings-oauth.server.ts",
+   "src/lib/oauth-state.ts",
+   "src/server/panel/transcripts.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/integrations.functions.ts": {
+  "lines": 341,
+  "deps": [
+   "src/lib/job-channels.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/integrations.server.ts",
+   "src/server/audit.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/integrations.server.ts": {
+  "lines": 284,
+  "deps": [
+   "src/server/db.ts",
+   "src/server/env.ts",
+   "drizzle/schema.ts",
+   "src/server/crypto.ts",
+   "src/lib/meetings.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/interview-plan.functions.ts": {
+  "lines": 61,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/guards.ts",
+   "src/lib/interview-plan.server.ts",
+   "src/server/audit.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/interview-plan.server.ts": {
+  "lines": 196,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/interview-plan.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/interview-plan.ts": {
+  "lines": 178,
+  "deps": [],
+  "ext": [
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/interview-with.ts": {
+  "lines": 10,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/interviewer-brief.server.ts": {
+  "lines": 178,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/env.ts",
+   "src/lib/ics.ts",
+   "src/lib/panelist-links.server.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/lib/interview-plan.server.ts",
+   "src/lib/interview-plan.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/interviewers.functions.ts": {
+  "lines": 43,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/lib/interviewers.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/interviewers.server.ts": {
+  "lines": 115,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/audit.ts",
+   "src/server/db.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/interviews.functions.ts": {
+  "lines": 1255,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/lifecycle.ts",
+   "src/lib/ics.ts",
+   "src/lib/meeting-ref.ts",
+   "src/lib/interview-plan.server.ts",
+   "src/lib/interview-plan.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/lib/local-time.ts",
+   "src/server/training/capture.server.ts",
+   "src/server/panel/review.server.ts",
+   "src/server/agents/events.ts",
+   "src/lib/stage-events.server.ts",
+   "src/lib/panel-brief.server.ts",
+   "src/server/audit.ts",
+   "src/server/desk/desk.server.ts",
+   "src/server/panel/transcripts.server.ts",
+   "src/lib/interview-with.ts",
+   "src/lib/interviewer-brief.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/jd-dedupe.ts": {
+  "lines": 139,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/job-channels.ts": {
+  "lines": 416,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/legal/acceptance.ts": {
+  "lines": 53,
+  "deps": [
+   "src/lib/legal/agreements.ts"
+  ],
+  "ext": [
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/legal/agreements.ts": {
+  "lines": 98,
+  "deps": [
+   "src/components/LegalPage.tsx",
+   "src/lib/legal/dpa.ts",
+   "src/lib/legal/privacy.ts",
+   "src/lib/legal/terms.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/legal/dpa.ts": {
+  "lines": 83,
+  "deps": [
+   "src/components/LegalPage.tsx"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/legal/privacy.ts": {
+  "lines": 75,
+  "deps": [
+   "src/components/LegalPage.tsx"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/legal/terms.ts": {
+  "lines": 66,
+  "deps": [
+   "src/components/LegalPage.tsx"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/lifecycle.functions.ts": {
+  "lines": 138,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/lifecycle.ts",
+   "src/lib/pipeline.server.ts",
+   "src/server/step-up.ts",
+   "src/lib/stage-events.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/lifecycle.ts": {
+  "lines": 258,
+  "deps": [
+   "src/lib/database.types.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/linkedin.functions.ts": {
+  "lines": 140,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/linkedin.server.ts",
+   "src/server/audit.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/linkedin.server.ts": {
+  "lines": 357,
+  "deps": [
+   "src/server/db.ts",
+   "src/server/env.ts",
+   "drizzle/schema.ts",
+   "src/lib/oauth-state.ts",
+   "src/server/crypto.ts"
+  ],
+  "ext": [
+   "crypto",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/local-inbox.functions.ts": {
+  "lines": 146,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/local-inbox.server.ts",
+   "src/lib/work-email.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/local-inbox.server.ts": {
+  "lines": 449,
+  "deps": [
+   "src/lib/job-channels.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/intake.server.ts",
+   "src/lib/cv-text.server.ts",
+   "src/lib/onboarding.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/local-time.ts": {
+  "lines": 24,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/logistics.ts": {
+  "lines": 140,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/manual-export.ts": {
+  "lines": 93,
+  "deps": [
+   "src/lib/user-manual.ts"
+  ],
+  "ext": [
+   "jspdf"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/market.functions.ts": {
+  "lines": 26,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/lib/market.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/market.server.ts": {
+  "lines": 452,
+  "deps": [
+   "src/lib/ai-gateway.server.ts",
+   "src/server/safe-fetch.ts",
+   "src/lib/comp-knowledge.server.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/master.functions.ts": {
+  "lines": 58,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/matching.functions.ts": {
+  "lines": 680,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/lib/templates.server.ts",
+   "src/lib/matching.server.ts",
+   "src/lib/logistics.ts",
+   "src/lib/social.server.ts",
+   "src/lib/org-context.server.ts",
+   "src/lib/stage-events.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/matching.server.ts": {
+  "lines": 604,
+  "deps": [
+   "src/server/agents/injection.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/lib/career.ts",
+   "src/lib/logistics.ts",
+   "src/lib/social.server.ts",
+   "src/lib/org-context.server.ts"
+  ],
+  "ext": [
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/meeting-ref.ts": {
+  "lines": 48,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/meeting-transcripts.server.ts": {
+  "lines": 354,
+  "deps": [
+   "src/server/safe-fetch.ts",
+   "src/lib/meetings.server.ts",
+   "src/lib/meeting-ref.ts",
+   "src/lib/vtt.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/meetings-oauth.server.ts": {
+  "lines": 388,
+  "deps": [
+   "src/server/env.ts",
+   "src/lib/oauth-state.ts",
+   "src/lib/integrations.server.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/meetings.functions.ts": {
+  "lines": 96,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/integrations.server.ts",
+   "src/lib/meetings.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/meetings.server.ts": {
+  "lines": 405,
+  "deps": [
+   "src/server/env.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/money.ts": {
+  "lines": 14,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/negotiation.functions.ts": {
+  "lines": 164,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/lib/negotiation.server.ts",
+   "src/lib/compensation.server.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/voice/negotiation-request.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "zod",
+   "drizzle-orm"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/negotiation.server.ts": {
+  "lines": 581,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/money.ts",
+   "src/server/desk/desk.server.ts",
+   "src/server/audit.ts",
+   "src/server/agents/events.ts",
+   "src/lib/compensation.server.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/lib/assessment-timeline.server.ts",
+   "src/server/env.ts",
+   "src/lib/auth.middleware.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/notifications.functions.ts": {
+  "lines": 764,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/server/db.ts",
+   "src/server/agents/task-liveness.ts",
+   "drizzle/schema.ts",
+   "src/server/agents/health.server.ts",
+   "src/lib/assessment-timeline.server.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/server/agents/policy.ts",
+   "src/lib/compensation.server.ts",
+   "src/lib/negotiation.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/nudges.functions.ts": {
+  "lines": 221,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/assessment-timeline.server.ts",
+   "src/lib/pipeline.server.ts",
+   "src/server/audit.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/oauth-state.ts": {
+  "lines": 91,
+  "deps": [
+   "src/server/env.ts"
+  ],
+  "ext": [
+   "node:crypto"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/lib/offer-letter-pdf.ts": {
+  "lines": 217,
+  "deps": [
+   "src/lib/offers.functions.ts"
+  ],
+  "ext": [
+   "jspdf"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/offer-response.functions.ts": {
+  "lines": 40,
+  "deps": [
+   "src/lib/offer-response.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/offer-response.server.ts": {
+  "lines": 236,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/audit.ts",
+   "src/lib/stage-events.server.ts",
+   "src/server/training/capture.server.ts",
+   "src/server/agents/events.ts",
+   "src/server/desk/desk.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/offers.functions.ts": {
+  "lines": 973,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/lib/templates.server.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/lib/offer-letter-pdf.ts",
+   "src/server/env.ts",
+   "src/server/log.ts",
+   "src/lib/compensation.server.ts",
+   "src/lib/onboarding.server.ts",
+   "src/server/agents/events.ts",
+   "src/server/step-up.ts",
+   "src/server/audit.ts",
+   "src/server/training/capture.server.ts",
+   "src/server/desk/desk.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/onboarding.catalogue.ts": {
+  "lines": 63,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/onboarding.functions.ts": {
+  "lines": 503,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/audit.ts",
+   "src/lib/onboarding.server.ts",
+   "src/server/training/capture.server.ts",
+   "src/server/agents/events.ts",
+   "src/server/storage.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/onboarding.server.ts": {
+  "lines": 1036,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/server/storage.ts",
+   "src/lib/cv-text.server.ts",
+   "src/server/agents/context.ts",
+   "src/server/agents/events.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod",
+   "pdfjs-dist",
+   "fflate"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/ontology.functions.ts": {
+  "lines": 419,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/ontology.server.ts",
+   "src/lib/ai-gateway.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/ontology.server.ts": {
+  "lines": 533,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/org-agreements.functions.ts": {
+  "lines": 55,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/lib/legal/acceptance.ts",
+   "src/lib/legal/agreements.ts",
+   "src/server/org-agreements.server.ts",
+   "src/server/client-ip.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/org-context.functions.ts": {
+  "lines": 206,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/org-context.server.ts",
+   "src/server/agents/policy.ts",
+   "src/server/agents/runtime.server.ts",
+   "src/server/agents/orchestrator.server.ts",
+   "src/lib/org-profile.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/org-context.server.ts": {
+  "lines": 1389,
+  "deps": [
+   "src/server/db.ts",
+   "src/server/audit.ts",
+   "drizzle/schema.ts",
+   "src/server/agents/injection.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/safe-fetch.ts",
+   "src/server/storage.ts",
+   "src/lib/org-profile.ts",
+   "src/lib/org-profile.server.ts",
+   "src/lib/cv-text.server.ts"
+  ],
+  "ext": [
+   "node:crypto",
+   "drizzle-orm",
+   "playwright",
+   "pdfjs-dist",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/lib/org-desk.functions.ts": {
+  "lines": 393,
+  "deps": [
+   "src/lib/org-profile.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/org-profile.server.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/server/agents/index.ts",
+   "src/server/desk/org-desk.server.ts",
+   "src/server/desk/desk.server.ts",
+   "src/server/agents/runtime.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/org-profile.functions.ts": {
+  "lines": 218,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/org-profile.ts",
+   "src/lib/org-profile.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/org-profile.server.ts": {
+  "lines": 689,
+  "deps": [
+   "src/server/db.ts",
+   "src/server/audit.ts",
+   "drizzle/schema.ts",
+   "src/server/agents/injection.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/org-profile.ts",
+   "src/server/agents/orchestrator.server.ts",
+   "src/server/agents/runtime.server.ts",
+   "src/server/storage.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/org-profile.ts": {
+  "lines": 414,
+  "deps": [
+   "drizzle/schema.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/org.functions.ts": {
+  "lines": 812,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/server/db.ts",
+   "src/server/claims.ts",
+   "drizzle/schema.ts",
+   "src/lib/work-email.ts",
+   "src/lib/legal/acceptance.ts",
+   "src/lib/email-templates/send-email.ts",
+   "src/server/audit.ts",
+   "src/server/org-agreements.server.ts",
+   "src/server/org-setup.server.ts",
+   "src/server/integration-seeds.server.ts",
+   "src/server/client-ip.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/panel-agent.functions.ts": {
+  "lines": 95,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/server/panel/transcripts.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/panel-assessment.ts": {
+  "lines": 269,
+  "deps": [
+   "src/lib/interview-plan.ts",
+   "src/lib/vtt.ts"
+  ],
+  "ext": [
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/panel-brief.server.ts": {
+  "lines": 133,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/db.ts",
+   "src/lib/panel-brief.ts",
+   "src/lib/interview-plan.server.ts",
+   "src/lib/interview-plan.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/panel-brief.ts": {
+  "lines": 27,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/panel-reconcile.ts": {
+  "lines": 44,
+  "deps": [
+   "src/lib/interview-plan.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/panelist-links.functions.ts": {
+  "lines": 45,
+  "deps": [
+   "src/lib/panelist-links.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/panelist-links.server.ts": {
+  "lines": 270,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/db.ts",
+   "src/server/env.ts",
+   "src/lib/panel-brief.ts",
+   "src/lib/interview-plan.server.ts",
+   "src/lib/interview-plan.ts",
+   "src/lib/panel-brief.server.ts",
+   "src/lib/interviews.functions.ts",
+   "src/server/audit.ts"
+  ],
+  "ext": [
+   "node:crypto",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/lib/panelists.functions.ts": {
+  "lines": 56,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/lib/panelists.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/panelists.server.ts": {
+  "lines": 230,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/db.ts",
+   "src/lib/interviewers.server.ts",
+   "src/lib/panels.server.ts",
+   "src/server/audit.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/panels.functions.ts": {
+  "lines": 59,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/db.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/guards.ts",
+   "src/lib/panels.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/panels.server.ts": {
+  "lines": 477,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/db.ts",
+   "src/lib/interview-plan.server.ts",
+   "src/lib/interview-plan.ts",
+   "src/server/audit.ts",
+   "src/lib/calendar-availability.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/password-policy.ts": {
+  "lines": 19,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/phone-screening.functions.ts": {
+  "lines": 115,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/server/voice/settings.server.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/server/audit.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/pipeline.server.ts": {
+  "lines": 219,
+  "deps": [
+   "src/lib/job-channels.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/lifecycle.ts",
+   "src/lib/requisitions.server.ts",
+   "src/lib/stage-events.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/platform-agents.functions.ts": {
+  "lines": 23,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/server/agents/platform.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/platform-ai-usage.functions.ts": {
+  "lines": 249,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/platform-health.functions.ts": {
+  "lines": 18,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/server/slo.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/platform.functions.ts": {
+  "lines": 543,
+  "deps": [
+   "src/server/db.ts",
+   "src/server/audit.ts",
+   "src/server/storage.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/org-agreements.server.ts",
+   "src/lib/email-templates/send-email.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/pool-share.ts": {
+  "lines": 15,
+  "deps": [
+   "drizzle/schema.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/product-catalogue.ts": {
+  "lines": 855,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/prompt-echo.ts": {
+  "lines": 82,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/public-paths.ts": {
+  "lines": 20,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/queries.functions.ts": {
+  "lines": 608,
+  "deps": [
+   "src/lib/pool-share.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/requisitions.functions.ts": {
+  "lines": 598,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/requisitions.server.ts",
+   "src/server/audit.ts",
+   "src/server/agents/runtime.server.ts",
+   "src/lib/pipeline.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/requisitions.server.ts": {
+  "lines": 697,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/agents/events.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/org-profile.ts",
+   "src/lib/org-profile.server.ts",
+   "src/server/boards/publish.server.ts",
+   "src/server/audit.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/resume-download.ts": {
+  "lines": 23,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/resume.functions.ts": {
+  "lines": 63,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/storage.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/roi.functions.ts": {
+  "lines": 354,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/ontology.server.ts",
+   "src/lib/roi.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/roi.server.ts": {
+  "lines": 688,
+  "deps": [
+   "src/lib/ontology.server.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/role-hiring-manager.functions.ts": {
+  "lines": 44,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/server/guards.ts",
+   "src/lib/role-hiring-manager.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/role-hiring-manager.server.ts": {
+  "lines": 75,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/db.ts",
+   "src/server/audit.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/role-profile.functions.ts": {
+  "lines": 25,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/lib/role-profile.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/role-profile.server.ts": {
+  "lines": 68,
+  "deps": [
+   "src/lib/ai-gateway.server.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/salary-benchmark.functions.ts": {
+  "lines": 150,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/lib/salary-benchmark.server.ts",
+   "src/lib/career-ladder.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/salary-benchmark.server.ts": {
+  "lines": 247,
+  "deps": [
+   "src/lib/career-ladder.ts",
+   "src/lib/ai-gateway.server.ts"
+  ],
+  "ext": [
+   "node:crypto",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/lib/screening-calls.functions.ts": {
+  "lines": 206,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/db.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/voice/request.server.ts",
+   "src/server/audit.ts",
+   "src/server/voice/opt-out.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/screening-coverage.ts": {
+  "lines": 33,
+  "deps": [
+   "drizzle/schema.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/screening-prep.server.ts": {
+  "lines": 235,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/matching.server.ts",
+   "src/lib/screening.functions.ts",
+   "src/server/agents/context.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/screening-queue.functions.ts": {
+  "lines": 379,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/screening-rationale.functions.ts": {
+  "lines": 145,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/db.ts",
+   "src/lib/screening-coverage.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/screening.functions.ts": {
+  "lines": 509,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/storage.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/screening.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/screening.server.ts": {
+  "lines": 438,
+  "deps": [
+   "src/lib/ai-gateway.server.ts",
+   "src/lib/expert-brief.ts",
+   "src/lib/org-context.server.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/shortlist.ts": {
+  "lines": 84,
+  "deps": [
+   "src/lib/data.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/slot-offers.functions.ts": {
+  "lines": 36,
+  "deps": [
+   "src/lib/slot-offers.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/slot-offers.server.ts": {
+  "lines": 689,
+  "deps": [
+   "src/lib/interview-with.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/env.ts",
+   "src/server/audit.ts",
+   "src/lib/panelists.server.ts",
+   "src/lib/pipeline.server.ts",
+   "src/lib/calendar-availability.server.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/lib/meetings.functions.ts",
+   "src/server/log.ts",
+   "src/lib/interviews.functions.ts",
+   "src/server/agents/events.ts",
+   "src/server/desk/desk.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/social.server.ts": {
+  "lines": 335,
+  "deps": [
+   "src/lib/ai-gateway.server.ts",
+   "src/server/safe-fetch.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/stage-events.server.ts": {
+  "lines": 316,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/lib/lifecycle.ts",
+   "src/server/training/capture.server.ts",
+   "src/server/agents/runtime.server.ts",
+   "src/server/agents/events.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/step-up-client.ts": {
+  "lines": 49,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/step-up.functions.ts": {
+  "lines": 25,
+  "deps": [
+   "src/lib/auth.middleware.ts",
+   "src/server/step-up.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/templates.functions.ts": {
+  "lines": 543,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/storage.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/lib/templates.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/templates.server.ts": {
+  "lines": 443,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/training.functions.ts": {
+  "lines": 249,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/audit.ts",
+   "src/server/training/capture.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start",
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/user-manual.ts": {
+  "lines": 434,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/utils.ts": {
+  "lines": 7,
+  "deps": [],
+  "ext": [
+   "clsx",
+   "tailwind-merge"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/verification.functions.ts": {
+  "lines": 138,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/verification.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-start",
+   "zod"
+  ],
+  "serverFn": true,
+  "nodeImports": false
+ },
+ "src/lib/verification.server.ts": {
+  "lines": 244,
+  "deps": [
+   "src/lib/ai-gateway.server.ts",
+   "src/lib/matching.server.ts",
+   "src/server/safe-fetch.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/vtt.ts": {
+  "lines": 64,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/work-email.ts": {
+  "lines": 164,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/lib/work-mode.ts": {
+  "lines": 23,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routeTree.gen.ts": {
+  "lines": 1554,
+  "deps": [
+   "src/routes/__root.tsx",
+   "src/routes/index.tsx",
+   "src/routes/brain.tsx",
+   "src/routes/catalogue.tsx",
+   "src/routes/collaboration.tsx",
+   "src/routes/cookies.tsx",
+   "src/routes/desk.tsx",
+   "src/routes/distribution.tsx",
+   "src/routes/dpa.tsx",
+   "src/routes/help.tsx",
+   "src/routes/hiring-cost.tsx",
+   "src/routes/ijp.tsx",
+   "src/routes/inbox.tsx",
+   "src/routes/integrations.tsx",
+   "src/routes/masters.tsx",
+   "src/routes/matching.tsx",
+   "src/routes/offers.tsx",
+   "src/routes/org-profile.tsx",
+   "src/routes/organisation.tsx",
+   "src/routes/platform.tsx",
+   "src/routes/platform-agents.tsx",
+   "src/routes/platform-ai-usage.tsx",
+   "src/routes/platform-health.tsx",
+   "src/routes/privacy.tsx",
+   "src/routes/reports.tsx",
+   "src/routes/roi.tsx",
+   "src/routes/screening.tsx",
+   "src/routes/team.tsx",
+   "src/routes/templates.tsx",
+   "src/routes/terms.tsx",
+   "src/routes/agents.index.tsx",
+   "src/routes/agents.observability.tsx",
+   "src/routes/agents.register.tsx",
+   "src/routes/agents.settings.tsx",
+   "src/routes/apply.$id.tsx",
+   "src/routes/assess.$token.tsx",
+   "src/routes/auth.reset.tsx",
+   "src/routes/candidates.index.tsx",
+   "src/routes/candidates.$id.tsx",
+   "src/routes/interviews.index.tsx",
+   "src/routes/interviews.mine.tsx",
+   "src/routes/negotiate.$token.tsx",
+   "src/routes/offer.$token.tsx",
+   "src/routes/pay.$token.tsx",
+   "src/routes/requisitions.index.tsx",
+   "src/routes/requisitions.$id.tsx",
+   "src/routes/schedule.$token.tsx",
+   "src/routes/scorecard.$token.tsx",
+   "src/routes/api/auth/change-password.ts",
+   "src/routes/api/auth/confirm.ts",
+   "src/routes/api/auth/login.ts",
+   "src/routes/api/auth/me.ts",
+   "src/routes/api/auth/register.ts",
+   "src/routes/api/auth/request-reset.ts",
+   "src/routes/api/auth/reset.ts",
+   "src/routes/api/auth/session.ts",
+   "src/routes/api/public/agent-tick.ts",
+   "src/routes/api/public/board-sync.ts",
+   "src/routes/api/public/capture.ts",
+   "src/routes/api/public/distribution.ts",
+   "src/routes/api/public/inbound-email.ts",
+   "src/routes/api/public/inbox-sync.ts",
+   "src/routes/api/public/process-email-outbox.ts",
+   "src/routes/api/public/screening-prep.ts",
+   "src/routes/api/public/sync-candidates.ts",
+   "src/routes/api/public/sync-hrms.ts",
+   "src/routes/api/public/linkedin/callback.ts",
+   "src/routes/api/public/boards/$provider.$token.ts",
+   "src/routes/api/public/feeds/$token.$format.ts",
+   "src/routes/api/public/integrations/google/callback.ts",
+   "src/routes/api/public/integrations/microsoft/callback.ts",
+   "src/routes/api/public/integrations/zoom/callback.ts",
+   "src/router.tsx",
+   "src/start.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/router.tsx": {
+  "lines": 17,
+  "deps": [
+   "src/routeTree.gen.ts"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "@tanstack/react-router"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/__root.tsx": {
+  "lines": 181,
+  "deps": [
+   "../ATSAgent_refactored/scripts/refactor/UNRESOLVED:../styles.css?url",
+   "src/components/Brand.tsx",
+   "src/components/AuthGate.tsx",
+   "src/components/AppShell.tsx",
+   "src/components/OrgGate.tsx",
+   "src/components/ui/sonner.tsx",
+   "src/components/StepUpDialog.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-query",
+   "@tanstack/react-router",
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/agents.index.tsx": {
+  "lines": 720,
+  "deps": [
+   "src/components/ats.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/tabs.tsx",
+   "src/components/ui/textarea.tsx",
+   "src/lib/agents.catalog.ts",
+   "src/lib/agents.functions.ts",
+   "src/lib/step-up-client.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/agents.observability.tsx": {
+  "lines": 1157,
+  "deps": [
+   "src/components/ats.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/chart.tsx",
+   "src/lib/agents-observability.functions.ts",
+   "src/lib/agents.catalog.ts",
+   "src/components/AgentDetailDrawer.tsx",
+   "src/components/AgentUtilisation.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "react",
+   "sonner",
+   "lucide-react",
+   "recharts"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/agents.register.tsx": {
+  "lines": 367,
+  "deps": [
+   "src/lib/eval-catalog.ts",
+   "src/components/ats.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/lib/agents.catalog.ts",
+   "src/lib/agents.functions.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "react",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/agents.settings.tsx": {
+  "lines": 875,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/components/ats.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/checkbox.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/select.tsx",
+   "src/components/ui/switch.tsx",
+   "src/lib/agents.catalog.ts",
+   "src/lib/agents.functions.ts",
+   "src/lib/agents-telemetry.functions.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/auth/change-password.ts": {
+  "lines": 93,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/password.ts",
+   "src/server/identity.ts",
+   "src/lib/password-policy.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "drizzle-orm",
+   "node:crypto"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/auth/confirm.ts": {
+  "lines": 34,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/action-token.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/auth/login.ts": {
+  "lines": 82,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/password.ts",
+   "src/server/identity.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/auth/me.ts": {
+  "lines": 30,
+  "deps": [
+   "src/server/identity.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/auth/register.ts": {
+  "lines": 93,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/password.ts",
+   "src/server/action-token.ts",
+   "src/lib/email-templates/send-email.ts",
+   "src/lib/work-email.ts",
+   "src/lib/password-policy.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/auth/request-reset.ts": {
+  "lines": 49,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/action-token.ts",
+   "src/lib/email-templates/send-email.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/auth/reset.ts": {
+  "lines": 61,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/action-token.ts",
+   "src/server/password.ts",
+   "src/lib/password-policy.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/auth/session.ts": {
+  "lines": 26,
+  "deps": [
+   "src/server/identity.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/public/agent-tick.ts": {
+  "lines": 41,
+  "deps": [
+   "src/server/cron-auth.ts",
+   "src/server/agents/index.ts",
+   "src/server/agents/runtime.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/public/board-sync.ts": {
+  "lines": 44,
+  "deps": [
+   "src/server/cron-auth.ts",
+   "src/server/boards/poll.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/public/boards/$provider.$token.ts": {
+  "lines": 47,
+  "deps": [
+   "src/server/boards/ingest.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/public/capture.ts": {
+  "lines": 109,
+  "deps": [
+   "src/lib/capture.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/public/distribution.ts": {
+  "lines": 104,
+  "deps": [
+   "src/lib/capture.server.ts",
+   "src/server/distribution/distribution.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/public/feeds/$token.$format.ts": {
+  "lines": 33,
+  "deps": [
+   "src/server/distribution/distribution.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/public/inbound-email.ts": {
+  "lines": 87,
+  "deps": [
+   "src/lib/local-inbox.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "node:crypto",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/routes/api/public/inbox-sync.ts": {
+  "lines": 43,
+  "deps": [
+   "src/server/cron-auth.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/autoscore.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/public/integrations/google/callback.ts": {
+  "lines": 17,
+  "deps": [
+   "src/lib/meetings-oauth.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/public/integrations/microsoft/callback.ts": {
+  "lines": 17,
+  "deps": [
+   "src/lib/meetings-oauth.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/public/integrations/zoom/callback.ts": {
+  "lines": 17,
+  "deps": [
+   "src/lib/meetings-oauth.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/public/linkedin/callback.ts": {
+  "lines": 95,
+  "deps": [
+   "src/lib/linkedin.server.ts",
+   "src/server/identity.ts",
+   "src/server/crypto.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/public/process-email-outbox.ts": {
+  "lines": 39,
+  "deps": [
+   "src/server/cron-auth.ts",
+   "src/lib/email-outbox.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/public/screening-prep.ts": {
+  "lines": 39,
+  "deps": [
+   "src/server/cron-auth.ts",
+   "src/lib/screening-prep.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/public/sync-candidates.ts": {
+  "lines": 159,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/cron-auth.ts",
+   "src/lib/verification.server.ts",
+   "src/lib/bias.server.ts",
+   "src/server/audit.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "@tanstack/react-router",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/api/public/sync-hrms.ts": {
+  "lines": 65,
+  "deps": [
+   "src/server/cron-auth.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/hrms.server.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/apply.$id.tsx": {
+  "lines": 276,
+  "deps": [
+   "src/components/Brand.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/lib/apply.functions.ts",
+   "src/lib/cv-extract.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-start",
+   "lucide-react",
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/assess.$token.tsx": {
+  "lines": 151,
+  "deps": [
+   "src/lib/assessment.functions.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/textarea.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/auth.reset.tsx": {
+  "lines": 109,
+  "deps": [
+   "src/lib/auth-client.ts",
+   "src/lib/password-policy.ts",
+   "src/components/ui/button.tsx",
+   "src/components/PasswordInput.tsx",
+   "src/components/ui/label.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "react",
+   "sonner"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/brain.tsx": {
+  "lines": 458,
+  "deps": [
+   "src/lib/ontology.functions.ts",
+   "src/hooks/usePlatform.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/OntologyGraph.tsx",
+   "src/components/OntologyGraph3D.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/candidates.$id.tsx": {
+  "lines": 681,
+  "deps": [
+   "src/components/ScreeningPanel.tsx",
+   "src/components/CandidateCollab.tsx",
+   "src/components/CompensationPanel.tsx",
+   "src/lib/data.ts",
+   "src/lib/matching.functions.ts",
+   "src/lib/interviews.functions.ts",
+   "src/lib/verification.functions.ts",
+   "src/lib/assessment.functions.ts",
+   "src/lib/resume.functions.ts",
+   "src/lib/resume-download.ts",
+   "src/lib/external-links.ts",
+   "src/lib/lifecycle.ts",
+   "src/components/HiringCost.tsx",
+   "src/components/StageMover.tsx",
+   "src/components/ats.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/label.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/candidates.index.tsx": {
+  "lines": 1700,
+  "deps": [
+   "src/lib/data.ts",
+   "src/lib/matching.functions.ts",
+   "src/lib/verification.functions.ts",
+   "src/lib/resume.functions.ts",
+   "src/lib/resume-download.ts",
+   "src/lib/candidates.functions.ts",
+   "src/lib/job-channels.ts",
+   "src/lib/cv-intake.ts",
+   "src/lib/external-links.ts",
+   "src/lib/lifecycle.ts",
+   "src/lib/career.ts",
+   "src/lib/dedupe.ts",
+   "src/components/ats.tsx",
+   "src/components/StageMover.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/checkbox.tsx",
+   "src/hooks/useMe.ts",
+   "src/lib/collaboration.functions.ts",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/textarea.tsx",
+   "src/components/ui/dialog.tsx",
+   "src/components/ui/select.tsx",
+   "src/components/ui/popover.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/catalogue.tsx": {
+  "lines": 309,
+  "deps": [
+   "src/lib/catalogue.functions.ts",
+   "src/lib/product-catalogue.ts",
+   "src/lib/catalogue-export.ts",
+   "src/hooks/usePlatform.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/select.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/collaboration.tsx": {
+  "lines": 540,
+  "deps": [
+   "src/hooks/useMe.ts",
+   "src/hooks/useOrg.ts",
+   "src/lib/data.ts",
+   "src/lib/collaboration.functions.ts",
+   "src/components/ats.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/textarea.tsx",
+   "src/components/ui/badge.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/cookies.tsx": {
+  "lines": 84,
+  "deps": [
+   "src/components/LegalPage.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/desk.tsx": {
+  "lines": 3105,
+  "deps": [
+   "src/lib/desk-view.ts",
+   "src/components/AgentMarkdown.tsx",
+   "src/components/ScreeningRationale.tsx",
+   "src/components/ats.tsx",
+   "src/components/OrgProfileNotice.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/checkbox.tsx",
+   "src/components/ui/textarea.tsx",
+   "src/components/ui/dialog.tsx",
+   "src/components/HiringManagerPicker.tsx",
+   "src/components/InterviewPlanCard.tsx",
+   "src/lib/panels.functions.ts",
+   "src/lib/agents.catalog.ts",
+   "src/lib/agents.functions.ts",
+   "src/lib/step-up-client.ts",
+   "src/lib/hiring-desk.functions.ts",
+   "src/lib/cv-intake.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "react",
+   "sonner",
+   "zod",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/distribution.tsx": {
+  "lines": 352,
+  "deps": [
+   "src/components/ats.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/switch.tsx",
+   "src/lib/distribution.functions.ts",
+   "src/lib/job-channels.ts",
+   "src/hooks/useOrg.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/dpa.tsx": {
+  "lines": 28,
+  "deps": [
+   "src/components/LegalPage.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/help.tsx": {
+  "lines": 100,
+  "deps": [
+   "src/lib/user-manual.ts",
+   "src/components/ats.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/lib/manual-export.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "react",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/hiring-cost.tsx": {
+  "lines": 286,
+  "deps": [
+   "src/components/ats.tsx",
+   "src/components/HiringCost.tsx",
+   "src/components/AgentUtilisation.tsx",
+   "src/lib/cost-format.ts",
+   "src/lib/hiring-cost.functions.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/ijp.tsx": {
+  "lines": 264,
+  "deps": [
+   "src/lib/data.ts",
+   "src/lib/requisitions.functions.ts",
+   "src/components/ats.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/textarea.tsx",
+   "src/components/ui/dialog.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/inbox.tsx": {
+  "lines": 348,
+  "deps": [
+   "src/lib/local-inbox.functions.ts",
+   "src/components/ats.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/select.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/index.tsx": {
+  "lines": 1496,
+  "deps": [
+   "src/lib/data.ts",
+   "src/lib/lifecycle.ts",
+   "src/lib/dedupe.ts",
+   "src/lib/shortlist.ts",
+   "src/components/ats.tsx",
+   "src/components/RolePeek.tsx",
+   "src/hooks/useRoles.ts",
+   "src/hooks/useOrg.ts",
+   "src/hooks/usePlatform.ts",
+   "src/lib/agents.functions.ts",
+   "src/lib/notifications.functions.ts",
+   "src/lib/candidates.functions.ts",
+   "src/lib/hr-performance.functions.ts",
+   "src/lib/roi.functions.ts",
+   "src/lib/platform.functions.ts",
+   "src/components/ui/button.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "react",
+   "sonner",
+   "lucide-react",
+   "@tanstack/react-start"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/integrations.tsx": {
+  "lines": 2391,
+  "deps": [
+   "src/components/ui/badge.tsx",
+   "src/lib/database.types.ts",
+   "src/lib/integrations.functions.ts",
+   "src/lib/boards.functions.ts",
+   "src/lib/ai-settings.functions.ts",
+   "src/lib/phone-screening.functions.ts",
+   "src/lib/email-settings.functions.ts",
+   "src/lib/linkedin.functions.ts",
+   "src/lib/hrms.functions.ts",
+   "src/lib/hrms.ts",
+   "src/lib/integrations-oauth.functions.ts",
+   "src/lib/local-inbox.functions.ts",
+   "src/lib/collect.functions.ts",
+   "src/lib/capture.functions.ts",
+   "src/components/ats.tsx",
+   "src/components/board-connect-panel.tsx",
+   "src/components/board-enterprise-panel.tsx",
+   "src/components/ui/tabs.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/switch.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/interviews.index.tsx": {
+  "lines": 839,
+  "deps": [
+   "src/lib/data.ts",
+   "src/lib/interviews.functions.ts",
+   "src/lib/panel-agent.functions.ts",
+   "src/lib/meetings.functions.ts",
+   "src/lib/ics.ts",
+   "src/lib/lifecycle.ts",
+   "src/components/ats.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/textarea.tsx",
+   "src/components/ui/select.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/interviews.mine.tsx": {
+  "lines": 447,
+  "deps": [
+   "src/lib/interviews.functions.ts",
+   "src/lib/ics.ts",
+   "src/lib/lifecycle.ts",
+   "src/components/ats.tsx",
+   "src/components/CompetencyRating.tsx",
+   "src/components/PanelBriefView.tsx",
+   "src/hooks/useOrg.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/textarea.tsx",
+   "src/components/ui/select.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/masters.tsx": {
+  "lines": 208,
+  "deps": [
+   "src/lib/data.ts",
+   "src/lib/master.functions.ts",
+   "src/components/ats.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/badge.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/matching.tsx": {
+  "lines": 1268,
+  "deps": [
+   "src/hooks/useNavCtx.ts",
+   "src/lib/data.ts",
+   "src/lib/matching.functions.ts",
+   "src/lib/requisitions.functions.ts",
+   "src/lib/lifecycle.functions.ts",
+   "src/lib/integrations.functions.ts",
+   "src/lib/cv-extract.ts",
+   "src/lib/shortlist.ts",
+   "src/components/ats.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/slider.tsx",
+   "src/components/ui/textarea.tsx",
+   "src/components/ui/select.tsx",
+   "src/components/ui/switch.tsx",
+   "src/components/ui/checkbox.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/negotiate.$token.tsx": {
+  "lines": 179,
+  "deps": [
+   "src/lib/negotiation.functions.ts",
+   "src/lib/money.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/textarea.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/offer.$token.tsx": {
+  "lines": 257,
+  "deps": [
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/textarea.tsx",
+   "src/lib/offer-response.functions.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/offers.tsx": {
+  "lines": 346,
+  "deps": [
+   "src/lib/data.ts",
+   "src/lib/offers.functions.ts",
+   "src/lib/step-up-client.ts",
+   "src/components/ats.tsx",
+   "src/components/OfferLetterDialog.tsx",
+   "src/components/PreOnboardingDialog.tsx",
+   "src/lib/onboarding.functions.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/select.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "react",
+   "sonner"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/org-profile.tsx": {
+  "lines": 431,
+  "deps": [
+   "src/lib/org-context.functions.ts",
+   "src/lib/org-profile.functions.ts",
+   "src/lib/org-profile.ts",
+   "src/components/ats.tsx",
+   "src/components/OrgAgentWorkspace.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/switch.tsx",
+   "src/components/ui/textarea.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/organisation.tsx": {
+  "lines": 241,
+  "deps": [
+   "src/lib/org.functions.ts",
+   "src/hooks/useOrg.ts",
+   "src/hooks/useNavCtx.ts",
+   "src/components/ats.tsx",
+   "src/components/TrainingDataCard.tsx",
+   "src/components/AssessmentPolicyCard.tsx",
+   "src/components/PhoneScreeningCard.tsx",
+   "src/components/SilentPanelCard.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/alert-dialog.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/pay.$token.tsx": {
+  "lines": 260,
+  "deps": [
+   "src/lib/compensation.functions.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/checkbox.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/textarea.tsx",
+   "src/lib/money.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/platform-agents.tsx": {
+  "lines": 308,
+  "deps": [
+   "src/components/ats.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx",
+   "src/hooks/usePlatform.ts",
+   "src/lib/agents.catalog.ts",
+   "src/lib/platform-agents.functions.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/platform-ai-usage.tsx": {
+  "lines": 588,
+  "deps": [
+   "src/lib/platform-ai-usage.functions.ts",
+   "src/lib/platform.functions.ts",
+   "src/hooks/usePlatform.ts",
+   "src/components/ats.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/select.tsx",
+   "src/components/ui/chart.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "lucide-react",
+   "sonner",
+   "recharts"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/platform-health.tsx": {
+  "lines": 249,
+  "deps": [
+   "src/components/ats.tsx",
+   "src/components/ui/badge.tsx",
+   "src/hooks/usePlatform.ts",
+   "src/lib/platform-health.functions.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/platform.tsx": {
+  "lines": 764,
+  "deps": [
+   "src/lib/platform.functions.ts",
+   "src/hooks/usePlatform.ts",
+   "src/lib/legal/agreements.ts",
+   "src/components/ats.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/dialog.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/privacy.tsx": {
+  "lines": 32,
+  "deps": [
+   "src/components/LegalPage.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/reports.tsx": {
+  "lines": 713,
+  "deps": [
+   "src/lib/job-channels.ts",
+   "src/lib/data.ts",
+   "src/lib/lifecycle.ts",
+   "src/components/HrPerformance.tsx",
+   "src/components/ats.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/select.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/requisitions.$id.tsx": {
+  "lines": 2033,
+  "deps": [
+   "src/lib/work-mode.ts",
+   "src/lib/data.ts",
+   "src/lib/requisitions.functions.ts",
+   "src/lib/matching.functions.ts",
+   "src/lib/cv-extract.ts",
+   "src/components/InterviewPlanCard.tsx",
+   "src/components/HiringManagerPicker.tsx",
+   "src/components/HiringCost.tsx",
+   "src/lib/cv-intake.ts",
+   "src/lib/shortlist.ts",
+   "src/lib/linkedin.functions.ts",
+   "src/lib/templates.functions.ts",
+   "src/hooks/useRoles.ts",
+   "src/hooks/useOrg.ts",
+   "src/components/ats.tsx",
+   "src/components/salary-benchmark.tsx",
+   "src/components/job-card.tsx",
+   "src/components/requisition-job-boards.tsx",
+   "src/components/requisition-distribution.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/dialog.tsx",
+   "src/components/ui/textarea.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/switch.tsx",
+   "src/components/ui/slider.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/requisitions.index.tsx": {
+  "lines": 949,
+  "deps": [
+   "src/lib/requisitions.functions.ts",
+   "src/hooks/useRoles.ts",
+   "src/lib/data.ts",
+   "src/lib/jd-dedupe.ts",
+   "src/lib/errors.ts",
+   "src/lib/role-profile.functions.ts",
+   "src/components/ats.tsx",
+   "src/components/OrgProfileNotice.tsx",
+   "src/components/MarketBenchmark.tsx",
+   "src/components/pickers.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/textarea.tsx",
+   "src/components/ui/dialog.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/roi.tsx": {
+  "lines": 595,
+  "deps": [
+   "src/lib/roi.functions.ts",
+   "src/hooks/usePlatform.ts",
+   "src/components/ats.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/schedule.$token.tsx": {
+  "lines": 204,
+  "deps": [
+   "src/components/ui/button.tsx",
+   "src/components/ui/textarea.tsx",
+   "src/lib/slot-offers.functions.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/scorecard.$token.tsx": {
+  "lines": 190,
+  "deps": [
+   "src/components/CompetencyRating.tsx",
+   "src/components/PanelBriefView.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/textarea.tsx",
+   "src/lib/panelist-links.functions.ts"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/screening.tsx": {
+  "lines": 599,
+  "deps": [
+   "src/lib/data.ts",
+   "src/lib/screening-queue.functions.ts",
+   "src/lib/lifecycle.ts",
+   "src/components/ScreeningPanel.tsx",
+   "src/components/StageMover.tsx",
+   "src/components/ats.tsx",
+   "src/lib/resume.functions.ts",
+   "src/lib/resume-download.ts",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/skeleton.tsx",
+   "src/components/ui/select.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/team.tsx": {
+  "lines": 817,
+  "deps": [
+   "src/components/InterviewerProfileCell.tsx",
+   "src/components/PanelDirectory.tsx",
+   "src/lib/interviewers.functions.ts",
+   "src/lib/org.functions.ts",
+   "src/hooks/useOrg.ts",
+   "src/components/ats.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/checkbox.tsx",
+   "src/components/ui/dropdown-menu.tsx",
+   "src/components/ui/alert-dialog.tsx",
+   "src/components/ui/popover.tsx",
+   "src/components/ui/dialog.tsx",
+   "src/components/ui/label.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "@tanstack/react-start",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/templates.tsx": {
+  "lines": 1052,
+  "deps": [
+   "src/components/job-card.tsx",
+   "src/lib/data.ts",
+   "src/lib/errors.ts",
+   "src/lib/templates.functions.ts",
+   "src/lib/cv-extract.ts",
+   "src/components/ats.tsx",
+   "src/components/ui/badge.tsx",
+   "src/components/ui/button.tsx",
+   "src/components/ui/dialog.tsx",
+   "src/components/ui/input.tsx",
+   "src/components/ui/label.tsx",
+   "src/components/ui/textarea.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router",
+   "@tanstack/react-query",
+   "react",
+   "sonner",
+   "lucide-react"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/routes/terms.tsx": {
+  "lines": 32,
+  "deps": [
+   "src/components/LegalPage.tsx"
+  ],
+  "ext": [
+   "@tanstack/react-router"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/action-token.ts": {
+  "lines": 57,
+  "deps": [],
+  "ext": [
+   "node:crypto"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/agents/alerts.server.ts": {
+  "lines": 242,
+  "deps": [
+   "src/server/db.ts",
+   "src/server/env.ts",
+   "src/server/audit.ts",
+   "src/server/crypto.ts",
+   "src/server/log.ts",
+   "src/server/safe-fetch.ts",
+   "drizzle/schema.ts",
+   "src/lib/email-outbox.server.ts"
+  ],
+  "ext": [
+   "node:crypto",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/agents/autonomy.server.ts": {
+  "lines": 331,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/agents/registry.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/context.ts": {
+  "lines": 51,
+  "deps": [],
+  "ext": [
+   "node:async_hooks"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/agents/definitions.ts": {
+  "lines": 1362,
+  "deps": [
+   "src/server/voice/call-prompt.ts",
+   "src/server/voice/negotiation-call-tools.ts",
+   "src/server/voice/negotiation-prompt.ts",
+   "src/server/voice/scheduling-prompt.ts",
+   "src/server/voice/charter.ts",
+   "src/server/agents/registry.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/distribution-agent.server.ts": {
+  "lines": 281,
+  "deps": [
+   "src/server/db.ts",
+   "src/server/env.ts",
+   "src/server/audit.ts",
+   "src/lib/job-channels.ts",
+   "src/server/distribution/distribution.server.ts",
+   "src/server/erase.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/eval.server.ts": {
+  "lines": 300,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/agents/registry.ts",
+   "src/server/agents/runtime.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/events.ts": {
+  "lines": 57,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/log.ts",
+   "src/server/agents/orchestrator.server.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/expert-gate.server.ts": {
+  "lines": 174,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/lib/expert-brief.ts",
+   "src/server/audit.ts",
+   "src/server/db.ts",
+   "src/server/agents/panel-gate.server.ts",
+   "src/lib/interview-plan.server.ts",
+   "src/lib/auth.middleware.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/health.server.ts": {
+  "lines": 1638,
+  "deps": [
+   "src/lib/job-channels.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/agents/policy.ts",
+   "src/server/audit.ts",
+   "src/server/log.ts",
+   "src/server/redteam/check.server.ts",
+   "src/server/agents/distribution-agent.server.ts",
+   "src/lib/panels.server.ts",
+   "src/server/voice/negotiation-graders.ts",
+   "src/server/agents/alerts.server.ts",
+   "src/server/slo.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/hiring-cost.server.ts": {
+  "lines": 544,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/ai-pricing.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/hitl.ts": {
+  "lines": 83,
+  "deps": [],
+  "ext": [
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/index.ts": {
+  "lines": 58,
+  "deps": [
+   "src/server/agents/registry.ts",
+   "src/server/agents/definitions.ts",
+   "src/server/agents/tools.ts",
+   "src/server/agents/tools-phase2.ts",
+   "src/server/agents/tools-phase3.ts",
+   "src/server/agents/tools-phase4.ts",
+   "src/server/agents/tools-sourcing.ts",
+   "src/server/agents/tools-distribution.ts",
+   "src/server/agents/tools-org.ts",
+   "src/server/agents/tools-expert.ts",
+   "src/server/agents/tools-panel.ts",
+   "drizzle/schema.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/injection.ts": {
+  "lines": 34,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/manifest.server.ts": {
+  "lines": 117,
+  "deps": [
+   "src/lib/ai-gateway.server.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/agents/hitl.ts",
+   "src/server/agents/registry.ts"
+  ],
+  "ext": [
+   "node:crypto",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/agents/metrics.server.ts": {
+  "lines": 101,
+  "deps": [
+   "src/server/db.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/orchestrator.server.ts": {
+  "lines": 989,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/log.ts",
+   "src/server/agents/policy.ts",
+   "src/server/agents/registry.ts",
+   "src/server/agents/runtime.server.ts",
+   "src/server/agents/tools.ts",
+   "src/server/agents/index.ts",
+   "src/server/desk/desk.server.ts",
+   "src/server/agents/sourcing.server.ts",
+   "src/server/agents/pool-match.server.ts",
+   "src/lib/slot-offers.server.ts",
+   "src/server/voice/scheduling-request.server.ts",
+   "src/server/panel/transcripts.server.ts",
+   "src/lib/training.functions.ts",
+   "src/lib/assessment-timeline.server.ts",
+   "src/lib/negotiation.server.ts",
+   "src/lib/compensation.server.ts",
+   "src/server/distribution/distribution.server.ts",
+   "src/server/distribution/google-indexing.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/otel.server.ts": {
+  "lines": 245,
+  "deps": [
+   "src/server/db.ts",
+   "src/server/crypto.ts",
+   "src/server/log.ts",
+   "src/server/safe-fetch.ts",
+   "drizzle/schema.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/panel-gate.server.ts": {
+  "lines": 531,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/db.ts",
+   "src/lib/interview-plan.server.ts",
+   "src/lib/interview-plan.ts",
+   "src/lib/panels.server.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/lib/local-time.ts",
+   "src/server/audit.ts",
+   "src/lib/calendar-availability.server.ts",
+   "src/lib/interviewer-brief.server.ts",
+   "src/lib/interviews.functions.ts",
+   "src/lib/panelists.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/platform.server.ts": {
+  "lines": 233,
+  "deps": [
+   "src/server/db.ts",
+   "src/server/agents/health.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/policy.ts": {
+  "lines": 91,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/pool-match.server.ts": {
+  "lines": 197,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/audit.ts",
+   "src/server/agents/talent-search.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/registry.ts": {
+  "lines": 221,
+  "deps": [
+   "src/server/ai-usage.ts",
+   "drizzle/schema.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/agents/policy.ts"
+  ],
+  "ext": [
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/replay.server.ts": {
+  "lines": 136,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/run-messages.ts": {
+  "lines": 12,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/runtime.server.ts": {
+  "lines": 2789,
+  "deps": [
+   "src/lib/money.ts",
+   "src/lib/org-profile.ts",
+   "drizzle/schema.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/lib/auth.middleware.ts",
+   "src/server/db.ts",
+   "src/server/audit.ts",
+   "src/server/log.ts",
+   "src/server/request-context.ts",
+   "src/server/agents/context.ts",
+   "src/server/agents/manifest.server.ts",
+   "src/server/agents/injection.ts",
+   "src/server/agents/policy.ts",
+   "src/server/agents/registry.ts",
+   "src/server/agents/task-liveness.ts",
+   "src/server/agents/run-messages.ts",
+   "src/server/agents/hitl.ts",
+   "src/server/agents/panel-gate.server.ts",
+   "src/server/agents/expert-gate.server.ts",
+   "src/server/panel/review.server.ts",
+   "src/lib/org-profile.server.ts",
+   "src/lib/compensation.server.ts",
+   "src/lib/negotiation.server.ts",
+   "src/lib/onboarding.server.ts",
+   "src/lib/interview-plan.server.ts",
+   "src/lib/screening-coverage.ts",
+   "src/lib/requisitions.server.ts",
+   "src/lib/offers.functions.ts",
+   "src/lib/onboarding.functions.ts",
+   "src/lib/pipeline.server.ts",
+   "src/server/agents/events.ts",
+   "src/server/desk/desk.server.ts",
+   "src/server/training/capture.server.ts",
+   "src/server/agents/orchestrator.server.ts",
+   "src/server/agents/metrics.server.ts",
+   "src/server/agents/health.server.ts",
+   "src/server/agents/otel.server.ts",
+   "src/lib/org-context.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/sourcing.server.ts": {
+  "lines": 431,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/env.ts",
+   "src/lib/job-channels.ts",
+   "src/lib/local-inbox.server.ts",
+   "src/server/boards/registry.ts",
+   "src/server/agents/talent-search.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/talent-search.server.ts": {
+  "lines": 218,
+  "deps": [
+   "src/lib/ai-gateway.server.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/task-liveness.ts": {
+  "lines": 113,
+  "deps": [
+   "drizzle/schema.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/tools-distribution.ts": {
+  "lines": 150,
+  "deps": [
+   "src/lib/job-channels.ts",
+   "src/server/agents/registry.ts",
+   "src/lib/requisitions.server.ts",
+   "src/server/agents/distribution-agent.server.ts",
+   "src/server/distribution/distribution.server.ts",
+   "src/lib/auth.middleware.ts"
+  ],
+  "ext": [
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/tools-expert.ts": {
+  "lines": 107,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/lib/expert-brief.ts",
+   "src/server/db.ts",
+   "src/server/guards.ts",
+   "src/server/agents/registry.ts",
+   "src/lib/interview-plan.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/tools-negotiation-call.ts": {
+  "lines": 236,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/lib/money.ts",
+   "src/server/db.ts",
+   "src/server/voice/negotiation-call-tools.ts",
+   "src/server/agents/registry.ts",
+   "src/server/voice/negotiation-brief.server.ts",
+   "src/server/voice/negotiation-session.server.ts",
+   "src/server/voice/opt-out.server.ts",
+   "src/server/voice/negotiation-request.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/tools-org.ts": {
+  "lines": 235,
+  "deps": [
+   "src/lib/org-profile.ts",
+   "src/server/agents/registry.ts",
+   "src/lib/requisitions.server.ts",
+   "src/lib/org-profile.server.ts",
+   "src/lib/org-context.server.ts",
+   "drizzle/schema.ts",
+   "src/server/db.ts"
+  ],
+  "ext": [
+   "zod",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/tools-panel.ts": {
+  "lines": 102,
+  "deps": [
+   "src/server/agents/registry.ts",
+   "src/server/panel/assess.server.ts",
+   "src/server/panel/review.server.ts"
+  ],
+  "ext": [
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/tools-phase2.ts": {
+  "lines": 706,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/env.ts",
+   "src/server/agents/registry.ts",
+   "src/server/agents/tools-screening-call.ts",
+   "src/server/agents/tools-negotiation-call.ts",
+   "src/server/agents/tools-scheduling-call.ts",
+   "src/server/agents/task-liveness.ts",
+   "src/lib/requisitions.server.ts",
+   "src/lib/autoscore.server.ts",
+   "src/lib/pipeline.server.ts",
+   "src/server/agents/talent-search.server.ts",
+   "src/server/voice/settings.server.ts",
+   "src/lib/compensation.server.ts",
+   "src/lib/screening.functions.ts",
+   "src/lib/assessment.functions.ts",
+   "src/lib/assessment-timeline.server.ts",
+   "src/lib/email-outbox.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/tools-phase3.ts": {
+  "lines": 699,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/guards.ts",
+   "src/server/agents/registry.ts",
+   "src/lib/requisitions.server.ts",
+   "src/lib/panels.server.ts",
+   "src/lib/local-time.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/lib/interview-plan.server.ts",
+   "src/lib/pipeline.server.ts",
+   "src/lib/panelists.server.ts",
+   "src/lib/calendar-availability.server.ts",
+   "src/lib/slot-offers.server.ts",
+   "src/lib/meetings.functions.ts",
+   "src/lib/interviews.functions.ts",
+   "src/lib/bias.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/tools-phase4.ts": {
+  "lines": 704,
+  "deps": [
+   "src/lib/money.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/agents/registry.ts",
+   "src/lib/requisitions.server.ts",
+   "src/lib/onboarding.server.ts",
+   "src/lib/compensation.server.ts",
+   "src/lib/negotiation.server.ts",
+   "src/lib/interview-plan.server.ts",
+   "src/lib/offers.functions.ts",
+   "src/lib/email-outbox.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/tools-scheduling-call.ts": {
+  "lines": 172,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/db.ts",
+   "src/server/voice/scheduling-call-tools.ts",
+   "src/server/agents/registry.ts",
+   "src/server/voice/scheduling-brief.server.ts",
+   "src/server/voice/scheduling-outcome.server.ts",
+   "src/server/voice/scheduling-request.server.ts",
+   "src/lib/email-outbox.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/tools-screening-call.ts": {
+  "lines": 147,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/db.ts",
+   "src/server/voice/call-tools.ts",
+   "src/server/agents/registry.ts",
+   "src/server/voice/call-brief.server.ts",
+   "src/server/voice/settings.server.ts",
+   "src/lib/compensation.server.ts",
+   "src/server/voice/request.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/tools-sourcing.ts": {
+  "lines": 117,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/agents/registry.ts",
+   "src/server/agents/sourcing.server.ts",
+   "src/lib/email-outbox.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/tools.ts": {
+  "lines": 569,
+  "deps": [
+   "src/lib/money.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/work-mode.ts",
+   "src/server/agents/registry.ts",
+   "src/lib/requisitions.server.ts",
+   "src/lib/market.server.ts",
+   "src/lib/matching.functions.ts",
+   "src/lib/templates.server.ts",
+   "src/server/desk/desk.server.ts",
+   "src/server/boards/publish.server.ts",
+   "src/server/agents/runtime.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/agents/utilisation.server.ts": {
+  "lines": 519,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/ai-pricing.ts": {
+  "lines": 112,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/ai-spend-cap.ts": {
+  "lines": 117,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/ai-usage.ts": {
+  "lines": 150,
+  "deps": [
+   "src/server/agents/context.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/training/capture.server.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/audit.ts": {
+  "lines": 41,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/boards/hmac.ts": {
+  "lines": 36,
+  "deps": [],
+  "ext": [
+   "crypto"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/boards/indeed.ts": {
+  "lines": 205,
+  "deps": [
+   "src/server/safe-fetch.ts",
+   "src/server/boards/hmac.ts",
+   "src/server/boards/partner.ts",
+   "src/server/boards/types.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/boards/ingest.server.ts": {
+  "lines": 585,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/intake.server.ts",
+   "src/server/boards/registry.ts",
+   "src/server/boards/partner.ts",
+   "src/server/boards/types.ts",
+   "src/server/safe-fetch.ts",
+   "src/lib/email-outbox.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/boards/linkedin.ts": {
+  "lines": 216,
+  "deps": [
+   "src/server/safe-fetch.ts",
+   "src/lib/linkedin.server.ts",
+   "src/server/boards/types.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/boards/naukri.ts": {
+  "lines": 167,
+  "deps": [
+   "src/server/safe-fetch.ts",
+   "src/server/boards/hmac.ts",
+   "src/server/boards/partner.ts",
+   "src/server/boards/types.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/boards/partner.ts": {
+  "lines": 71,
+  "deps": [
+   "src/server/safe-fetch.ts",
+   "src/lib/integrations.server.ts",
+   "src/server/boards/types.ts"
+  ],
+  "ext": [
+   "crypto"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/boards/poll.server.ts": {
+  "lines": 153,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/boards/ingest.server.ts",
+   "src/server/boards/registry.ts",
+   "src/server/boards/types.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/boards/publish.server.ts": {
+  "lines": 272,
+  "deps": [
+   "src/lib/work-mode.ts",
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/audit.ts",
+   "src/server/guards.ts",
+   "src/server/boards/registry.ts",
+   "src/server/boards/types.ts",
+   "src/server/env.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/boards/registry.ts": {
+  "lines": 117,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/integrations.server.ts",
+   "src/lib/linkedin.server.ts",
+   "src/server/boards/indeed.ts",
+   "src/server/boards/linkedin.ts",
+   "src/server/boards/naukri.ts",
+   "src/server/boards/types.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "node:crypto"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/boards/types.ts": {
+  "lines": 114,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/claims.ts": {
+  "lines": 10,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/client-ip.ts": {
+  "lines": 23,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/cron-auth.ts": {
+  "lines": 28,
+  "deps": [],
+  "ext": [
+   "node:crypto"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/crypto.ts": {
+  "lines": 78,
+  "deps": [],
+  "ext": [
+   "node:crypto"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/db.ts": {
+  "lines": 38,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/env.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "postgres"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/desk/desk.server.ts": {
+  "lines": 4784,
+  "deps": [
+   "src/server/agents/run-messages.ts",
+   "src/lib/local-time.ts",
+   "src/lib/work-mode.ts",
+   "src/lib/job-channels.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/server/db.ts",
+   "src/server/audit.ts",
+   "src/server/log.ts",
+   "src/server/agents/registry.ts",
+   "src/server/agents/task-liveness.ts",
+   "drizzle/schema.ts",
+   "src/lib/org-context.server.ts",
+   "src/server/agents/policy.ts",
+   "src/server/agents/runtime.server.ts",
+   "src/server/agents/tools.ts",
+   "src/server/agents/orchestrator.server.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/requisitions.server.ts",
+   "src/server/agents/events.ts",
+   "src/server/agents/context.ts",
+   "src/server/agents/index.ts",
+   "src/lib/screening-coverage.ts",
+   "src/lib/autoscore.server.ts",
+   "src/lib/templates.server.ts",
+   "src/lib/interview-plan.server.ts",
+   "src/lib/email-outbox.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/desk/org-desk.server.ts": {
+  "lines": 399,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/server/log.ts",
+   "src/server/desk/desk.server.ts",
+   "src/lib/org-profile.ts",
+   "src/lib/org-profile.server.ts",
+   "src/lib/org-context.server.ts",
+   "src/server/agents/policy.ts",
+   "src/server/agents/runtime.server.ts",
+   "src/server/agents/orchestrator.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/distribution/content.ts": {
+  "lines": 374,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/distribution/distribution.server.ts": {
+  "lines": 924,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/lib/job-channels.ts",
+   "src/server/db.ts",
+   "src/server/env.ts",
+   "src/server/audit.ts",
+   "src/server/crypto.ts",
+   "src/server/guards.ts",
+   "src/server/distribution/content.ts",
+   "src/server/distribution/google-indexing.server.ts",
+   "src/server/boards/publish.server.ts"
+  ],
+  "ext": [
+   "node:crypto",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/distribution/google-indexing.server.ts": {
+  "lines": 236,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/db.ts",
+   "src/server/env.ts"
+  ],
+  "ext": [
+   "node:crypto",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/env.ts": {
+  "lines": 142,
+  "deps": [],
+  "ext": [
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/erase.server.ts": {
+  "lines": 43,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/db.ts",
+   "src/server/storage.ts",
+   "src/server/agents/runtime.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/guards.ts": {
+  "lines": 20,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/http-metrics.ts": {
+  "lines": 253,
+  "deps": [
+   "src/server/slo.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/identity.ts": {
+  "lines": 107,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts"
+  ],
+  "ext": [
+   "drizzle-orm",
+   "node:crypto"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/integration-seeds.server.ts": {
+  "lines": 118,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/log.ts": {
+  "lines": 92,
+  "deps": [
+   "src/server/request-context.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/org-agreements.server.ts": {
+  "lines": 161,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/lib/legal/agreements.ts",
+   "src/lib/legal/acceptance.ts",
+   "src/server/audit.ts",
+   "src/server/db.ts"
+  ],
+  "ext": [
+   "node:crypto",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/org-setup.server.ts": {
+  "lines": 31,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/panel/assess.server.ts": {
+  "lines": 332,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/lib/panel-assessment.ts",
+   "src/server/panel/prompts.ts",
+   "src/server/db.ts",
+   "src/server/env.ts",
+   "src/lib/interview-plan.server.ts",
+   "src/lib/interview-plan.ts",
+   "src/server/agents/context.ts",
+   "src/server/panel/review.server.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/lib/panelist-links.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/panel/prompts.ts": {
+  "lines": 79,
+  "deps": [
+   "src/lib/ai-gateway.server.ts",
+   "src/lib/panel-assessment.ts",
+   "src/lib/vtt.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/panel/review.server.ts": {
+  "lines": 499,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/lib/interview-plan.ts",
+   "src/lib/panel-reconcile.ts",
+   "src/server/audit.ts",
+   "src/server/db.ts",
+   "src/server/log.ts",
+   "src/server/agents/policy.ts",
+   "src/server/agents/events.ts",
+   "src/server/desk/desk.server.ts",
+   "src/lib/auth.middleware.ts",
+   "src/lib/pipeline.server.ts",
+   "src/lib/interview-plan.server.ts",
+   "src/lib/interviews.functions.ts",
+   "src/lib/slot-offers.server.ts",
+   "src/server/training/capture.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/panel/transcripts.server.ts": {
+  "lines": 423,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/lib/meeting-ref.ts",
+   "src/server/audit.ts",
+   "src/server/db.ts",
+   "src/server/log.ts",
+   "src/lib/integrations.server.ts",
+   "src/lib/meeting-transcripts.server.ts",
+   "src/server/agents/events.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/parser/client.ts": {
+  "lines": 52,
+  "deps": [
+   "src/server/log.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/parser/worker.ts": {
+  "lines": 94,
+  "deps": [
+   "src/lib/cv-text.server.ts"
+  ],
+  "ext": [
+   "node:http",
+   "node:crypto",
+   "pdfjs-dist"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/password.ts": {
+  "lines": 69,
+  "deps": [],
+  "ext": [
+   "node:crypto",
+   "node:util",
+   "bcryptjs"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/rate-limit.ts": {
+  "lines": 106,
+  "deps": [
+   "src/server/db.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/redteam/check.server.ts": {
+  "lines": 175,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/server/redteam/probes.ts",
+   "src/lib/screening.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/redteam/probes.ts": {
+  "lines": 193,
+  "deps": [
+   "src/lib/prompt-echo.ts"
+  ],
+  "ext": [
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/request-context.ts": {
+  "lines": 103,
+  "deps": [],
+  "ext": [
+   "node:async_hooks"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/safe-fetch.ts": {
+  "lines": 209,
+  "deps": [],
+  "ext": [
+   "node:dns",
+   "node:net",
+   "undici"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/slo.server.ts": {
+  "lines": 502,
+  "deps": [
+   "src/server/db.ts",
+   "src/server/env.ts",
+   "src/server/audit.ts",
+   "src/server/log.ts",
+   "src/server/safe-fetch.ts",
+   "src/server/http-metrics.ts",
+   "src/server/slo.ts",
+   "drizzle/schema.ts",
+   "src/lib/email-templates/send-email.ts",
+   "src/server/agents/alerts.server.ts"
+  ],
+  "ext": [
+   "node:os",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/slo.ts": {
+  "lines": 109,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/step-up.ts": {
+  "lines": 112,
+  "deps": [
+   "src/server/db.ts",
+   "drizzle/schema.ts",
+   "src/server/identity.ts",
+   "src/server/password.ts",
+   "src/server/audit.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/storage.ts": {
+  "lines": 184,
+  "deps": [
+   "src/server/env.ts"
+  ],
+  "ext": [
+   "node:fs",
+   "node:path",
+   "@aws-sdk/client-s3"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/training/capture.server.ts": {
+  "lines": 305,
+  "deps": [
+   "src/server/db.ts",
+   "src/server/log.ts",
+   "drizzle/schema.ts",
+   "src/server/agents/context.ts"
+  ],
+  "ext": [
+   "node:crypto",
+   "node:async_hooks",
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/training/pseudonymise.ts": {
+  "lines": 48,
+  "deps": [],
+  "ext": [
+   "node:crypto"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/voice/call-brief.server.ts": {
+  "lines": 233,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/lib/screening.server.ts",
+   "src/lib/job-channels.ts",
+   "src/lib/work-mode.ts",
+   "src/server/db.ts",
+   "src/server/voice/call-prompt.ts",
+   "src/server/voice/settings.server.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/lib/compensation.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/call-prompt.ts": {
+  "lines": 196,
+  "deps": [
+   "src/lib/screening.server.ts",
+   "src/server/voice/charter.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/call-session.server.ts": {
+  "lines": 918,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/server/agents/context.ts",
+   "src/server/db.ts",
+   "src/server/log.ts",
+   "src/server/voice/rtp.ts",
+   "src/server/voice/vad.ts",
+   "src/server/voice/call-brief.server.ts",
+   "src/server/voice/call-tools.ts",
+   "src/server/voice/phone.ts",
+   "src/server/voice/resample.ts",
+   "src/server/voice/schedule.ts",
+   "src/server/voice/settings.server.ts",
+   "src/server/voice/scheduling-session.server.ts",
+   "src/server/voice/negotiation-session.server.ts",
+   "src/server/agents/index.ts",
+   "src/server/agents/registry.ts",
+   "src/server/agents/manifest.server.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/lib/compensation.server.ts",
+   "src/lib/screening.functions.ts",
+   "src/server/desk/desk.server.ts",
+   "src/lib/screening-coverage.ts",
+   "src/server/agents/events.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/call-tools.ts": {
+  "lines": 245,
+  "deps": [],
+  "ext": [
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/charter.ts": {
+  "lines": 247,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/debug.ts": {
+  "lines": 14,
+  "deps": [],
+  "ext": [
+   "node:fs"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/voice/dispatcher.server.ts": {
+  "lines": 127,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/db.ts",
+   "src/server/log.ts",
+   "src/server/voice/schedule.ts",
+   "src/server/voice/settings.server.ts",
+   "src/lib/email-outbox.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/g711.ts": {
+  "lines": 71,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/negotiation-brief.server.ts": {
+  "lines": 200,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/lib/negotiation.server.ts",
+   "src/server/db.ts",
+   "src/server/voice/negotiation-call-tools.ts",
+   "src/server/voice/negotiation-prompt.ts",
+   "src/lib/org-profile.ts",
+   "src/server/voice/negotiation-graders.ts",
+   "src/server/voice/settings.server.ts",
+   "src/lib/interview-plan.server.ts",
+   "src/lib/org-profile.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/negotiation-call-tools.ts": {
+  "lines": 651,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/voice/call-tools.ts",
+   "src/server/voice/negotiation-graders.ts",
+   "src/server/voice/scheduling-call-tools.ts"
+  ],
+  "ext": [
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/negotiation-graders.ts": {
+  "lines": 333,
+  "deps": [
+   "src/server/voice/call-tools.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/negotiation-prompt.ts": {
+  "lines": 115,
+  "deps": [
+   "src/server/voice/charter.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/negotiation-request.server.ts": {
+  "lines": 249,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/lib/negotiation.server.ts",
+   "src/server/audit.ts",
+   "src/server/db.ts",
+   "src/server/voice/phone.ts",
+   "src/server/voice/negotiation-call-tools.ts",
+   "src/server/voice/schedule.ts",
+   "src/server/voice/settings.server.ts",
+   "src/lib/org-profile.server.ts",
+   "src/lib/org-profile.ts",
+   "src/lib/email-outbox.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/negotiation-session.server.ts": {
+  "lines": 572,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/server/agents/context.ts",
+   "src/server/db.ts",
+   "src/server/log.ts",
+   "src/server/voice/call-session.server.ts",
+   "src/server/voice/call-tools.ts",
+   "src/server/voice/negotiation-brief.server.ts",
+   "src/server/voice/vad.ts",
+   "src/server/voice/negotiation-call-tools.ts",
+   "src/server/voice/negotiation-graders.ts",
+   "src/server/voice/negotiation-prompt.ts",
+   "src/server/voice/phone.ts",
+   "src/server/voice/resample.ts",
+   "src/server/voice/schedule.ts",
+   "src/server/voice/settings.server.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/server/voice/opt-out.server.ts",
+   "src/server/audit.ts",
+   "src/server/desk/desk.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/opt-out.server.ts": {
+  "lines": 114,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/audit.ts",
+   "src/server/db.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/phone.ts": {
+  "lines": 36,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/request.server.ts": {
+  "lines": 187,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/audit.ts",
+   "src/server/db.ts",
+   "src/server/voice/phone.ts",
+   "src/server/voice/schedule.ts",
+   "src/server/voice/settings.server.ts",
+   "src/lib/email-outbox.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/resample.ts": {
+  "lines": 80,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/rtp.ts": {
+  "lines": 206,
+  "deps": [
+   "src/server/voice/debug.ts",
+   "src/server/voice/g711.ts"
+  ],
+  "ext": [
+   "node:crypto",
+   "node:dgram"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/voice/schedule.ts": {
+  "lines": 114,
+  "deps": [
+   "src/lib/calendar-availability.server.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/scheduling-brief.server.ts": {
+  "lines": 217,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/db.ts",
+   "src/server/voice/scheduling-prompt.ts",
+   "src/server/voice/scheduling-call-tools.ts",
+   "src/server/voice/settings.server.ts",
+   "src/lib/slot-offers.server.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/lib/interview-plan.server.ts",
+   "src/lib/pipeline.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/scheduling-call-tools.ts": {
+  "lines": 241,
+  "deps": [
+   "src/server/voice/call-tools.ts"
+  ],
+  "ext": [
+   "zod"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/scheduling-outcome.server.ts": {
+  "lines": 177,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/db.ts",
+   "src/server/log.ts",
+   "src/server/voice/scheduling-call-tools.ts",
+   "src/server/voice/scheduling-brief.server.ts",
+   "src/lib/slot-offers.server.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/server/voice/settings.server.ts",
+   "src/server/voice/schedule.ts",
+   "src/server/voice/opt-out.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/scheduling-prompt.ts": {
+  "lines": 119,
+  "deps": [
+   "src/lib/interview-with.ts",
+   "src/server/voice/charter.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/scheduling-request.server.ts": {
+  "lines": 333,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/audit.ts",
+   "src/server/db.ts",
+   "src/server/voice/phone.ts",
+   "src/server/voice/schedule.ts",
+   "src/server/voice/settings.server.ts",
+   "src/lib/slot-offers.server.ts",
+   "src/lib/calendar-availability.server.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/server/agents/events.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/scheduling-session.server.ts": {
+  "lines": 448,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/lib/ai-gateway.server.ts",
+   "src/server/agents/context.ts",
+   "src/server/db.ts",
+   "src/server/log.ts",
+   "src/server/voice/call-session.server.ts",
+   "src/server/voice/phone.ts",
+   "src/server/voice/resample.ts",
+   "src/server/voice/vad.ts",
+   "src/server/voice/schedule.ts",
+   "src/server/voice/scheduling-call-tools.ts",
+   "src/server/voice/call-tools.ts",
+   "src/server/voice/scheduling-brief.server.ts",
+   "src/server/voice/scheduling-outcome.server.ts",
+   "src/server/voice/scheduling-prompt.ts",
+   "src/server/voice/settings.server.ts",
+   "src/lib/email-outbox.server.ts",
+   "src/server/voice/opt-out.server.ts",
+   "src/server/desk/desk.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/settings.server.ts": {
+  "lines": 166,
+  "deps": [
+   "drizzle/schema.ts",
+   "src/server/audit.ts",
+   "src/server/db.ts",
+   "src/server/env.ts",
+   "src/lib/ai-gateway.server.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/sip-line.ts": {
+  "lines": 37,
+  "deps": [
+   "src/server/env.ts",
+   "src/server/voice/call-session.server.ts",
+   "src/server/voice/sip.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/sip.ts": {
+  "lines": 536,
+  "deps": [
+   "src/server/voice/g711.ts",
+   "src/server/voice/rtp.ts"
+  ],
+  "ext": [
+   "node:crypto",
+   "node:dgram",
+   "node:net"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/server/voice/vad.ts": {
+  "lines": 69,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server/voice/worker.ts": {
+  "lines": 88,
+  "deps": [
+   "src/server/env.ts",
+   "src/server/log.ts",
+   "src/server/voice/call-session.server.ts",
+   "src/server/voice/dispatcher.server.ts",
+   "src/server/voice/settings.server.ts",
+   "src/server/voice/sip-line.ts"
+  ],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/server.ts": {
+  "lines": 390,
+  "deps": [
+   "src/lib/error-capture.ts",
+   "src/lib/error-page.ts",
+   "src/server/client-ip.ts",
+   "src/server/http-metrics.ts",
+   "src/server/log.ts",
+   "src/server/rate-limit.ts",
+   "src/server/env.ts",
+   "src/server/request-context.ts",
+   "src/server/slo.server.ts"
+  ],
+  "ext": [
+   "node:crypto",
+   "@tanstack/react-start"
+  ],
+  "serverFn": false,
+  "nodeImports": true
+ },
+ "src/start.ts": {
+  "lines": 31,
+  "deps": [
+   "src/lib/error-page.ts"
+  ],
+  "ext": [
+   "@tanstack/react-start"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/stubs/browser-3d-stub.ts": {
+  "lines": 19,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "src/types/mammoth-browser.d.ts": {
+  "lines": 9,
+  "deps": [],
+  "ext": [],
+  "serverFn": false,
+  "nodeImports": false
+ },
+ "drizzle/schema.ts": {
+  "lines": 3720,
+  "deps": [
+   "src/lib/interview-plan.ts",
+   "src/lib/expert-brief.ts",
+   "src/lib/vtt.ts",
+   "src/lib/panel-assessment.ts"
+  ],
+  "ext": [
+   "drizzle-orm"
+  ],
+  "serverFn": false,
+  "nodeImports": false
+ }
+}

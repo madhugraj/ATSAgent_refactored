@@ -1,0 +1,82 @@
+/**
+ * Run the agent eval scenarios against a live model.
+ *
+ *   DATABASE_URL=postgres://...127.0.0.1... SESSION_SECRET=... \
+ *   EVAL_PROVIDER=openai|anthropic|google EVAL_API_KEY=... EVAL_MODEL=... \
+ *   bun scripts/agent-eval.ts
+ *
+ * EVAL_ONLY=<text> runs only the scenarios whose name contains it (e.g.
+ * EVAL_ONLY="scheduling call").
+ *
+ * Uses a throwaway organisation per scenario on a local database. The key is
+ * a test key supplied by the person running the eval; it is never stored.
+ * Exits non-zero when any scenario fails.
+ */
+const url = process.env.DATABASE_URL ?? "";
+if (!["127.0.0.1", "localhost", "::1"].includes(new URL(url).hostname)) {
+  throw new Error("Refusing to run evals against a non-local database");
+}
+const provider = process.env.EVAL_PROVIDER as "openai" | "anthropic" | "google" | undefined;
+const apiKey = process.env.EVAL_API_KEY;
+const model = process.env.EVAL_MODEL;
+if (!provider || !apiKey || !model) {
+  console.error("Set EVAL_PROVIDER, EVAL_API_KEY and EVAL_MODEL to run live evals.");
+  process.exit(2);
+}
+
+// Phone screening evals: a phone line on paper (nothing is dialled in an eval)
+// and a key to store the organisation's voice credential with.
+process.env["SIP_SERVER"] ??= "127.0.0.1";
+process.env["SIP_USER"] ??= "eval";
+process.env["SIP_PASSWORD"] ??= "eval";
+process.env["SECRET_ENCRYPTION_KEY"] ??= Buffer.alloc(32, 7).toString("base64");
+
+const { setEvalModelOverride } = await import("../apps/web/src/server/agents/runtime.server");
+const { resetRegistry } = await import("../apps/web/src/server/agents/registry");
+const tools = [
+  await import("../apps/web/src/server/agents/tools").then((m) => m.registerPhase1Tools),
+  await import("../apps/web/src/server/agents/tools-phase2").then((m) => m.registerPhase2Tools),
+  await import("../apps/web/src/server/agents/tools-phase3").then((m) => m.registerPhase3Tools),
+  await import("../apps/web/src/server/agents/tools-phase4").then((m) => m.registerPhase4Tools),
+  await import("../apps/web/src/server/agents/tools-sourcing").then((m) => m.registerSourcingTools),
+  await import("../apps/web/src/server/agents/tools-distribution").then(
+    (m) => m.registerDistributionTools,
+  ),
+  await import("../apps/web/src/server/agents/tools-org").then((m) => m.registerOrgTools),
+  await import("../apps/web/src/server/agents/tools-expert").then((m) => m.registerExpertTools),
+  await import("../apps/web/src/server/agents/tools-panel").then((m) => m.registerPanelTools),
+];
+const defs = await import("../apps/web/src/server/agents/definitions");
+/** Every real agent and tool, as production registers them (scenarios that
+ * bring their own agent start from an empty registry instead). */
+const registerReal = () => {
+  resetRegistry();
+  for (const r of tools) r();
+  defs.registerPhase1Agents();
+  defs.registerPhase2Agents();
+  defs.registerPhase3Agents();
+  defs.registerPhase4Agents();
+  defs.registerPhase6Agents();
+  defs.registerOrgAgents();
+  defs.registerExpertAgents();
+  defs.registerPanelAgents();
+};
+const { runScenario } = await import("../apps/web/src/server/agents/eval.server");
+const { scenarios } = await import("./evals/scenarios");
+const { sql } = await import("../apps/web/src/server/db");
+
+setEvalModelOverride({ provider, model, apiKey });
+let failed = 0;
+const only = process.env["EVAL_ONLY"]?.toLowerCase();
+for (const s of scenarios().filter((x) => !only || x.name.toLowerCase().includes(only))) {
+  if (s.agent) resetRegistry();
+  else registerReal();
+  const r = await runScenario(s);
+  if (!r.passed) failed++;
+  console.log(
+    `${r.passed ? "PASS" : "FAIL"}  ${r.name}\n      status=${r.status} steps=${r.steps} tokens=${r.tokens} human_requests=${r.humanRequests}\n      calls: ${r.calls.join(" → ") || "none"}${r.failures.map((f) => `\n      ✗ ${f}`).join("")}`,
+  );
+}
+await sql.end();
+console.log(`\n${scenarios().length - failed}/${scenarios().length} scenarios passed`);
+process.exit(failed ? 1 : 0);

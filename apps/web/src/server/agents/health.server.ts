@@ -1,0 +1,2082 @@
+/**
+ * Agent health engine (docs/agentic-plan.md §9.3).
+ *
+ * A fixed set of rules, each tied to one element of the agent architecture
+ * (harness, human-in-the-loop, tools, skills, budget, orchestrator,
+ * definition, audit). Every few minutes the scheduler evaluates them per
+ * organisation: a firing rule opens (or re-sees) an issue; a rule that stops
+ * firing resolves it. Openings and resolutions are audited; serious and
+ * critical issues reach HR leadership through the notification bell.
+ *
+ * Thresholds are explicit constants so every issue is explainable.
+ */
+import { WORKINGS_FINDING } from "../voice/guard/checks";
+import { sourceLabel } from "@/lib/job-channels";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
+
+import { db } from "../db";
+import {
+  agentIssues,
+  agentRuntimeHeartbeat,
+  type AgentIssueSeverity,
+  type AgentType,
+} from "@db/schema";
+import { loadPolicy } from "./policy";
+import { writeAudit } from "../audit";
+import { log } from "../log";
+
+/* ------------------------------------------------------------- thresholds */
+
+export const HEALTH = {
+  /** Human request open longer than this is overdue (hours). */
+  hitlSlaHours: 48,
+  /** …and serious after this many hours. */
+  hitlSeriousHours: 120,
+  /** A running run whose lease expired this long ago is stuck (minutes). */
+  stuckLeaseMinutes: 15,
+  /** Failed runs per agent in 24 h that trip the failure rule. */
+  failedRuns24h: 3,
+  /** Agent studio agent: share of its runs in an organisation that failed over 7 days… */
+  studioFailShare: 0.5,
+  /** …counted once it has at least this many runs there. */
+  studioMinRuns: 4,
+  /** Tool error rate over 24 h (with at least `minToolCalls`). */
+  toolErrorRate: 0.2,
+  minToolCalls: 10,
+  /** AI request error rate over 24 h (with at least `minAiRequests`). */
+  aiErrorRate: 0.2,
+  minAiRequests: 5,
+  /** AI p95 latency over 24 h (ms). */
+  aiP95Ms: 60_000,
+  /** Human decline rate over 7 days (with at least `minDecisions`). */
+  declineRate: 0.5,
+  minDecisions: 6,
+  /** Definition changes in 7 days. */
+  definitionChanges7d: 3,
+  /** Pending orchestrator events older than this (minutes). */
+  eventBacklogMinutes: 15,
+  /** Scheduler considered stopped after this many minutes without a tick. */
+  heartbeatMinutes: 5,
+  /** Suspected prompt injections in tool results over 24 h: warning from 1, serious from this many. */
+  injectionSerious24h: 3,
+  /** Sourcing runs in 7 days on one role that added and invited nobody before it counts as exhausted. */
+  sourcingFruitlessRuns: 2,
+  /** Interview-time offers answered with "none work" or left to expire, in 7 days… */
+  slotOffersUnanswered7d: 3,
+  /** …and as a share of all offers that closed. */
+  slotOffersUnansweredShare: 0.5,
+  /**
+   * Hours a candidate may wait on the panel before this is flagged — the answer
+   * window (4 h) has closed and nobody acted on the stand-in or "Send invite now".
+   */
+  panelAnswerHours: 8,
+  /** A panelist's scorecard proposal left undecided this long. */
+  planProposalHours: 8,
+  /** Panelists who moved or stepped down from this many rounds in 14 days. */
+  panelChangesPerPerson: 3,
+  /** Rounds the candidate did not join, in 7 days, before it is flagged. */
+  interviewNoShows7d: 3,
+  /** An open offer on its this-many-th revision is going back and forth. */
+  offerRevisions: 3,
+  /** A pay discussion waiting on a person (suggested figure, call asked for) this many days. */
+  negotiationWaitDays: 2,
+  /** A portal listing live this many days without one CV from it (Distribution agent on). */
+  quietListingDays: 14,
+  /** Role-limited CVs still kept this many days after they became due for erasure. */
+  roleLimitedOverdueDays: 7,
+  /** Scheduling calls: with at least this many connected calls in 7 days… */
+  minSchedulingCalls7d: 5,
+  /** …fewer than this share ending in a booking is flagged. */
+  schedulingBookedShare: 0.3,
+  /** A scheduling call placed when times were offered, still not dialled this many minutes after it was due. */
+  schedulingCallStuckMins: 30,
+  /** Pay calls: a yes heard on a call and not confirmed by a person for this many hours. */
+  verbalConfirmHours: 24,
+  /** …with at least this many connected pay calls in 14 days… */
+  minNegotiationCalls14d: 5,
+  /** …fewer than this share ending in a yes is flagged. */
+  negotiationYesShare: 0.2,
+  /** Candidates asking not to be called by the AI assistant, in 7 days. */
+  aiCallOptOuts7d: 2,
+  /** A booked interview this close with an interviewer who said they can't make it (hours). */
+  unavailableLeadHours: 24,
+  /** Silent panel agent: interview calls whose transcript never came, in 7 days. */
+  transcriptsMissing7d: 1,
+  /** …a transcript in this long without the level's panel agent assessing it (hours). */
+  assessmentWaitHours: 2,
+  /** …a panel review left open by the HR head this long (hours). */
+  reviewWaitHours: 48,
+  /** Model replies cut off at the output limit without acting, in 24 h. */
+  cutOffReplies24h: 2,
+  /** One run asking people this many questions (7 days) is going round in circles. */
+  questionsPerRun: 3,
+  /** One run calling the same read tool this many times in 24 h is re-reading instead of working. */
+  repeatedReadsPerRun: 4,
+  /** A hiring manager's expert-interview questions open longer than this (hours). */
+  expertUnansweredHours: 72,
+  /** Phone screening: a call still not placed this many hours after it was due. */
+  callOverdueHours: 3,
+  /** …a call still dialling / in progress this many minutes later (the worker stopped). */
+  callStuckMinutes: 45,
+  /** …calls that could not be placed (line or AI voice errors) in 24 h. */
+  callFailures24h: 3,
+  /** …with at least this many call attempts in 7 days, a pick-up share below this… */
+  minCalls7d: 5,
+  callAnswerShare: 0.4,
+  /** …and of the answered calls, a decline share at or above this. */
+  callDeclineShare: 0.5,
+  /** With at least this many recorded screening answers in 7 days, a prompted-answer… */
+  minCallAnswers7d: 10,
+  /** …share at or above this means the assistant is leading the witness. */
+  callPromptedShare: 0.3,
+  /** …answered calls that ended before any question was answered, in 7 days. */
+  shortCalls7d: 3,
+  /** Re-evaluate at most this often (minutes). */
+  evaluateEveryMinutes: 5,
+  /** An issue resolves only after it has not been seen for this long (stops flapping). */
+  resolveAfterMinutes: 60,
+  /** An approved organisation profile older than this is stale (days). */
+  profileStaleDays: 180,
+  /** A pay conventions proposal waiting this long for the HR head (docs/pay-terms-plan.md). */
+  payConventionsWaitDays: 7,
+  /** Labour policy: a source failing this many reads in a row; a zone unread this long. */
+  policySourceFailures: 3,
+  policyStaleDays: 14,
+  /** A submitted profile version waiting longer than this for a decision (days). */
+  reviewWaitingDays: 7,
+  /** A request for a new panellist left this long holds the round up. */
+  newPanelistWaitingHours: 24,
+  /** Website re-read failures before the warning becomes serious. */
+  rereadSeriousFailures: 2,
+  /** Profile items refused from sources in 7 days before it is flagged. */
+  refusedItems7d: 5,
+  /** Score drift after a profile approval: mean CV score moved by at least this many points… */
+  scoreDriftPoints: 10,
+  /** …with at least this many scorings before and after (days each side below). */
+  scoreDriftMinSamples: 20,
+  scoreDriftWindowDays: 14,
+  /** An answered AI phone call still without its Voice Guard review after this many hours. */
+  callReviewOverdueHours: 2,
+  /** Reviewed calls of one phone agent with a breach in 7 days before it is flagged (serious from the second number). */
+  callBreaches7d: 2,
+  callBreachesSerious7d: 5,
+} as const;
+
+export type HealthElement =
+  | "harness"
+  | "hitl"
+  | "tools"
+  | "skills"
+  | "budget"
+  | "orchestrator"
+  | "definition"
+  | "audit"
+  | "context";
+
+type Finding = {
+  agentType: string;
+  title: string;
+  detail: Record<string, unknown>;
+  severity?: AgentIssueSeverity;
+};
+
+type Rule = {
+  id: string;
+  element: HealthElement;
+  severity: AgentIssueSeverity;
+  /** Plain-language description shown in the observability page. */
+  description: string;
+  evaluate: (orgId: string) => Promise<Finding[]>;
+};
+
+const rows = async <T>(q: ReturnType<typeof sql>) => (await db.execute(q)) as unknown as T[];
+
+/* ------------------------------------------------------------------ rules */
+
+export const RULES: Rule[] = [
+  {
+    id: "definition.studio_agent_failing",
+    element: "definition",
+    severity: "warning",
+    description: `An Agent studio agent (built by the platform and granted to this organisation) failed in at least ${Math.round(HEALTH.studioFailShare * 100)}% of its runs here over 7 days. Its published version may not fit this organisation's data or settings; the platform team can test it again with sample data, or withdraw it.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; failed: number; total: number }>(sql`
+        select agent_type, count(*) filter (where status = 'failed')::int failed, count(*)::int total
+        from agent_runs
+        where org_id = ${orgId} and agent_type like 'studio:%' and agent_type not like 'studio:test\_%'
+          and created_at > now() - interval '7 days' and status in ('done', 'failed')
+        group by agent_type
+        having count(*) >= ${HEALTH.studioMinRuns}::int
+          and count(*) filter (where status = 'failed') >= ${HEALTH.studioFailShare}::float8 * count(*)`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `${x.failed} of ${x.total} runs failed in 7 days`,
+        detail: { failed: x.failed, total: x.total },
+      }));
+    },
+  },
+  {
+    id: "harness.autonomous_unverified",
+    element: "harness",
+    severity: "warning",
+    description:
+      "An agent works at Autonomous, but the organisation's AI model has no passed model safety check from the last 30 days — the model was changed, the check expired or it failed. Autonomous actions are not re-verified against prompt injection until the check is run again (Agent settings → Model safety check).",
+    evaluate: async (orgId) => {
+      const { autonomousWithoutCheck } = await import("../redteam/check.server");
+      return (await autonomousWithoutCheck(orgId)).map((agentType) => ({
+        agentType,
+        title: "Autonomous with no current model safety check",
+        detail: {},
+      }));
+    },
+  },
+  {
+    id: "harness.stuck_run",
+    element: "harness",
+    severity: "critical",
+    description: `A run is still marked running ${HEALTH.stuckLeaseMinutes} minutes after its worker lease expired, or was reclaimed twice.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; n: number }>(sql`
+        select agent_type, count(*)::int n from agent_runs
+        where org_id = ${orgId}
+          and ((status = 'running' and lease_until < now() - make_interval(mins => ${HEALTH.stuckLeaseMinutes}))
+            or (status in ('queued','running') and attempts >= 2))
+        group by agent_type`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `${x.n} run(s) stuck or repeatedly reclaimed`,
+        detail: { runs: x.n },
+      }));
+    },
+  },
+  {
+    id: "harness.run_limits",
+    element: "harness",
+    severity: "warning",
+    description:
+      "A run stopped on its step or token limit in the last 7 days and nothing has picked its work up since — the role or candidate it was working on is waiting. Raise the agent's run limits in Agent settings and try it again; if it stopped at the overall ceiling, check its steps first (it may be going round in circles).",
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; n: number; ceiling: number }>(sql`
+        select f.agent_type, count(*)::int n,
+          count(*) filter (where f.last_error like '%overall step or token ceiling%')::int ceiling
+        from agent_runs f
+        where f.org_id = ${orgId} and f.status = 'failed' and f.mode = 'live'
+          and f.last_error like '%step or token%'
+          and f.finished_at >= now() - interval '7 days'
+          and not exists (
+            select 1 from agent_runs later
+            where later.org_id = f.org_id and later.agent_type = f.agent_type
+              and later.subject_id is not distinct from f.subject_id
+              and later.created_at > f.created_at
+              and later.status in ('queued','running','awaiting_human','done'))
+        group by f.agent_type`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `${x.n} ${x.n === 1 ? "run" : "runs"} stopped on ${x.n === 1 ? "its" : "their"} limits, with the work still waiting${x.ceiling ? ` (${x.ceiling} at the overall ceiling)` : ""}`,
+        detail: { runs: x.n, atCeiling: x.ceiling },
+        ...(x.ceiling ? { severity: "serious" as const } : {}),
+      }));
+    },
+  },
+  {
+    id: "harness.failures",
+    element: "harness",
+    severity: "serious",
+    description: `${HEALTH.failedRuns24h} or more runs of one agent stopped with a failure in the last 24 hours.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; n: number; budget: number }>(sql`
+        select agent_type, count(*)::int n,
+          count(*) filter (where last_error like '%step or token budget%')::int budget
+        from agent_runs
+        where org_id = ${orgId} and status = 'failed' and mode = 'live'
+          and finished_at >= now() - interval '24 hours'
+        group by agent_type having count(*) >= ${HEALTH.failedRuns24h}`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `${x.n} failed runs in 24 h${x.budget ? ` (${x.budget} hit the step/token limit)` : ""}`,
+        detail: { failed: x.n, stepOrTokenLimit: x.budget },
+      }));
+    },
+  },
+  {
+    id: "budget.paused",
+    element: "budget",
+    severity: "warning",
+    description: "Runs are paused because the agent reached its monthly token budget.",
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; n: number }>(sql`
+        select agent_type, count(*)::int n from agent_runs
+        where org_id = ${orgId} and status = 'queued'
+          and last_error = 'Paused: this agent reached its monthly token budget.'
+        group by agent_type`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `${x.n} run(s) paused at the monthly token budget`,
+        detail: { paused: x.n },
+      }));
+    },
+  },
+  {
+    id: "hitl.overdue",
+    element: "hitl",
+    severity: "warning",
+    description: `A request for a person's decision or answer has been open longer than ${HEALTH.hitlSlaHours} hours (serious after ${HEALTH.hitlSeriousHours} hours).`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; n: number; oldest_h: number }>(sql`
+        select r.agent_type, count(*)::int n,
+          floor(max(extract(epoch from (now() - t.created_at)) / 3600))::int oldest_h
+        from agent_tasks t join agent_runs r on r.id = t.run_id
+        where t.org_id = ${orgId} and t.status = 'open'
+          and t.created_at < now() - make_interval(hours => ${HEALTH.hitlSlaHours})
+        group by r.agent_type`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `${x.n} request(s) waiting on a person past the ${HEALTH.hitlSlaHours} h SLA (oldest ${x.oldest_h} h)`,
+        detail: { overdue: x.n, oldestHours: x.oldest_h },
+        severity: x.oldest_h >= HEALTH.hitlSeriousHours ? "serious" : "warning",
+      }));
+    },
+  },
+  {
+    id: "hitl.decline_rate",
+    element: "hitl",
+    severity: "warning",
+    description: `People declined more than ${HEALTH.declineRate * 100}% of an agent's requests over 7 days — its proposals may not fit how the team works.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; decided: number; declined: number }>(sql`
+        select r.agent_type, count(*)::int decided,
+          count(*) filter (where t.status = 'rejected')::int declined
+        from agent_tasks t join agent_runs r on r.id = t.run_id
+        where t.org_id = ${orgId} and t.decided_at >= now() - interval '7 days'
+          and t.status in ('approved','rejected','answered')
+        group by r.agent_type having count(*) >= ${HEALTH.minDecisions}`);
+      return r
+        .filter((x) => x.declined / x.decided > HEALTH.declineRate)
+        .map((x) => ({
+          agentType: x.agent_type,
+          title: `${Math.round((x.declined / x.decided) * 100)}% of ${x.decided} requests declined in 7 days`,
+          detail: { decided: x.decided, declined: x.declined },
+        }));
+    },
+  },
+  {
+    id: "tools.error_rate",
+    element: "tools",
+    severity: "serious",
+    description: `More than ${HEALTH.toolErrorRate * 100}% of an agent's tool calls failed in 24 hours.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{
+        agent_type: string;
+        calls: number;
+        errors: number;
+        top: string | null;
+      }>(sql`
+        with s as (
+          -- Refusals (a rule said no) are guardrails working, not failures.
+          select r.agent_type, st.tool_name, st.status,
+            coalesce(st.output ->> 'refused', 'false') = 'true' refused
+          from agent_steps st join agent_runs r on r.id = st.run_id
+          where st.org_id = ${orgId} and st.kind = 'tool' and st.status in ('ok','error')
+            and st.created_at >= now() - interval '24 hours'
+        )
+        select agent_type, count(*)::int calls,
+          count(*) filter (where status = 'error' and coalesce(refused, false) = false)::int errors,
+          (select tool_name from s s2 where s2.agent_type = s.agent_type and s2.status = 'error'
+            and not s2.refused group by tool_name order by count(*) desc limit 1) top
+        from s group by agent_type having count(*) >= ${HEALTH.minToolCalls}`);
+      return r
+        .filter((x) => x.errors / x.calls > HEALTH.toolErrorRate)
+        .map((x) => ({
+          agentType: x.agent_type,
+          title: `${x.errors} of ${x.calls} tool calls failed in 24 h${x.top ? ` (mostly ${x.top})` : ""}`,
+          detail: { calls: x.calls, errors: x.errors, topFailingTool: x.top },
+        }));
+    },
+  },
+  {
+    id: "tools.injection",
+    element: "tools",
+    severity: "warning",
+    description: `Third-party text (CV, mail, document) returned by a tool looked like instructions to the model in the last 24 hours (serious from ${HEALTH.injectionSerious24h}). The text stays fenced as data, and the rest of each such run asks a person before any write or outbound action; review the runs.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; n: number; runs: number }>(sql`
+        select r.agent_type, count(*)::int n, count(distinct st.run_id)::int runs
+        from agent_steps st join agent_runs r on r.id = st.run_id
+        where st.org_id = ${orgId} and st.injection_suspected
+          and st.created_at >= now() - interval '24 hours'
+        group by r.agent_type`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `${x.n} suspected prompt injection(s) in tool results across ${x.runs} run(s) in 24 h`,
+        detail: { detections: x.n, runs: x.runs },
+        severity: x.n >= HEALTH.injectionSerious24h ? ("serious" as const) : ("warning" as const),
+      }));
+    },
+  },
+  {
+    id: "skills.ai_errors",
+    element: "skills",
+    severity: "serious",
+    description: `More than ${HEALTH.aiErrorRate * 100}% of AI requests made inside an agent's runs failed in 24 hours (key, quota or provider problems).`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; n: number; errors: number }>(sql`
+        select r.agent_type, count(*)::int n, count(*) filter (where u.status = 'error')::int errors
+        from ai_usage_events u join agent_runs r on r.id = u.agent_run_id
+        where r.org_id = ${orgId} and u.created_at >= now() - interval '24 hours'
+        group by r.agent_type having count(*) >= ${HEALTH.minAiRequests}`);
+      return r
+        .filter((x) => x.errors / x.n > HEALTH.aiErrorRate)
+        .map((x) => ({
+          agentType: x.agent_type,
+          title: `${x.errors} of ${x.n} AI requests failed in 24 h`,
+          detail: { requests: x.n, errors: x.errors },
+        }));
+    },
+  },
+  {
+    id: "skills.copilot_errors",
+    element: "skills",
+    severity: "serious",
+    description: `More than ${HEALTH.aiErrorRate * 100}% of the HR copilot's AI requests (chat answers and the demand outlook) failed in 24 hours — people asking the copilot get "I could not complete that" instead of an answer (key, quota or provider problems).`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number; errors: number }>(sql`
+        select count(*)::int n, count(*) filter (where status = 'error')::int errors
+        from ai_usage_events
+        where org_id = ${orgId} and agent_run_id is null
+          and feature in ('copilot', 'demand_outlook')
+          and created_at >= now() - interval '24 hours'
+        having count(*) >= ${HEALTH.minAiRequests}`);
+      return r
+        .filter((x) => x.errors / x.n > HEALTH.aiErrorRate)
+        .map((x) => ({
+          agentType: "copilot",
+          title: `${x.errors} of ${x.n} copilot AI requests failed in 24 h`,
+          detail: { requests: x.n, errors: x.errors },
+        }));
+    },
+  },
+  {
+    id: "skills.latency",
+    element: "skills",
+    severity: "warning",
+    description: `AI requests inside an agent's runs are slow: 95th percentile above ${HEALTH.aiP95Ms / 1000} s over 24 hours.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; p95: number }>(sql`
+        select r.agent_type, percentile_cont(0.95) within group (order by u.duration_ms)::int p95
+        from ai_usage_events u join agent_runs r on r.id = u.agent_run_id
+        where r.org_id = ${orgId} and u.created_at >= now() - interval '24 hours'
+          and u.duration_ms is not null
+          -- A live phone call is a voice session lasting minutes, not an AI request.
+          and u.feature not in ('screening_call', 'scheduling_call', 'negotiation_call')
+        group by r.agent_type having count(*) >= ${HEALTH.minAiRequests}`);
+      return r
+        .filter((x) => x.p95 > HEALTH.aiP95Ms)
+        .map((x) => ({
+          agentType: x.agent_type,
+          title: `AI p95 latency ${Math.round(x.p95 / 1000)} s over 24 h`,
+          detail: { p95Ms: x.p95 },
+        }));
+    },
+  },
+  {
+    id: "definition.churn",
+    element: "definition",
+    severity: "warning",
+    description: `An agent's definition changed under running work ${HEALTH.definitionChanges7d} or more times in 7 days.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; n: number }>(sql`
+        select split_part(actor, ':', 2) agent_type, count(*)::int n from audit_log
+        where org_id = ${orgId} and action = 'agent.run.definition_changed'
+          and created_at >= now() - interval '7 days'
+        group by 1 having count(*) >= ${HEALTH.definitionChanges7d}`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `Definition changed under ${x.n} running run(s) in 7 days`,
+        detail: { changes: x.n },
+      }));
+    },
+  },
+  {
+    id: "audit.gap",
+    element: "audit",
+    severity: "critical",
+    description:
+      "A write or external tool call completed in the last 24 hours without its audit_log entry — the audit trail is incomplete.",
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; n: number }>(sql`
+        select r.agent_type, count(*)::int n
+        from agent_steps st join agent_runs r on r.id = st.run_id
+        where st.org_id = ${orgId} and st.kind = 'tool' and st.status = 'ok'
+          and st.created_at >= now() - interval '24 hours'
+          and st.created_at < now() - interval '2 minutes'
+          and st.tool_name not in ('ask_human', 'request_approval', 'handoff')
+          and exists (
+            select 1 from audit_log a0 where a0.entity_id = r.id and a0.action = 'agent.run.started'
+          )
+          and not exists (
+            select 1 from audit_log a
+            where a.entity_id = r.id and a.action = 'agent.tool.' || st.tool_name
+          )
+          and coalesce((
+            select d.manifest from agent_definitions d where d.id = r.definition_id
+          ) -> 'tools', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('name', st.tool_name))
+          and not (coalesce((
+            select d.manifest from agent_definitions d where d.id = r.definition_id
+          ) -> 'tools', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('name', st.tool_name, 'risk', 'read')))
+        group by r.agent_type`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `${x.n} change(s) made without an audit entry`,
+        detail: { unaudited: x.n },
+      }));
+    },
+  },
+  {
+    id: "sourcing.no_supply",
+    element: "tools",
+    severity: "warning",
+    description: `The Sourcing agent ran ${HEALTH.sourcingFruitlessRuns}+ times in 7 days on a role and found nobody to add or invite — the talent pool and past candidates are exhausted for it. Publish it more widely or revisit its must-haves.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ code: string; runs: number }>(sql`
+        select q.code, count(*)::int runs
+        from agent_runs r join requisitions q on q.id = r.subject_id
+        where r.org_id = ${orgId} and r.agent_type = 'sourcing' and r.mode = 'live'
+          and r.status = 'done' and r.created_at >= now() - interval '7 days'
+          and q.status = 'approved'
+          and not exists (
+            select 1 from agent_steps s where s.run_id = r.id and s.kind = 'tool' and s.status = 'ok'
+              and s.tool_name in ('add_to_pipeline', 'invite_to_apply')
+          )
+        group by q.code having count(*) >= ${HEALTH.sourcingFruitlessRuns}
+        order by count(*) desc`);
+      if (!r.length) return [];
+      return [
+        {
+          agentType: "sourcing",
+          title: `Sourcing found nobody for ${r.length} role(s): ${r
+            .slice(0, 5)
+            .map((x) => `${x.code} (${x.runs} runs)`)
+            .join(", ")}`,
+          detail: { roles: r.length, codes: r.slice(0, 5).map((x) => x.code) },
+        },
+      ];
+    },
+  },
+  {
+    id: "distribution.quiet_listing",
+    element: "tools",
+    severity: "warning",
+    description: `A role has been live on a job portal for ${HEALTH.quietListingDays}+ days without a single CV from it — nobody is bringing that portal's applications in (export or download them and upload them with the portal as the source), or the portal is not working for this role and the listing should come down.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ code: string; provider: string }>(sql`
+        select q.code, p.provider
+        from requisition_board_postings p
+        join requisitions q on q.id = p.requisition_id and q.org_id = p.org_id
+        where p.org_id = ${orgId} and p.status = 'published' and q.status = 'approved'
+          and p.provider <> 'google_jobs'
+          and p.published_at <= now() - make_interval(days => ${HEALTH.quietListingDays})
+          and exists (select 1 from agent_policies ap where ap.org_id = ${orgId}
+            and ap.agent_type = 'distribution' and ap.enabled)
+          and not exists (select 1 from applications a
+            where a.requisition_id = q.id and a.source = p.provider)
+        order by p.published_at
+        limit 20`);
+      if (!r.length) return [];
+      return [
+        {
+          agentType: "distribution",
+          title: `${r.length} listing(s) brought no CVs in ${HEALTH.quietListingDays} days: ${r
+            .slice(0, 5)
+            .map((x) => `${x.code} on ${sourceLabel(x.provider)}`)
+            .join(", ")}`,
+          detail: { listings: r.length, sample: r.slice(0, 5) },
+        },
+      ];
+    },
+  },
+  {
+    id: "distribution.role_limited_retention",
+    element: "audit",
+    severity: "serious",
+    description: `CVs a portal's terms limit to the role they were for are still kept ${HEALTH.roleLimitedOverdueDays}+ days after they became due for erasure. The HR head should approve the Distribution agent's erasure request (or erase them from the talent pool).`,
+    evaluate: async (orgId) => {
+      const { overdueRestricted } = await import("./distribution-agent.server");
+      const n = await overdueRestricted(orgId, HEALTH.roleLimitedOverdueDays);
+      if (!n) return [];
+      return [
+        {
+          agentType: "distribution",
+          title: `${n} role-limited CV(s) overdue for erasure`,
+          detail: { overdue: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "interview.slots_unanswered",
+    element: "hitl",
+    severity: "warning",
+    description: `Candidates did not pick any of the offered interview times (they said none work, or the link expired) at least ${HEALTH.slotOffersUnanswered7d} times in 7 days and for more than half of the offers — the times offered may not suit candidates, or the emails are not reaching them.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ closed: number; missed: number }>(sql`
+        select count(*)::int closed,
+          count(*) filter (where status in ('declined','expired'))::int missed
+        from interview_slot_offers
+        where org_id = ${orgId} and status in ('booked','declined','expired')
+          and updated_at >= now() - interval '7 days'`);
+      const x = r[0];
+      if (
+        !x ||
+        x.missed < HEALTH.slotOffersUnanswered7d ||
+        x.missed / x.closed <= HEALTH.slotOffersUnansweredShare
+      )
+        return [];
+      return [
+        {
+          agentType: "interview",
+          title: `${x.missed} of ${x.closed} interview-time offers in 7 days were not taken up`,
+          detail: { closed: x.closed, missed: x.missed },
+        },
+      ];
+    },
+  },
+  {
+    id: "interview.panel_not_answering",
+    element: "hitl",
+    severity: "warning",
+    description: `Offered interview times, or a booked round's invite, have waited more than ${HEALTH.panelAnswerHours} hours for the panel to accept the time — the candidate has not been contacted. Chase the panel, or send the invite from the Interviews page.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ held: number }>(sql`
+        select (
+          (select count(*) from email_outbox
+            where org_id = ${orgId} and status = 'held' and kind = 'interview_invite'
+              and created_at <= now() - make_interval(hours => ${HEALTH.panelAnswerHours}))
+          + (select count(distinct k.offer_id) from interview_confirmations k
+              join interview_slot_offers o on o.id = k.offer_id and o.status = 'offered'
+              where k.org_id = ${orgId} and k.state = 'pending'
+                and k.created_at <= now() - make_interval(hours => ${HEALTH.panelAnswerHours}))
+        )::int held`);
+      const held = r[0]?.held ?? 0;
+      if (!held) return [];
+      return [
+        {
+          agentType: "interview",
+          title: `${held} candidate interview e-mail${held === 1 ? " is" : "s are"} waiting on the panel`,
+          detail: { held },
+        },
+      ];
+    },
+  },
+  {
+    id: "interview.plan_proposal_waiting",
+    element: "hitl",
+    severity: "warning",
+    description: `A panelist's proposed scorecard change has waited more than ${HEALTH.planProposalHours} hours for the hiring manager — the round keeps the current scorecard until someone decides. Approve or reject it on the role's Interview plan; the HR head can decide too.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from plan_change_proposals
+        where org_id = ${orgId} and status = 'awaiting_approval'
+          and created_at <= now() - make_interval(hours => ${HEALTH.planProposalHours})`);
+      const n = r[0]?.n ?? 0;
+      if (!n) return [];
+      return [
+        {
+          agentType: "interview",
+          title: `${n} scorecard proposal${n === 1 ? " is" : "s are"} waiting for the hiring manager`,
+          detail: { waiting: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "interview.panel_changes_often",
+    element: "hitl",
+    severity: "warning",
+    description: `A panelist moved or stepped down from ${HEALTH.panelChangesPerPerson} or more booked rounds in the last 14 days. Each change costs the candidate time against the hiring SLA; talk to them or rely on others for the panel.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ email: string; n: number }>(sql`
+        select c->>'email' email, count(*)::int n
+        from interviews i, jsonb_array_elements(i.panel_changes) c
+        where i.org_id = ${orgId}
+          and (c->>'at')::timestamptz > now() - interval '14 days'
+        group by 1 having count(*) >= ${HEALTH.panelChangesPerPerson}`);
+      return r.map((x) => ({
+        agentType: "interview",
+        title: `${x.email} changed ${x.n} booked rounds in 14 days`,
+        detail: { email: x.email, changes: x.n },
+      }));
+    },
+  },
+  {
+    id: "interview.no_eligible_panel",
+    element: "skills",
+    severity: "warning",
+    description:
+      "Candidates are waiting for an interview round that has no approved panel and nobody eligible to propose: nobody in the panel directory takes the round, or all are at their weekly limit. The Interview coordinator asks the HR head in the hiring desk to add someone; people can also be added under Team → Panel directory.",
+    evaluate: async (orgId) => {
+      const waiting = await rows<{
+        requisition_id: string;
+        code: string;
+        level: number;
+        n: number;
+      }>(sql`
+        select a.requisition_id, r.code, substring(a.stage::text from 2)::int as level,
+          count(*)::int n
+        from applications a join requisitions r on r.id = a.requisition_id and r.org_id = a.org_id
+        where a.org_id = ${orgId} and a.stage::text in ('l1', 'l2', 'l3')
+          and not exists (select 1 from interviews i where i.application_id = a.id
+            and i.org_id = ${orgId} and i.level = substring(a.stage::text from 2)::int
+            and i.status not in ('cancelled', 'no_show'))
+          and not exists (select 1 from role_panels p where p.org_id = ${orgId}
+            and p.requisition_id = a.requisition_id
+            and p.level = substring(a.stage::text from 2)::int)
+        group by a.requisition_id, r.code, a.stage
+        limit 50`);
+      const { eligibleInterviewers } = await import("@/lib/panels.server");
+      const stuck: {
+        requisition: string;
+        level: number;
+        waiting: number;
+        atWeeklyLimit: string[];
+      }[] = [];
+      for (const w of waiting) {
+        const e = await eligibleInterviewers(orgId, w.requisition_id, w.level).catch(() => null);
+        if (!e || e.people.length) continue;
+        stuck.push({ requisition: w.code, level: w.level, waiting: w.n, atWeeklyLimit: e.full });
+      }
+      if (!stuck.length) return [];
+      // One issue for the organisation; the rounds are in its detail.
+      return [
+        {
+          agentType: "interview",
+          title: `Nobody is eligible to interview for ${stuck
+            .slice(0, 3)
+            .map((x) => `${x.requisition} L${x.level}`)
+            .join(", ")}${stuck.length > 3 ? ` and ${stuck.length - 3} more` : ""}`,
+          detail: { rounds: stuck },
+        },
+      ];
+    },
+  },
+  {
+    id: "interview.unavailable_unresolved",
+    element: "hitl",
+    severity: "critical",
+    description: `A booked interview starts within ${HEALTH.unavailableLeadHours} hours and an interviewer on it said they cannot make it — no stand-in has been approved and it has not been moved. Approve or arrange a stand-in, or cancel the round so new times are offered.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number; first: string }>(sql`
+        select count(*)::int n, min(scheduled_at)::text first from interviews
+        where org_id = ${orgId} and status in ('scheduled', 'rescheduled')
+          and scheduled_at > now()
+          and scheduled_at < now() + make_interval(hours => ${HEALTH.unavailableLeadHours})
+          and exists (select 1 from jsonb_array_elements(unavailable) u
+            where lower(u ->> 'email') = lower(interviewer_email)
+              or panel @> jsonb_build_array(jsonb_build_object('email', u ->> 'email')))`);
+      const x = r[0];
+      if (!x?.n) return [];
+      return [
+        {
+          agentType: "interview",
+          title: `${x.n} interview(s) soon with an interviewer who can't make it`,
+          detail: { interviews: x.n, firstStartsAt: x.first },
+        },
+      ];
+    },
+  },
+  {
+    id: "interview.no_shows",
+    element: "hitl",
+    severity: "warning",
+    description: `Candidates did not join ${HEALTH.interviewNoShows7d} or more booked interview rounds in 7 days — check that invites and reminders reach them, and that the times suit them.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from interviews
+        where org_id = ${orgId} and status = 'no_show'
+          and scheduled_at >= now() - interval '7 days'`);
+      const n = r[0]?.n ?? 0;
+      if (n < HEALTH.interviewNoShows7d) return [];
+      return [
+        {
+          agentType: "interview",
+          title: `${n} interview rounds in 7 days where the candidate did not join`,
+          detail: { noShows: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "panel.transcript_missing",
+    element: "tools",
+    severity: "warning",
+    description:
+      "Interview calls the silent panel agent should have read have no transcript — transcription was not on in the call, the meeting account's plan does not include it, or the connection lacks permission to read it. Those rounds had no independent check; the panel's verdict applied as usual. Check the meeting provider on the Integrations page.",
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number; reason: string | null }>(sql`
+        select count(*)::int n, (array_agg(transcription_detail order by scheduled_at desc))[1] reason
+        from interviews
+        where org_id = ${orgId} and transcription = 'unavailable'
+          and scheduled_at >= now() - interval '7 days'
+          and status not in ('cancelled', 'no_show')`);
+      const x = r[0];
+      if (!x?.n || x.n < HEALTH.transcriptsMissing7d) return [];
+      return [
+        {
+          agentType: "*",
+          title: `${x.n} interview call(s) in 7 days without a transcript`,
+          detail: { rounds: x.n, latestReason: x.reason },
+        },
+      ];
+    },
+  },
+  {
+    id: "panel.assessment_missing",
+    element: "skills",
+    severity: "warning",
+    description: `An interview call's transcript has been in for ${HEALTH.assessmentWaitHours} hours or more and its level's panel agent (switched on) has not assessed it — its assessment failed or the run is waiting for a person's approval. That round will have no independent check unless it is assessed before the panel finishes scoring.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ level: number; n: number }>(sql`
+        select i.level, count(*)::int n
+        from interviews i join interview_transcripts t on t.interview_id = i.id
+        where i.org_id = ${orgId} and i.transcription = 'ready'
+          and t.fetched_at < now() - make_interval(hours => ${HEALTH.assessmentWaitHours})
+          and t.fetched_at >= now() - interval '7 days'
+          and not exists (select 1 from panel_assessments a
+            where a.interview_id = i.id and a.assessed_at is not null)
+        group by i.level`);
+      const out: Finding[] = [];
+      for (const x of r) {
+        const agentType = `panel_l${x.level}` as AgentType;
+        if (!(await loadPolicy(orgId, agentType)).enabled) continue;
+        out.push({
+          agentType,
+          title: `${x.n} L${x.level} interview call(s) with a transcript but no assessment`,
+          detail: { level: x.level, rounds: x.n },
+        });
+      }
+      return out;
+    },
+  },
+  {
+    id: "panel.review_unresolved",
+    element: "hitl",
+    severity: "warning",
+    description: `The panel and a round's panel agent saw a candidate differently and the HR head has not reviewed it in ${HEALTH.reviewWaitHours} hours. Serious when the candidate's move is on hold, since they are waiting on it.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ level: number; n: number; held: number }>(sql`
+        select level, count(*)::int n, count(*) filter (where held)::int held
+        from panel_assessments
+        where org_id = ${orgId} and outcome in ('partial', 'disagree')
+          and review_decision is null
+          and reconciled_at < now() - make_interval(hours => ${HEALTH.reviewWaitHours})
+        group by level`);
+      return r.map((x) => ({
+        agentType: `panel_l${x.level}`,
+        title: `${x.n} L${x.level} panel review(s) waiting over ${HEALTH.reviewWaitHours} hours${x.held ? ` (${x.held} with the candidate on hold)` : ""}`,
+        detail: { level: x.level, reviews: x.n, held: x.held },
+        ...(x.held ? { severity: "serious" as const } : {}),
+      }));
+    },
+  },
+  {
+    id: "offer.negotiation_loop",
+    element: "hitl",
+    severity: "warning",
+    description: `An offer is on its ${HEALTH.offerRevisions}rd revision or later and still open — the candidate and the band may not meet; a person should talk to the candidate rather than another revision.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number; max_rev: number }>(sql`
+        select count(*)::int n, coalesce(max(revision), 0)::int max_rev from offers
+        where org_id = ${orgId} and revision >= ${HEALTH.offerRevisions}
+          and status in ('draft','pending_hr','pending_cbo','approved','released','countered')`);
+      const x = r[0];
+      if (!x?.n) return [];
+      return [
+        {
+          agentType: "offer",
+          title: `${x.n} offer(s) still open after ${x.max_rev} revisions`,
+          detail: { offers: x.n, maxRevision: x.max_rev },
+        },
+      ];
+    },
+  },
+  {
+    id: "offer.pay_unknown",
+    element: "hitl",
+    severity: "warning",
+    description:
+      "A candidate between interview and offer let the pay & availability form close unanswered, and their expected CTC or notice period is still unknown — the Offer agent cannot draft, so TA should ask them on a call and enter it on the candidate's page.",
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(distinct cr.application_id)::int n
+        from compensation_requests cr
+        join applications a on a.id = cr.application_id and a.org_id = cr.org_id
+        join candidates c on c.id = a.candidate_id
+        where cr.org_id = ${orgId} and cr.status = 'expired'
+          and a.stage in ('l1','l2','l3','offer_pending')
+          and not exists (
+            select 1 from compensation_requests o
+            where o.application_id = cr.application_id and o.status in ('sent','completed')
+              and o.created_at > cr.created_at)
+          and (
+            coalesce(
+              (select d.expected_ctc from compensation_details d
+               where d.application_id = a.id and d.expected_ctc is not null
+               order by d.created_at desc limit 1),
+              c.expected_ctc) is null
+            or coalesce(
+              (select d.notice_period_days from compensation_details d
+               where d.application_id = a.id and d.notice_period_days is not null
+               order by d.created_at desc limit 1),
+              c.notice_period_days) is null)`);
+      const n = r[0]?.n ?? 0;
+      if (!n) return [];
+      return [
+        {
+          agentType: "offer",
+          title: `${n} candidate(s) near an offer never shared their expected pay or notice period`,
+          detail: { candidates: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "offer.negotiation_stalled",
+    element: "hitl",
+    severity: "warning",
+    description: `A pay discussion has waited on a person for more than ${HEALTH.negotiationWaitDays} days (the candidate suggested a figure or asked for a call), or it closed without agreement while the candidate is still near an offer — someone should call them or the HR head should decide.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(distinct n.application_id)::int n
+        from offer_negotiations n
+        join applications a on a.id = n.application_id and a.org_id = n.org_id
+        where n.org_id = ${orgId}
+          and a.stage in ('l1','l2','l3','offer_pending')
+          and (
+            (n.status in ('countered','call_requested','open')
+              and n.updated_at < now() - make_interval(days => ${HEALTH.negotiationWaitDays}))
+            or (n.status in ('expired','no_agreement')
+              and n.updated_at >= now() - interval '14 days'
+              and not exists (
+                select 1 from offer_negotiations later
+                where later.application_id = n.application_id
+                  and later.created_at > n.created_at)))`);
+      const n = r[0]?.n ?? 0;
+      if (!n) return [];
+      return [
+        {
+          agentType: "offer",
+          title: `${n} pay ${n === 1 ? "discussion" : "discussions"} waiting on a person or ended without agreement`,
+          detail: { candidates: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "orchestrator.events",
+    element: "orchestrator",
+    severity: "serious",
+    description: `Lifecycle events failed to process, or have waited more than ${HEALTH.eventBacklogMinutes} minutes — agents may not start when they should.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ failed: number; stale: number }>(sql`
+        select count(*) filter (where status = 'failed' and updated_at >= now() - interval '24 hours')::int failed,
+          count(*) filter (where status = 'pending' and created_at < now() - make_interval(mins => ${HEALTH.eventBacklogMinutes}))::int stale
+        from agent_events where org_id = ${orgId}`);
+      const x = r[0];
+      if (!x || (!x.failed && !x.stale)) return [];
+      return [
+        {
+          agentType: "*",
+          title: `${x.failed} failed and ${x.stale} stale lifecycle event(s)`,
+          detail: { failed: x.failed, stale: x.stale },
+        },
+      ];
+    },
+  },
+  {
+    id: "screening_call.not_placed",
+    element: "orchestrator",
+    severity: "serious",
+    description: `Phone screening calls are still not placed ${HEALTH.callOverdueHours} hours after they were due — the voice worker may not be running, or phone screening is no longer ready (switched off, no AI voice key, no phone line). Candidates wait meanwhile.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from screening_calls
+        where org_id = ${orgId} and status in ('approved', 'callback', 'no_answer', 'failed')
+          and due_at < now() - make_interval(hours => ${HEALTH.callOverdueHours})`);
+      const n = r[0]?.n ?? 0;
+      if (!n) return [];
+      return [
+        {
+          agentType: "screening_call",
+          title: `${n} phone screening call${n === 1 ? "" : "s"} overdue by more than ${HEALTH.callOverdueHours} hours`,
+          detail: { overdue: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "screening_call.stuck",
+    element: "harness",
+    severity: "critical",
+    description: `A phone screening call has been dialling or in progress for more than ${HEALTH.callStuckMinutes} minutes — longer than any call may last. The voice worker stopped mid-call and has not recovered it.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from screening_calls
+        where org_id = ${orgId} and status in ('dialling', 'in_progress')
+          and updated_at < now() - make_interval(mins => ${HEALTH.callStuckMinutes})`);
+      const n = r[0]?.n ?? 0;
+      if (!n) return [];
+      return [
+        {
+          agentType: "screening_call",
+          title: `${n} phone screening call${n === 1 ? "" : "s"} stuck mid-call`,
+          detail: { stuck: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "screening_call.failures",
+    element: "tools",
+    severity: "serious",
+    description: `${HEALTH.callFailures24h} or more phone screening calls in 24 hours could not be placed because of the phone line or the AI voice (not because nobody answered). Check the phone line and the organisation's AI voice key.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from screening_calls
+        where org_id = ${orgId} and last_error is not null
+          and updated_at >= now() - interval '24 hours'`);
+      const n = r[0]?.n ?? 0;
+      if (n < HEALTH.callFailures24h) return [];
+      return [
+        {
+          agentType: "screening_call",
+          title: `${n} phone screening calls could not be placed in 24 hours`,
+          detail: { failed: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "screening_call.answer_rate",
+    element: "hitl",
+    severity: "warning",
+    description: `Fewer than ${Math.round(HEALTH.callAnswerShare * 100)}% of phone screening calls in 7 days were picked up (with at least ${HEALTH.minCalls7d} calls). Candidates may not recognise the number — ask for a recognisable caller ID, or check the calling hours.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ total: number; answered: number }>(sql`
+        select count(*)::int total, count(*) filter (where started_at is not null)::int answered
+        from screening_calls
+        where org_id = ${orgId} and purpose = 'screening' and attempt > 0
+          and updated_at >= now() - interval '7 days'
+          and status not in ('approved', 'requested', 'dialling', 'in_progress', 'cancelled')`);
+      const x = r[0];
+      if (!x || x.total < HEALTH.minCalls7d || x.answered / x.total >= HEALTH.callAnswerShare)
+        return [];
+      return [
+        {
+          agentType: "screening_call",
+          title: `Only ${x.answered} of ${x.total} phone screening calls were picked up in 7 days`,
+          detail: x,
+        },
+      ];
+    },
+  },
+  {
+    id: "screening_call.declines",
+    element: "hitl",
+    severity: "warning",
+    description: `Half or more of the candidates who picked up in 7 days declined the AI screening call (with at least ${HEALTH.minCalls7d} answered). Check how the assistant introduces itself, or whether these candidates prefer the written assessment.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ answered: number; declined: number }>(sql`
+        select count(*)::int answered,
+          count(*) filter (where status = 'consent_declined')::int declined
+        from screening_calls
+        where org_id = ${orgId} and purpose = 'screening' and started_at is not null
+          and updated_at >= now() - interval '7 days'`);
+      const x = r[0];
+      if (!x || x.answered < HEALTH.minCalls7d || x.declined / x.answered < HEALTH.callDeclineShare)
+        return [];
+      return [
+        {
+          agentType: "screening_call",
+          title: `${x.declined} of ${x.answered} candidates declined the AI screening call in 7 days`,
+          detail: x,
+        },
+      ];
+    },
+  },
+  {
+    id: "screening_call.prompted",
+    element: "skills",
+    severity: "warning",
+    description: `${Math.round(HEALTH.callPromptedShare * 100)}% or more of the answers recorded in phone screening calls in 7 days were the candidate agreeing with something the assistant said first (with at least ${HEALTH.minCallAnswers7d} answers). The assistant may be leading the witness — naming tools or examples, or reframing into yes/no — which the grading discounts. Check the call prompt's never-hand-over-the-answer rules.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ total: number; prompted: number }>(sql`
+        select count(*)::int total,
+          count(*) filter (where coalesce((a ->> 'prompted')::boolean, false))::int prompted
+        from screening_calls c
+        join lateral jsonb_array_elements(c.answers) a on true
+        where c.org_id = ${orgId} and c.purpose = 'screening'
+          and c.updated_at >= now() - interval '7 days'`);
+      const x = r[0];
+      if (
+        !x ||
+        x.total < HEALTH.minCallAnswers7d ||
+        x.prompted / x.total < HEALTH.callPromptedShare
+      )
+        return [];
+      return [
+        {
+          agentType: "screening_call",
+          title: `${x.prompted} of ${x.total} screening answers in 7 days only agreed with what the assistant suggested`,
+          detail: x,
+        },
+      ];
+    },
+  },
+  {
+    id: "scheduling_call.no_booking",
+    element: "skills",
+    severity: "warning",
+    description: `Of ${HEALTH.minSchedulingCalls7d} or more scheduling calls in 7 days where the candidate agreed to pick a time, fewer than ${Math.round(HEALTH.schedulingBookedShare * 100)}% booked one — the offered times may not suit candidates, or the assistant may be struggling to book.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ connected: number; booked: number }>(sql`
+        select count(*)::int connected,
+          count(*) filter (where end_reason = 'booked')::int booked
+        from screening_calls
+        where org_id = ${orgId} and purpose = 'scheduling' and consent_at is not null
+          and status not in ('dialling', 'in_progress')
+          and updated_at >= now() - interval '7 days'`);
+      const x = r[0];
+      if (!x || x.connected < HEALTH.minSchedulingCalls7d) return [];
+      if (x.booked / x.connected >= HEALTH.schedulingBookedShare) return [];
+      return [
+        {
+          agentType: "scheduling_call",
+          title: `${x.booked} of ${x.connected} scheduling calls booked a time`,
+          detail: { connected: x.connected, booked: x.booked },
+        },
+      ];
+    },
+  },
+  {
+    id: "scheduling_call.not_dialled",
+    element: "harness",
+    severity: "serious",
+    description: `A scheduling call placed when interview times were offered has not been dialled ${HEALTH.schedulingCallStuckMins} minutes after it was due — the voice worker or its phone line may be down. Voice goes first, so the candidate has not heard about these times yet; the e-mail goes out within hours as a fallback.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number; oldest: string }>(sql`
+        select count(*)::int n, min(due_at)::text oldest from screening_calls
+        where org_id = ${orgId} and purpose = 'scheduling'
+          and status in ('approved', 'callback')
+          and due_at < now() - make_interval(mins => ${HEALTH.schedulingCallStuckMins})`);
+      const x = r[0];
+      if (!x || x.n === 0) return [];
+      return [
+        {
+          agentType: "scheduling_call",
+          title: `${x.n} scheduling call${x.n === 1 ? " has" : "s have"} not been dialled`,
+          detail: { calls: x.n, oldestDueAt: x.oldest },
+        },
+      ];
+    },
+  },
+  {
+    id: "negotiation_call.leak_suspected",
+    element: "skills",
+    severity: "serious",
+    description:
+      "A pay call in the last 7 days said something its rules forbid — the role's ceiling or band, more than the ceiling, a figure nobody approved, talk of limits, a promise or agreement, or pay before saying it is an AI — checked on the kept transcript by the same graders the tests use. Read the call and pause pay calls if it is real; the ceiling, or offering more than it, makes it critical.",
+    evaluate: async (orgId) => {
+      const r = await rows<{
+        id: string;
+        transcript: { who: "ai" | "caller"; text: string }[];
+        proposed_ctc: string;
+        call_step_ctc: string | null;
+        ceiling: string;
+        band_max: string | null;
+        levers: { joiningBonus?: number | null } | null;
+        call_brief: {
+          fixedCtc?: number | null;
+          variableCtc?: number | null;
+          esopValue?: number | null;
+        } | null;
+      }>(sql`
+        select c.id, c.transcript, n.proposed_ctc, n.call_step_ctc, n.ceiling, q.ctc_band_max band_max, n.levers, n.call_brief
+        from screening_calls c
+        join offer_negotiations n on n.id = c.negotiation_id and n.org_id = c.org_id
+        join applications a on a.id = n.application_id and a.org_id = n.org_id
+        join requisitions q on q.id = a.requisition_id and q.org_id = a.org_id
+        where c.org_id = ${orgId} and c.purpose = 'negotiation'
+          and jsonb_array_length(c.transcript) > 0
+          and c.updated_at >= now() - interval '7 days'`);
+      if (!r.length) return [];
+      const { gradeNegotiationCall } = await import("../voice/negotiation-graders");
+      const codes = new Set<string>();
+      let calls = 0;
+      let ceiling = false;
+      for (const c of r) {
+        const v = gradeNegotiationCall({
+          system: "",
+          timeline: c.transcript.map((t) => ({ kind: "turn", who: t.who, text: t.text })),
+          proposalCtc: Number(c.proposed_ctc),
+          stepCtc: c.call_step_ctc == null ? null : Number(c.call_step_ctc),
+          leverAmounts: [
+            c.levers?.joiningBonus,
+            c.call_brief?.fixedCtc,
+            c.call_brief?.variableCtc,
+            c.call_brief?.esopValue,
+          ]
+            .filter((x): x is number => typeof x === "number" && x > 0)
+            .map(Number),
+          ceiling: Number(c.ceiling),
+          bandMax: c.band_max == null ? null : Number(c.band_max),
+          transcriptOnly: true,
+        });
+        if (!v.length) continue;
+        calls++;
+        for (const x of v) codes.add(x.code);
+        if (v.some((x) => x.code === "ceiling_leak" || x.code === "above_ceiling")) ceiling = true;
+      }
+      if (!calls) return [];
+      return [
+        {
+          agentType: "negotiation_call",
+          title: `${calls} pay ${calls === 1 ? "call" : "calls"} broke the call's rules${ceiling ? " — the ceiling or more than it" : ""}`,
+          // Kinds of breach only: amounts stay with the pay roles.
+          detail: { calls, kinds: [...codes].sort() },
+          ...(ceiling ? { severity: "critical" as const } : {}),
+        },
+      ];
+    },
+  },
+  {
+    id: "negotiation_call.unconfirmed_yes",
+    element: "hitl",
+    severity: "warning",
+    description: `A candidate said yes on an AI pay call more than ${HEALTH.verbalConfirmHours} hours ago and nobody has confirmed it — nothing is agreed, and no offer is drafted, until TA or the HR head confirms it on the candidate's page.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from offer_negotiations
+        where org_id = ${orgId}
+          and status in ('open','message_sent','countered','call_requested','expired')
+          and (call_outcome ->> 'agreed')::boolean
+          and (call_outcome ->> 'at')::timestamptz < now() - make_interval(hours => ${HEALTH.verbalConfirmHours})`);
+      const n = r[0]?.n ?? 0;
+      if (!n) return [];
+      return [
+        {
+          agentType: "negotiation_call",
+          title: `${n} ${n === 1 ? "yes" : "yeses"} from pay calls waiting to be confirmed`,
+          detail: { candidates: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "negotiation_call.few_agreements",
+    element: "skills",
+    severity: "warning",
+    description: `Of ${HEALTH.minNegotiationCalls14d} or more pay calls in 14 days where the candidate agreed to talk, fewer than ${Math.round(HEALTH.negotiationYesShare * 100)}% ended in a yes — the approved figures may be too far from expectations, or the calls may not land well; read a few.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ connected: number; yes: number }>(sql`
+        select count(*)::int connected,
+          count(*) filter (where end_reason = 'verbal_agreement')::int yes
+        from screening_calls
+        where org_id = ${orgId} and purpose = 'negotiation' and consent_at is not null
+          and status not in ('dialling', 'in_progress')
+          and updated_at >= now() - interval '14 days'`);
+      const x = r[0];
+      if (!x || x.connected < HEALTH.minNegotiationCalls14d) return [];
+      if (x.yes / x.connected >= HEALTH.negotiationYesShare) return [];
+      return [
+        {
+          agentType: "negotiation_call",
+          title: `${x.yes} of ${x.connected} pay calls ended in a yes`,
+          detail: { connected: x.connected, yes: x.yes },
+        },
+      ];
+    },
+  },
+  {
+    id: "ai_call.opt_outs",
+    element: "skills",
+    severity: "warning",
+    description: `${HEALTH.aiCallOptOuts7d} or more candidates asked in 7 days not to be called by the AI assistant — review how the calls come across.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from audit_log
+        where org_id = ${orgId} and action = 'candidate.ai_call_opt_out'
+          and created_at >= now() - interval '7 days'`);
+      const n = r[0]?.n ?? 0;
+      if (n < HEALTH.aiCallOptOuts7d) return [];
+      return [
+        {
+          agentType: "scheduling_call",
+          title: `${n} candidates asked not to be called by the AI assistant`,
+          detail: { optOuts: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "harness.cut_off_replies",
+    element: "harness",
+    severity: "warning",
+    description: `${HEALTH.cutOffReplies24h} or more replies in 24 hours were cut off at the output limit without acting — the agent may be thinking out loud instead of using its tools; its instructions need a look.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; n: number }>(sql`
+        select r.agent_type, count(*)::int n from agent_steps s
+        join agent_runs r on r.id = s.run_id
+        where r.org_id = ${orgId} and s.kind = 'model' and s.output ->> 'stopReason' = 'max_tokens'
+          and s.created_at >= now() - interval '24 hours'
+        group by r.agent_type having count(*) >= ${HEALTH.cutOffReplies24h}`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `${x.n} replies were cut off at the length limit`,
+        detail: { cutOff: x.n },
+      }));
+    },
+  },
+  {
+    id: "hitl.repeated_questions",
+    element: "hitl",
+    severity: "warning",
+    description: `A run asked people ${HEALTH.questionsPerRun} or more questions in 7 days — the agent may be going round in circles (asking again instead of acting on the answer or handing off).`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; runs: number; most: number }>(sql`
+        select r.agent_type, count(*)::int runs, max(q.n)::int most from (
+          select run_id, count(*) n from agent_tasks
+          where org_id = ${orgId} and kind = 'clarification'
+            and created_at >= now() - interval '7 days'
+          group by run_id having count(*) >= ${HEALTH.questionsPerRun}) q
+        join agent_runs r on r.id = q.run_id
+        group by r.agent_type`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `${x.runs} run${x.runs === 1 ? "" : "s"} asked people ${x.most} questions or more`,
+        detail: { runs: x.runs, mostQuestions: x.most },
+      }));
+    },
+  },
+  {
+    id: "tools.repeated_reads",
+    element: "tools",
+    severity: "warning",
+    description: `A run called the same read tool with the same arguments ${HEALTH.repeatedReadsPerRun} or more times in 24 hours — the agent is re-reading (or trying guessed addresses) instead of working from what it read, and spends its budget before it finishes.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ agent_type: string; runs: number; most: number; tool: string }>(sql`
+        select r.agent_type, count(*)::int runs, max(q.n)::int most, min(q.tool_name) tool from (
+          select s.run_id, s.tool_name, count(*) n from agent_steps s
+          where s.org_id = ${orgId} and s.kind = 'tool' and s.tool_name like 'read_%'
+            and s.created_at >= now() - interval '24 hours'
+          -- The same read with the same arguments: searching a document for different
+          -- sections, or reading different documents, is work, not re-reading.
+          group by s.run_id, s.tool_name, s.input::text
+          having count(*) >= ${HEALTH.repeatedReadsPerRun}) q
+        join agent_runs r on r.id = q.run_id
+        group by r.agent_type`);
+      return r.map((x) => ({
+        agentType: x.agent_type,
+        title: `${x.runs} run${x.runs === 1 ? "" : "s"} re-read the same source ${x.most} times or more`,
+        detail: { runs: x.runs, mostReads: x.most, tool: x.tool },
+      }));
+    },
+  },
+  {
+    id: "expert_interview.unanswered",
+    element: "hitl",
+    severity: "warning",
+    description: `A hiring manager has left the Role expert interview agent's questions unanswered for over ${HEALTH.expertUnansweredHours} hours — the role's screening and interviews go ahead without what the hiring manager says it really needs. Remind them, or set a hiring manager who can answer.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from agent_tasks t
+        join agent_runs r on r.id = t.run_id
+        where t.org_id = ${orgId} and r.agent_type = 'expert_interview'
+          and t.kind = 'clarification' and t.status = 'open'
+          and t.created_at < now() - make_interval(hours => ${HEALTH.expertUnansweredHours})`);
+      const n = r[0]?.n ?? 0;
+      if (!n) return [];
+      return [
+        {
+          agentType: "expert_interview",
+          title: `${n} hiring manager interview${n === 1 ? "" : "s"} unanswered for over ${Math.round(HEALTH.expertUnansweredHours / 24)} days`,
+          detail: { open: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "screening_call.short_calls",
+    element: "skills",
+    severity: "warning",
+    description: `${HEALTH.shortCalls7d} or more phone screening calls in 7 days were picked up and agreed to but ended before any question was answered — the assistant may be ending calls early or failing to hear the candidate.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select count(*)::int n from screening_calls
+        where org_id = ${orgId} and purpose = 'screening' and status = 'completed'
+          and consent_at is not null and coalesce(end_reason, '') <> 'not_interested'
+          and jsonb_array_length(answers) = 0 and updated_at >= now() - interval '7 days'`);
+      const n = r[0]?.n ?? 0;
+      if (n < HEALTH.shortCalls7d) return [];
+      return [
+        {
+          agentType: "screening_call",
+          title: `${n} screening calls ended before any question was answered`,
+          detail: { calls: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "context.profile_missing",
+    element: "context",
+    severity: "warning",
+    description: `Live hiring agents are working with no approved organisation profile — the JD, the requisitions and the candidate matching all go without the organisation's own context. Approve one on Organisation → Profile (serious once a role was raised without one).`,
+    evaluate: async (orgId) => {
+      const live = await rows<{ n: number }>(sql`
+        select count(*)::int n from agent_policies
+        where org_id = ${orgId} and enabled
+          and agent_type in ('requisition','jd','intake','screening','publishing','sourcing','distribution')`);
+      if (!live[0]?.n) return [];
+      const [p] = await rows<{ current: string | null }>(sql`
+        select current_version_id current from org_profiles where org_id = ${orgId}`);
+      if (p?.current) return [];
+      const raised = await rows<{ n: number }>(sql`
+        select count(*)::int n from requisitions
+        where org_id = ${orgId} and created_at >= now() - interval '30 days'`);
+      const serious = (raised[0]?.n ?? 0) > 0;
+      return [
+        {
+          agentType: "org_context",
+          title: serious
+            ? "Roles are being raised with no approved organisation profile"
+            : "No approved organisation profile — agents work without the organisation's context",
+          detail: { rolesRaised30d: raised[0]?.n ?? 0 },
+          ...(serious ? { severity: "serious" as const } : {}),
+        },
+      ];
+    },
+  },
+  {
+    id: "context.pay_conventions_waiting",
+    element: "context",
+    severity: "warning",
+    description: `A proposal of the organisation's pay conventions (currency, pay zones, regions) has waited more than ${HEALTH.payConventionsWaitDays} days for the HR head — roles raised meanwhile use the conventions in force. Decide it in the approvals inbox.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ id: string; days: number }>(sql`
+        select id, extract(day from now() - created_at)::int days from pay_convention_drafts
+        where org_id = ${orgId} and status = 'pending'
+          and created_at < now() - make_interval(days => ${HEALTH.payConventionsWaitDays})
+        order by created_at limit 1`);
+      if (!r[0]) return [];
+      return [
+        {
+          agentType: "org_context",
+          title: `Pay conventions proposal waiting ${r[0].days} days for a decision`,
+          detail: { draftId: r[0].id, days: r[0].days },
+        },
+      ];
+    },
+  },
+  {
+    id: "context.pay_currency_mismatch",
+    element: "context",
+    severity: "serious",
+    description:
+      "A role's pay currency is not its pay zone's currency (the zone changed after the role was set up, or the currency was typed over it) — its band would be compared with candidates' pay in the wrong currency. Set the role's pay terms again.",
+    evaluate: async (orgId) => {
+      const r = await rows<{
+        id: string;
+        code: string;
+        pay: string;
+        zone: string;
+        name: string;
+      }>(sql`
+        select r.id, r.code, r.pay_currency pay, z.currency zone, z.name
+        from requisitions r join pay_zones z on z.id = r.pay_zone_id and z.org_id = r.org_id
+        where r.org_id = ${orgId} and r.status not in ('closed','rejected')
+          and r.pay_currency <> z.currency and not r.pays_by_location
+        order by r.code limit 20`);
+      return r.map((x) => ({
+        agentType: "requisition" as const,
+        title: `${x.code} pays in ${x.pay}, but its zone ${x.name} pays in ${x.zone}`,
+        detail: { requisitionId: x.id, payCurrency: x.pay, zoneCurrency: x.zone },
+      }));
+    },
+  },
+  {
+    id: "context.pay_not_comparable",
+    element: "context",
+    severity: "warning",
+    description:
+      "Candidates' pay was recorded in a currency the organisation has no current exchange rate for (none on record, or out of date), so it could not be compared with the role's band. Add the rate on the Organisation page (Pay, currency and pay zones).",
+    evaluate: async (orgId) => {
+      const r = await rows<{ pair: string; n: number }>(sql`
+        select f.currency || ' → ' || r.pay_currency pair, count(*)::int n
+        from pay_figures f
+        join applications a on a.id = f.owner_id and a.org_id = f.org_id
+        join requisitions r on r.id = a.requisition_id and r.org_id = f.org_id
+        where f.org_id = ${orgId} and f.owner_type = 'application'
+          and f.refusal in ('no_rate','stale_rate')
+          and f.created_at >= now() - interval '14 days'
+        group by 1 order by 2 desc limit 5`);
+      if (!r.length) return [];
+      return [
+        {
+          agentType: "org_context",
+          title: `Pay not compared — no current exchange rate for ${r.map((x) => x.pair).join(", ")}`,
+          detail: { pairs: r },
+        },
+      ];
+    },
+  },
+  {
+    id: "context.offer_not_in_reports",
+    element: "context",
+    severity: "warning",
+    description:
+      "An approved offer in a currency other than the organisation's reporting currency had no current exchange rate when it was approved, so its cost is left out of hiring reports. Add the rate on the Organisation page; offers approved afterwards are counted.",
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number; currencies: string }>(sql`
+        select count(*)::int n, string_agg(distinct o.currency, ', ') currencies
+        from offers o join organizations g on g.id = o.org_id
+        where o.org_id = ${orgId} and o.rate_locked_at is not null
+          and o.reporting_amount is null and o.currency <> g.currency
+          and o.rate_locked_at >= now() - interval '90 days'`);
+      if (!r[0]?.n) return [];
+      return [
+        {
+          agentType: "offer",
+          title: `${r[0].n} approved offer${r[0].n > 1 ? "s" : ""} in ${r[0].currencies} left out of reports — no exchange rate at approval`,
+          detail: { offers: r[0].n, currencies: r[0].currencies },
+        },
+      ];
+    },
+  },
+  {
+    id: "context.policy_source_failing",
+    element: "context",
+    severity: "warning",
+    description: `An approved labour policy source has failed its last ${HEALTH.policySourceFailures} reads — changes published there are not being seen. Check its address on the Organisation page, or pause it.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ id: string; label: string }>(sql`
+        select s.id, s.label from policy_sources s
+        where s.org_id = ${orgId} and s.active
+          and (select count(*) from (
+                select status from policy_reads where source_id = s.id and org_id = s.org_id
+                order by fetched_at desc limit ${HEALTH.policySourceFailures}) last
+               where last.status = 'failed') = ${HEALTH.policySourceFailures}
+        order by s.label limit 10`);
+      return r.map((x) => ({
+        agentType: "labour_policy" as const,
+        title: `Policy source failing: ${x.label}`,
+        detail: { sourceId: x.id },
+      }));
+    },
+  },
+  {
+    id: "context.policy_zone_unread",
+    element: "context",
+    severity: "warning",
+    description: `A place the organisation is hiring in right now has had no successful read of its labour policy sources for ${HEALTH.policyStaleDays} days (or has no sources) — rule changes there would be missed. Seed or add its official sources, and switch the Labour law & policy agent on.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ zone: string }>(sql`
+        select distinct z.name zone from requisitions r
+        join pay_zones z on z.id = r.pay_zone_id and z.org_id = r.org_id
+        where r.org_id = ${orgId} and r.status in ('approved','pending_dh','pending_hr','pending_cbo')
+          and not exists (
+            select 1 from policy_reads pr join policy_sources s on s.id = pr.source_id
+            where pr.org_id = r.org_id and pr.status <> 'failed'
+              and pr.fetched_at >= now() - make_interval(days => ${HEALTH.policyStaleDays})
+              and (s.zone_id = z.id or s.country = any(z.countries)))
+        order by 1 limit 10`);
+      return r.map((x) => ({
+        agentType: "labour_policy" as const,
+        title: `No current labour policy read for ${x.zone}, where a role is open`,
+        detail: { zone: x.zone },
+      }));
+    },
+  },
+  {
+    id: "context.policy_waiting_past_effective",
+    element: "context",
+    severity: "serious",
+    description:
+      "A labour policy change is already in effect but still waiting for the HR head — agents are working to the old rule. Decide it in the approvals inbox.",
+    evaluate: async (orgId) => {
+      const r = await rows<{ id: string; area: string; effective: string }>(sql`
+        select id, area, effective_date::text effective from policy_findings
+        where org_id = ${orgId} and status in ('new','proposed')
+          and effective_date is not null and effective_date <= current_date
+        order by effective_date limit 10`);
+      return r.map((x) => ({
+        agentType: "labour_policy" as const,
+        title: `A ${x.area.replace(/_/g, " ")} change effective ${x.effective} is still waiting for a decision`,
+        detail: { findingId: x.id },
+      }));
+    },
+  },
+  {
+    id: "offer.policy_check_overridden",
+    element: "context",
+    severity: "warning",
+    description:
+      "An offer went ahead after the offer check found it breaks an approved labour rule — the HR head overrode it with a reason in the last 30 days. Each one is listed so it can be reviewed with counsel.",
+    evaluate: async (orgId) => {
+      const r = await rows<{ id: string; reason: string; by: string }>(sql`
+        select id, policy_override->>'reason' reason, policy_override->>'by' by from offers
+        where org_id = ${orgId} and policy_override is not null
+          and (policy_override->>'at')::timestamptz >= now() - interval '30 days'
+        order by (policy_override->>'at') desc limit 10`);
+      return r.map((x) => ({
+        agentType: "offer" as const,
+        title: `Offer check overridden by ${x.by}: “${x.reason.slice(0, 80)}”`,
+        detail: { offerId: x.id },
+      }));
+    },
+  },
+  {
+    id: "context.profile_stale",
+    element: "context",
+    severity: "warning",
+    description: `The approved organisation profile has not been touched for ${HEALTH.profileStaleDays} days, or documents were added after it was approved — the profile may no longer say what the organisation is. Read the website again or start a new draft.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ id: string; version: number; days: number }>(sql`
+        select v.id, v.version, extract(day from now() - v.decided_at)::int days
+        from org_profiles p join org_profile_versions v on v.id = p.current_version_id
+        where p.org_id = ${orgId} and v.decided_at < now() - make_interval(days => ${HEALTH.profileStaleDays})`);
+      if (!r.length) return [];
+      const docs = await rows<{ n: number }>(sql`
+        select count(*)::int n from org_context_sources
+        where org_id = ${orgId} and kind = 'document' and deleted_at is null
+          and created_at > (select decided_at from org_profiles p join org_profile_versions v on v.id = p.current_version_id where p.org_id = ${orgId})`);
+      return r.map((x) => ({
+        agentType: "org_context",
+        title: `The approved organisation profile (version ${x.version}) is ${x.days} days old${docs[0]?.n ? ` and ${docs[0].n} document(s) arrived after it` : ""}`,
+        detail: { version: x.version, days: x.days, documentsAfter: docs[0]?.n ?? 0 },
+      }));
+    },
+  },
+  {
+    id: "context.score_drift",
+    element: "context",
+    severity: "warning",
+    description: `The average CV score moved by ${HEALTH.scoreDriftPoints} points or more in the ${HEALTH.scoreDriftWindowDays} days after the organisation profile was approved, compared with the ${HEALTH.scoreDriftWindowDays} days before. The profile is part of what the scorer reads, so a change in it can tilt every score — check the latest version for wording that favours or disfavours particular candidates (serious when the version was self-approved).`,
+    evaluate: async (orgId) => {
+      const r = await rows<{
+        version: number;
+        version_id: string;
+        before_avg: number | null;
+        before_n: number;
+        after_avg: number | null;
+        after_n: number;
+      }>(sql`
+        with v as (
+          select v.id, v.version, v.decided_at from org_profiles p
+          join org_profile_versions v on v.id = p.current_version_id
+          where p.org_id = ${orgId} and v.decided_at is not null)
+        select v.version, v.id version_id,
+          (select avg(overall_score)::float from match_scores m where m.org_id = ${orgId}
+             and m.computed_at >= v.decided_at - make_interval(days => ${HEALTH.scoreDriftWindowDays})
+             and m.computed_at < v.decided_at) before_avg,
+          (select count(*)::int from match_scores m where m.org_id = ${orgId}
+             and m.computed_at >= v.decided_at - make_interval(days => ${HEALTH.scoreDriftWindowDays})
+             and m.computed_at < v.decided_at) before_n,
+          (select avg(overall_score)::float from match_scores m where m.org_id = ${orgId}
+             and m.computed_at >= v.decided_at
+             and m.computed_at < v.decided_at + make_interval(days => ${HEALTH.scoreDriftWindowDays})) after_avg,
+          (select count(*)::int from match_scores m where m.org_id = ${orgId}
+             and m.computed_at >= v.decided_at
+             and m.computed_at < v.decided_at + make_interval(days => ${HEALTH.scoreDriftWindowDays})) after_n
+        from v`);
+      const x = r[0];
+      if (
+        !x ||
+        x.before_avg == null ||
+        x.after_avg == null ||
+        x.before_n < HEALTH.scoreDriftMinSamples ||
+        x.after_n < HEALTH.scoreDriftMinSamples
+      )
+        return [];
+      const drift = Math.round(x.after_avg - x.before_avg);
+      if (Math.abs(drift) < HEALTH.scoreDriftPoints) return [];
+      const self = await rows<{ n: number }>(sql`
+        select count(*)::int n from audit_log
+        where org_id = ${orgId} and entity_id = ${x.version_id}
+          and action = 'org_profile.approved' and (detail->>'selfApproved') = 'true'`);
+      const selfApproved = (self[0]?.n ?? 0) > 0;
+      return [
+        {
+          agentType: "org_context",
+          title: `Average CV score ${drift > 0 ? "rose" : "fell"} ${Math.abs(drift)} points after organisation profile version ${x.version} was approved${selfApproved ? " (self-approved)" : ""}`,
+          detail: {
+            version: x.version,
+            beforeAvg: Math.round(x.before_avg),
+            afterAvg: Math.round(x.after_avg),
+            beforeScorings: x.before_n,
+            afterScorings: x.after_n,
+            selfApproved,
+          },
+          ...(selfApproved ? { severity: "serious" as const } : {}),
+        },
+      ];
+    },
+  },
+  {
+    id: "context.reread_failed",
+    element: "context",
+    severity: "warning",
+    description: `The monthly re-read of the organisation's website failed${HEALTH.rereadSeriousFailures > 1 ? ` — it becomes serious after ${HEALTH.rereadSeriousFailures} failures in a row` : ""}. Check the website address on Organisation → Profile and use “Read it now”.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ status: string; failures: number }>(sql`
+        select last_reread_status status, reread_failures failures
+        from org_profiles where org_id = ${orgId} and last_reread_status = 'failed'`);
+      if (!r.length) return [];
+      const serious = r[0]!.failures >= HEALTH.rereadSeriousFailures;
+      return [
+        {
+          agentType: "org_context",
+          title: `The organisation website could not be read${r[0]!.failures > 1 ? ` (${r[0]!.failures} failures in a row)` : ""}`,
+          detail: { failures: r[0]!.failures },
+          ...(serious ? { severity: "serious" as const } : {}),
+        },
+      ];
+    },
+  },
+  {
+    id: "interview.new_panelist_waiting",
+    element: "hitl",
+    severity: "warning",
+    description: `The Interview coordinator asked the HR head to add someone to the panel directory more than ${HEALTH.newPanelistWaitingHours} hours ago and nobody has answered — that interview round cannot get a panel or times until someone is typed in (or the request is declined) in the hiring desk.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ code: string; level: number; hours: number }>(sql`
+        select r.code, (t.proposed_action -> 'args' -> 'subject' ->> 'level')::int as level,
+          extract(epoch from now() - t.created_at)::int / 3600 as hours
+        from agent_tasks t
+        join requisitions r on r.org_id = t.org_id
+          and r.id::text = t.proposed_action -> 'args' -> 'subject' ->> 'requisitionId'
+        where t.org_id = ${orgId} and t.status = 'open' and t.kind = 'gate'
+          and t.proposed_action -> 'args' -> 'subject' ->> 'type' = 'new_panelist'
+          and t.created_at < now() - make_interval(hours => ${HEALTH.newPanelistWaitingHours})
+        limit 20`);
+      return r.map((x) => ({
+        agentType: "interview",
+        title: `${x.code} L${x.level} has waited ${x.hours} hours for a new panellist`,
+        detail: { requisition: x.code, level: x.level, hours: x.hours },
+      }));
+    },
+  },
+  {
+    id: "context.review_waiting",
+    element: "context",
+    severity: "warning",
+    description: `A submitted organisation profile has waited more than ${HEALTH.reviewWaitingDays} days for the HR head's decision — the improvements it holds are not reaching any agent. Decide it on Organisation → Profile.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ version: number; days: number }>(sql`
+        select version, extract(day from now() - submitted_at)::int days
+        from org_profile_versions
+        where org_id = ${orgId} and status = 'pending'
+          and submitted_at < now() - make_interval(days => ${HEALTH.reviewWaitingDays})`);
+      return r.map((x) => ({
+        agentType: "org_context",
+        title: `Profile version ${x.version} has waited ${x.days} days for approval`,
+        detail: { version: x.version, days: x.days },
+      }));
+    },
+  },
+  {
+    id: "context.items_refused",
+    element: "context",
+    severity: "warning",
+    description: `More than ${HEALTH.refusedItems7d} items from the website or documents were refused in 7 days (pay figures or staff names) — a source may be the wrong kind of document for the profile.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number }>(sql`
+        select coalesce(sum(jsonb_array_length(coalesce(detail->'refused', '[]'::jsonb))), 0)::int n
+        from audit_log
+        where org_id = ${orgId} and action = 'org_profile.items_refused'
+          and created_at >= now() - interval '7 days'`);
+      const n = r[0]?.n ?? 0;
+      if (n <= HEALTH.refusedItems7d) return [];
+      return [
+        {
+          agentType: "org_context",
+          title: `${n} profile items were refused in 7 days (pay figures or staff names)`,
+          detail: { refused: n },
+        },
+      ];
+    },
+  },
+  {
+    id: "voice_guard.unreviewed",
+    element: "harness",
+    severity: "warning",
+    description: `An answered AI phone call has had no Voice Guard review for more than ${HEALTH.callReviewOverdueHours} hours (not queued, still running, or given up after three tries). Every answered call is meant to be reviewed: check the agent scheduler and the Voice Guard's failed runs, then use Review again on Call reviews.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{ n: number; failed: number }>(sql`
+        select count(*)::int n, count(*) filter (where r.status = 'failed')::int failed
+        from screening_calls c
+        left join call_reviews r on r.call_id = c.id
+        where c.org_id = ${orgId}
+          and c.started_at is not null and c.ended_at is not null
+          and c.status not in ('dialling', 'in_progress')
+          and c.ended_at between now() - interval '14 days'
+            and now() - make_interval(hours => ${HEALTH.callReviewOverdueHours})
+          and (r.id is null or r.status <> 'done')
+          and exists (select 1 from agent_policies p where p.org_id = c.org_id and p.enabled
+            and p.agent_type in ('screening_call', 'scheduling_call', 'negotiation_call'))`);
+      const x = r[0];
+      if (!x || x.n === 0) return [];
+      return [
+        {
+          agentType: "voice_guard",
+          title: `${x.n} answered AI phone call${x.n === 1 ? " has" : "s have"} no Voice Guard review yet`,
+          detail: x,
+        },
+      ];
+    },
+  },
+  {
+    id: "voice_guard.breaches",
+    element: "definition",
+    severity: "warning",
+    description: `The Voice Guard found a breach of the call's rules (critical or high) on ${HEALTH.callBreaches7d} or more of one phone agent's calls in 7 days (serious from ${HEALTH.callBreachesSerious7d}). The detail lists which checks failed most — read those reviews under Call reviews and change the agent's instructions where the same mistake repeats.`,
+    evaluate: async (orgId) => {
+      const r = await rows<{
+        purpose: string;
+        reviewed: number;
+        breached: number;
+        top: string | null;
+      }>(sql`
+        select r.purpose, count(*)::int reviewed,
+          count(*) filter (where r.verdict = 'breach')::int breached,
+          (select string_agg(x.chk || ' (' || x.n || ')', ', ' order by x.n desc)
+             from (select f ->> 'check' chk, count(*)::int n
+                   from call_reviews r2, jsonb_array_elements(r2.findings) f
+                   where r2.org_id = ${orgId} and r2.purpose = r.purpose and r2.verdict = 'breach'
+                     and r2.reviewed_at >= now() - interval '7 days'
+                     and f ->> 'severity' in ('critical', 'high')
+                   group by 1 order by 2 desc limit 3) x) top
+        from call_reviews r
+        where r.org_id = ${orgId} and r.status = 'done'
+          and r.reviewed_at >= now() - interval '7 days'
+        group by r.purpose`);
+      return r
+        .filter((x) => x.breached >= HEALTH.callBreaches7d)
+        .map((x) => ({
+          agentType: `${x.purpose}_call`,
+          severity:
+            x.breached >= HEALTH.callBreachesSerious7d
+              ? ("serious" as const)
+              : ("warning" as const),
+          title: `${x.breached} of ${x.reviewed} reviewed ${x.purpose} calls in 7 days broke the call's rules`,
+          detail: x,
+        }));
+    },
+  },
+  {
+    // A screening test call on 10 November spoke a block of code and its reasoning.
+    id: "voice_guard.read_out_workings",
+    element: "definition",
+    severity: "serious",
+    description:
+      "An AI phone agent read out a tool call, code or its own reasoning to a candidate on a call in the last 7 days (found by the Voice Guard). The live guard cuts such a line off, but the candidate heard part of it: read the call under Call reviews, and check the agent's instructions and tools.",
+    evaluate: async (orgId) => {
+      const r = await rows<{ purpose: string; n: number }>(sql`
+        select r.purpose, count(distinct r.id)::int n
+        from call_reviews r, jsonb_array_elements(r.findings) f
+        where r.org_id = ${orgId} and r.status = 'done'
+          and r.reviewed_at >= now() - interval '7 days'
+          and f ->> 'summary' = ${WORKINGS_FINDING}
+        group by r.purpose`);
+      return r.map((x) => ({
+        agentType: `${x.purpose}_call`,
+        title: `${x.n} ${x.purpose} call${x.n === 1 ? "" : "s"} read out a tool call, code or its reasoning to the candidate`,
+        detail: x,
+      }));
+    },
+  },
+];
+
+/* -------------------------------------------------------------- evaluation */
+
+/** Organisations worth checking: any agent switched on, or agent activity in 30 days. */
+async function orgsToCheck(orgId?: string): Promise<string[]> {
+  if (orgId) return [orgId];
+  const r = await rows<{ org_id: string }>(sql`
+    select org_id from agent_policies where enabled
+    union select org_id from agent_runs where created_at >= now() - interval '30 days'`);
+  return r.map((x) => x.org_id);
+}
+
+export type HealthCounts = { orgs: number; opened: number; resolved: number; seen: number };
+
+/**
+ * `resolveAfterMinutes`: how long an issue must go unseen before it resolves.
+ * The scheduled sweep waits HEALTH.resolveAfterMinutes so a flapping rule does
+ * not reopen (and re-alert) every few minutes; an explicit single-org check
+ * (tests, "check now") resolves at once unless told otherwise.
+ */
+export async function evaluateAgentHealth(
+  opts: { orgId?: string; resolveAfterMinutes?: number } = {},
+): Promise<HealthCounts> {
+  const resolveAfter = opts.resolveAfterMinutes ?? (opts.orgId ? 0 : HEALTH.resolveAfterMinutes);
+  const counts: HealthCounts = { orgs: 0, opened: 0, resolved: 0, seen: 0 };
+  for (const orgId of await orgsToCheck(opts.orgId)) {
+    counts.orgs++;
+    const active = await db
+      .select()
+      .from(agentIssues)
+      .where(and(eq(agentIssues.orgId, orgId), ne(agentIssues.status, "resolved")));
+    const firing = new Set<string>();
+    for (const rule of RULES) {
+      let findings: Finding[] = [];
+      try {
+        findings = await rule.evaluate(orgId);
+      } catch (e) {
+        log.error("agent.health.rule_failed", { org_id: orgId, rule: rule.id, error: e as Error });
+        // Keep current issues for a rule that could not be evaluated.
+        for (const a of active.filter((x) => x.rule === rule.id)) firing.add(a.id);
+        continue;
+      }
+      for (const f of findings) {
+        const severity = f.severity ?? rule.severity;
+        const existing = active.find((a) => a.rule === rule.id && a.agentType === f.agentType);
+        if (existing) {
+          firing.add(existing.id);
+          counts.seen++;
+          await db
+            .update(agentIssues)
+            .set({
+              title: f.title,
+              detail: f.detail,
+              severity,
+              lastSeenAt: new Date(),
+              occurrences: sql`${agentIssues.occurrences} + 1`,
+            })
+            .where(eq(agentIssues.id, existing.id));
+          continue;
+        }
+        const [row] = await db
+          .insert(agentIssues)
+          .values({
+            orgId,
+            agentType: f.agentType,
+            element: rule.element,
+            rule: rule.id,
+            severity,
+            title: f.title,
+            detail: f.detail,
+          })
+          .onConflictDoNothing()
+          .returning({ id: agentIssues.id });
+        if (!row) continue;
+        firing.add(row.id);
+        counts.opened++;
+        await writeAudit({
+          actor: "system:agent-health",
+          orgId,
+          action: "agent.issue.opened",
+          entityType: "agent_issue",
+          entityId: row.id,
+          detail: {
+            rule: rule.id,
+            element: rule.element,
+            agent: f.agentType,
+            severity,
+            title: f.title,
+          },
+        });
+      }
+    }
+    const quietSince = Date.now() - resolveAfter * 60_000;
+    const cleared = active.filter((a) => !firing.has(a.id) && a.lastSeenAt.getTime() < quietSince);
+    if (cleared.length) {
+      await db
+        .update(agentIssues)
+        .set({ status: "resolved", resolvedAt: new Date() })
+        .where(
+          inArray(
+            agentIssues.id,
+            cleared.map((c) => c.id),
+          ),
+        );
+      for (const c of cleared) {
+        counts.resolved++;
+        await writeAudit({
+          actor: "system:agent-health",
+          orgId,
+          action: "agent.issue.resolved",
+          entityType: "agent_issue",
+          entityId: c.id,
+          detail: { rule: c.rule, agent: c.agentType },
+        });
+      }
+    }
+  }
+  return counts;
+}
+
+/* --------------------------------------------------------------- heartbeat */
+
+const HEARTBEAT_ID = "agents";
+
+/** Called by every scheduler tick; runs the health engine at most every few minutes. */
+export async function heartbeatAndMaybeEvaluate(
+  tickCounts: Record<string, unknown>,
+): Promise<void> {
+  const now = new Date();
+  const [hb] = await db
+    .insert(agentRuntimeHeartbeat)
+    .values({ id: HEARTBEAT_ID, lastTickAt: now, lastCounts: tickCounts })
+    .onConflictDoUpdate({
+      target: agentRuntimeHeartbeat.id,
+      set: { lastTickAt: now, lastCounts: tickCounts },
+    })
+    .returning({ lastHealthAt: agentRuntimeHeartbeat.lastHealthAt });
+  const due =
+    !hb?.lastHealthAt ||
+    now.getTime() - hb.lastHealthAt.getTime() >= HEALTH.evaluateEveryMinutes * 60_000;
+  if (!due) return;
+  await db
+    .update(agentRuntimeHeartbeat)
+    .set({ lastHealthAt: now })
+    .where(eq(agentRuntimeHeartbeat.id, HEARTBEAT_ID));
+  const c = await evaluateAgentHealth();
+  if (c.opened || c.resolved) log.info("agent.health", c);
+  // Push channels (e-mail, webhook) for newly opened serious / critical issues.
+  const { dispatchAgentAlerts } = await import("./alerts.server");
+  const a = await dispatchAgentAlerts();
+  if (a.alerted) log.info("agent.alerts", a);
+  const { dispatchAgentDigests } = await import("./alerts.server");
+  const d = await dispatchAgentDigests();
+  if (d.digests) log.info("agent.digests", d);
+  // Platform SLO burn-rate alerts ride the same cadence (src/server/slo.server.ts).
+  try {
+    const { evaluateSloBurn } = await import("../slo.server");
+    const b = await evaluateSloBurn();
+    if (b.opened || b.escalated || b.resolved) log.info("slo.burn", b);
+  } catch (e) {
+    log.error("slo.burn_failed", { error: e instanceof Error ? e : String(e) });
+  }
+}
+
+/** Scheduler liveness for the observability page (a stopped scheduler can't report itself). */
+export async function schedulerStatus(): Promise<{
+  lastTickAt: string | null;
+  lastHealthAt: string | null;
+  minutesSinceTick: number | null;
+  healthy: boolean;
+}> {
+  const [hb] = await db
+    .select()
+    .from(agentRuntimeHeartbeat)
+    .where(eq(agentRuntimeHeartbeat.id, HEARTBEAT_ID))
+    .limit(1);
+  const minutes = hb?.lastTickAt
+    ? Math.floor((Date.now() - hb.lastTickAt.getTime()) / 60_000)
+    : null;
+  return {
+    lastTickAt: hb?.lastTickAt?.toISOString() ?? null,
+    lastHealthAt: hb?.lastHealthAt?.toISOString() ?? null,
+    minutesSinceTick: minutes,
+    healthy: minutes != null && minutes <= HEALTH.heartbeatMinutes,
+  };
+}

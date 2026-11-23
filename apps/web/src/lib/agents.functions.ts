@@ -1,0 +1,1090 @@
+/**
+ * Agent server functions: the Decisions inbox, recent runs, and per-org agent
+ * settings (docs/agentic-plan.md §5, §8). Reads are org-scoped; settings are
+ * HR-head / CBO (owner passes); decisions are checked against each task's
+ * role or assignee by the runtime.
+ */
+import { CEILING_MESSAGE, LEG_LIMIT_MESSAGE } from "../server/agents/run-messages";
+import { taskIsLive } from "../server/agents/task-liveness";
+import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
+import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
+import { z } from "zod";
+
+import { db } from "../server/db";
+import { plainPreview } from "../server/desk/desk.server";
+import { agentPolicies, agentRuns, agentTasks, userRoles, type AgentType } from "@db/schema";
+import { requireOrg } from "./auth.middleware";
+import { AGENT_CATALOG, WHITELISTABLE_TEMPLATES } from "./agents.catalog";
+
+const AGENT_TYPES = AGENT_CATALOG.map((a) => a.type) as [string, ...string[]];
+const ROLES = [
+  "recruiter",
+  "hiring_manager",
+  "department_head",
+  "hr_head",
+  "president_cbo",
+] as const;
+const SETTINGS_ROLES = ["hr_head", "president_cbo"] as const;
+
+/** Errors the runtime itself writes; anything else (provider text) is not shown. */
+const SAFE_RUN_ERRORS = new Set([
+  LEG_LIMIT_MESSAGE,
+  CEILING_MESSAGE,
+  "The run reached its step or token budget.",
+  "The worker stopped before finishing this step.",
+  "No AI model key saved. Add one on the Integrations page.",
+  "Paused: this agent reached its monthly token budget.",
+]);
+const GENERIC_RUN_ERROR = "The agent could not complete this step.";
+
+const clip = (s: string | null, n: number) => (s && s.length > n ? `${s.slice(0, n)}…` : s);
+
+const rolesOf = createServerOnlyFn(async function rolesOf(userId: string, orgId: string) {
+  return (
+    await db
+      .select({ role: userRoles.role })
+      .from(userRoles)
+      .where(and(eq(userRoles.userId, userId), eq(userRoles.orgId, orgId)))
+  ).map((r) => r.role);
+});
+
+/* --------------------------------------------------------- decisions inbox */
+
+export type AgentTaskView = {
+  id: string;
+  kind: "gate" | "approval" | "clarification";
+  title: string;
+  body: string;
+  agentType: string;
+  runId: string;
+  goal: string;
+  /** Proposed tool call; args as pretty JSON so the reviewer can read and edit them. */
+  action: { name: string; argsJson: string } | null;
+  assigneeRole: string | null;
+  /** What a gate decides (e.g. "requisition", "org_profile"), when it is tied to a record. */
+  subjectType: string | null;
+  createdAt: string;
+};
+
+/** Open agent requests the caller can act on (owner: all of the org's). */
+export const listAgentTasks = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .handler(async ({ context }): Promise<AgentTaskView[]> => openTasks(context));
+
+/**
+ * The open requests of one workflow run's agents — answered and approved
+ * inside the workflow window instead of the whole inbox. Org-scoped; same
+ * visibility as Waiting for you (owner: all; others: theirs or their role's).
+ */
+export const listWorkflowRunTasks = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ workflowRunId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<AgentTaskView[]> => {
+    const { workflowRuns } = await import("@db/schema");
+    const [wr] = await db
+      .select({
+        context: workflowRuns.context,
+        waitingRunId: workflowRuns.waitingRunId,
+        createdAt: workflowRuns.createdAt,
+      })
+      .from(workflowRuns)
+      .where(and(eq(workflowRuns.id, data.workflowRunId), eq(workflowRuns.orgId, context.orgId)))
+      .limit(1);
+    if (!wr) return [];
+    const ids = new Set([
+      ...(((wr.context as { runs?: string[] } | null)?.runs ?? []) as string[]),
+      ...(wr.waitingRunId ? [wr.waitingRunId] : []),
+    ]);
+    // While it waits on its requisition, agents working on that requisition
+    // (e.g. revising it after a send-back) ask their questions in this thread too.
+    const subject = (wr.context as { subject?: { type?: string; id?: string } } | null)?.subject;
+    if (subject?.type === "requisition" && subject.id) {
+      const linked = await db
+        .select({ id: agentRuns.id })
+        .from(agentRuns)
+        .where(
+          and(
+            eq(agentRuns.orgId, context.orgId),
+            eq(agentRuns.subjectType, "requisition"),
+            eq(agentRuns.subjectId, subject.id),
+            gte(agentRuns.createdAt, wr.createdAt),
+          ),
+        );
+      for (const l of linked) ids.add(l.id);
+    }
+    return ids.size ? openTasks(context, [...ids]) : [];
+  });
+
+async function openTasks(
+  context: { userId: string; orgId: string; isOwner: boolean },
+  runIds?: string[],
+): Promise<AgentTaskView[]> {
+  {
+    const roles = await rolesOf(context.userId, context.orgId);
+    const mine = context.isOwner
+      ? undefined
+      : or(
+          eq(agentTasks.assigneeUserId, context.userId),
+          roles.length ? inArray(agentTasks.assigneeRole, roles) : undefined,
+        );
+    const rows = await db
+      .select({
+        id: agentTasks.id,
+        kind: agentTasks.kind,
+        title: agentTasks.title,
+        body: agentTasks.body,
+        proposedAction: agentTasks.proposedAction,
+        assigneeRole: agentTasks.assigneeRole,
+        createdAt: agentTasks.createdAt,
+        runId: agentRuns.id,
+        agentType: agentRuns.agentType,
+        goal: agentRuns.goal,
+      })
+      .from(agentTasks)
+      .innerJoin(agentRuns, eq(agentRuns.id, agentTasks.runId))
+      .where(
+        and(
+          eq(agentTasks.orgId, context.orgId),
+          eq(agentTasks.status, "open"),
+          taskIsLive(),
+          mine,
+          runIds ? inArray(agentTasks.runId, runIds) : undefined,
+        ),
+      )
+      .orderBy(agentTasks.createdAt)
+      .limit(200);
+    return rows.map((r) => {
+      const a = r.proposedAction as {
+        name?: string;
+        args?: { subject?: { type?: string } } | unknown;
+      } | null;
+      return {
+        id: r.id,
+        kind: r.kind,
+        title: r.title,
+        body: r.body,
+        agentType: r.agentType,
+        runId: r.runId,
+        goal: plainPreview(r.goal, 300) ?? "",
+        action:
+          r.kind === "approval" && a?.name
+            ? { name: a.name, argsJson: JSON.stringify(a.args ?? {}, null, 2) }
+            : null,
+        assigneeRole: r.assigneeRole,
+        subjectType:
+          r.kind === "gate"
+            ? ((a?.args as { subject?: { type?: string } } | undefined)?.subject?.type ?? null)
+            : null,
+        createdAt: r.createdAt.toISOString(),
+      };
+    });
+  }
+}
+
+const Decision = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("approved"),
+    args: z.record(z.string(), z.unknown()).optional(),
+    comment: z.string().max(2000).optional(),
+    /** A screening decision decided the other way: the person's call, with a comment. */
+    outcome: z.enum(["proceed", "hold"]).optional(),
+  }),
+  z.object({
+    status: z.literal("rejected"),
+    reason: z.string().max(2000).optional(),
+    /** Send back for changes (requisitions in approval) instead of a final decline. */
+    changes: z.boolean().optional(),
+    /** Decline a screening decision by rejecting the candidate (needs a reason). */
+    rejectCandidate: z.boolean().optional(),
+  }),
+  z.object({ status: z.literal("answered"), answer: z.string().min(1).max(4000) }),
+]);
+
+export type AgentDecisionInput = z.infer<typeof Decision>;
+
+export const decideAgentTask = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ taskId: z.string().uuid(), decision: Decision }).parse(d))
+  .handler(async ({ data, context }) => {
+    // Approving an agent's offer release or rejection batch, approving a
+    // hiring recommendation of `reject`, and declining a screening decision
+    // with "reject the candidate" all end the same way as doing it by hand:
+    // the candidate or the offer is moved. Each needs a fresh password.
+    if (data.decision.status === "approved" || data.decision.status === "rejected") {
+      const [task] = await db
+        .select({ proposedAction: agentTasks.proposedAction })
+        .from(agentTasks)
+        .where(and(eq(agentTasks.id, data.taskId), eq(agentTasks.orgId, context.orgId)))
+        .limit(1);
+      const subject = (
+        task?.proposedAction as {
+          args?: { subject?: { type?: string; recommendation?: string } };
+        } | null
+      )?.args?.subject;
+      const rejectsCandidate =
+        (data.decision.status === "approved" &&
+          (subject?.type === "offer_release" ||
+            subject?.type === "rejection" ||
+            (subject?.type === "hiring_decision" && subject?.recommendation === "reject"))) ||
+        (data.decision.status === "rejected" && data.decision.rejectCandidate === true);
+      if (rejectsCandidate) {
+        const { assertStepUp } = await import("../server/step-up");
+        const { getRequest } = await import("@tanstack/react-start/server");
+        await assertStepUp(context.userId, getRequest());
+      }
+    }
+    const { resolveTask } = await import("../server/agents/runtime.server");
+    const result = await resolveTask({
+      orgId: context.orgId,
+      taskId: data.taskId,
+      userId: context.userId,
+      decision: data.decision,
+    });
+    const { kickAgents } = await import("../server/agents/orchestrator.server");
+    kickAgents(context.orgId);
+    // A request that outlived its work was closed, not decided: say so.
+    return result.outcome === "no_longer_relevant"
+      ? { ok: true as const, noLongerRelevant: result.message }
+      : { ok: true as const, noLongerRelevant: null };
+  });
+
+/* ------------------------------------------------------------- recent runs */
+
+export type AgentRunView = {
+  id: string;
+  agentType: string;
+  status: string;
+  goal: string;
+  result: string | null;
+  error: string | null;
+  steps: number;
+  tokens: number;
+  createdAt: string;
+  finishedAt: string | null;
+  /** live | replay (dry run of `replayOf`). */
+  mode: "live" | "replay";
+  replayOf: string | null;
+};
+
+export const listAgentRuns = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .handler(async ({ context }): Promise<AgentRunView[]> => {
+    const rows = await db
+      .select()
+      .from(agentRuns)
+      .where(eq(agentRuns.orgId, context.orgId))
+      .orderBy(desc(agentRuns.createdAt))
+      .limit(50);
+    return rows.map((r) => ({
+      id: r.id,
+      agentType: r.agentType,
+      status: r.status,
+      goal: plainPreview(r.goal, 300) ?? "",
+      result: plainPreview(r.result, 600),
+      error: r.lastError
+        ? SAFE_RUN_ERRORS.has(r.lastError)
+          ? r.lastError
+          : GENERIC_RUN_ERROR
+        : null,
+      steps: r.stepCount,
+      tokens: r.tokensUsed,
+      createdAt: r.createdAt.toISOString(),
+      finishedAt: r.finishedAt?.toISOString() ?? null,
+      mode: r.mode,
+      replayOf: r.replayOf,
+    }));
+  });
+
+export const cancelAgentRun = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { assertRole } = await import("./auth.middleware");
+    const [run] = await db
+      .select({ principal: agentRuns.principalUserId })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.id, data.runId), eq(agentRuns.orgId, context.orgId)))
+      .limit(1);
+    if (!run) throw new Error("Run not found");
+    // The person the agent works for may stop it; otherwise HR leadership.
+    if (run.principal !== context.userId) {
+      await assertRole(context.userId, context.orgId, [...SETTINGS_ROLES]);
+    }
+    const { cancelRun } = await import("../server/agents/runtime.server");
+    await cancelRun({ orgId: context.orgId, runId: data.runId, userId: context.userId });
+    return { ok: true as const };
+  });
+
+/* ---------------------------------------------------------------- settings */
+
+export type AgentSettingsView = {
+  canEdit: boolean;
+  allPaused: boolean;
+  /** Model safety check (red-team probes) that Autonomous requires — docs/red-team.md. */
+  safetyCheck: import("../server/redteam/check.server").SafetyCheckView;
+  agents: {
+    type: string;
+    live: boolean;
+    enabled: boolean;
+    autonomy: "suggest" | "act_and_notify" | "autonomous";
+    whitelistedTemplates: string[];
+    monthlyTokenBudget: number | null;
+    /** Run limits per stretch of work (between human decisions); null = the agent's default. */
+    maxStepsPerLeg: number | null;
+    maxTokensPerLeg: number | null;
+    /** The agent's own default AI turns per stretch. */
+    defaultStepsPerLeg: number;
+    /** Measured over 30 days; a person applies it (docs/agentic-plan.md §5.2). */
+    recommendation: import("../server/agents/autonomy.server").AutonomyRecommendation | null;
+    /** An Agent studio agent granted to this organisation (its published version). */
+    studio?: { label: string; description: string; version: number; riskTier: string };
+  }[];
+};
+
+export const agentSettings = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .handler(async ({ context }): Promise<AgentSettingsView> => {
+    const { isAgentLive } = await import("../server/agents");
+    const { getAgent } = await import("../server/agents/registry");
+    const rows = await db
+      .select()
+      .from(agentPolicies)
+      .where(eq(agentPolicies.orgId, context.orgId));
+    const roles = await rolesOf(context.userId, context.orgId);
+    const by = new Map(rows.map((r) => [r.agentType, r]));
+    const { autonomyRecommendations } = await import("../server/agents/autonomy.server");
+    const { ensureAgentsRegistered } = await import("../server/agents");
+    ensureAgentsRegistered();
+    const recs = await autonomyRecommendations(
+      context.orgId,
+      AGENT_CATALOG.map((a) => a.type),
+    );
+    const { safetyCheckView } = await import("../server/redteam/check.server");
+    return {
+      canEdit:
+        context.isOwner || roles.some((r) => (SETTINGS_ROLES as readonly string[]).includes(r)),
+      allPaused: by.get("*")?.enabled === false,
+      safetyCheck: await safetyCheckView(context.orgId),
+      agents: AGENT_CATALOG.map((a) => {
+        const r = by.get(a.type);
+        return {
+          type: a.type,
+          live: isAgentLive(a.type),
+          enabled: r?.enabled ?? false,
+          autonomy: r?.autonomy ?? "suggest",
+          whitelistedTemplates: r?.whitelistedTemplates ?? [],
+          monthlyTokenBudget: r?.monthlyTokenBudget ?? null,
+          maxStepsPerLeg: r?.maxStepsPerLeg ?? null,
+          maxTokensPerLeg: r?.maxTokensPerLeg ?? null,
+          defaultStepsPerLeg: getAgent(a.type)?.maxSteps ?? 20,
+          recommendation: recs[a.type] ?? null,
+        };
+      }).concat(
+        // Agent studio agents the platform granted this organisation (off until switched on).
+        (
+          await (
+            await import("../server/agents/blueprints.server")
+          ).grantedStudioAgents(context.orgId)
+        ).map((g) => {
+          const r = by.get(g.type);
+          return {
+            type: g.type,
+            live: true,
+            enabled: r?.enabled ?? false,
+            autonomy: r?.autonomy ?? "suggest",
+            whitelistedTemplates: [],
+            monthlyTokenBudget: r?.monthlyTokenBudget ?? null,
+            maxStepsPerLeg: r?.maxStepsPerLeg ?? null,
+            maxTokensPerLeg: r?.maxTokensPerLeg ?? null,
+            defaultStepsPerLeg: g.manifest.maxSteps,
+            recommendation: null,
+            studio: {
+              label: g.manifest.name,
+              description: g.manifest.responsibility,
+              version: g.manifest.version,
+              riskTier: g.manifest.riskTier,
+            },
+          };
+        }),
+      ),
+    };
+  });
+
+const PolicyInput = z.object({
+  // Stock agents, or an Agent studio agent (checked against the org's grants below).
+  agentType: z.union([z.enum(["*", ...AGENT_TYPES]), z.string().regex(/^studio:[a-z0-9_]{1,60}$/)]),
+  enabled: z.boolean(),
+  autonomy: z.enum(["suggest", "act_and_notify", "autonomous"]).optional(),
+  whitelistedTemplates: z
+    .array(z.enum(WHITELISTABLE_TEMPLATES.map((t) => t.id) as [string, ...string[]]))
+    .max(20)
+    .optional(),
+  monthlyTokenBudget: z.number().int().min(0).max(1_000_000_000).nullable().optional(),
+  /** Run limits per stretch of work (platform range; null = the agent's default). */
+  maxStepsPerLeg: z.number().int().min(4).max(60).nullable().optional(),
+  maxTokensPerLeg: z.number().int().min(20_000).max(1_000_000).nullable().optional(),
+  /** Set when the change applies a measured recommendation (recorded in the audit entry). */
+  viaRecommendation: z.boolean().optional(),
+});
+
+export type AgentPolicyInput = z.infer<typeof PolicyInput>;
+
+/**
+ * Run the model safety check (red-team probes) against the organisation's
+ * saved model now. Settings roles only; audited. docs/red-team.md.
+ */
+export const runModelSafetyCheck = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .handler(async ({ context }) => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(context.userId, context.orgId, [...SETTINGS_ROLES]);
+    const { runSafetyCheck } = await import("../server/redteam/check.server");
+    const { passed, view } = await runSafetyCheck(context.orgId, context.userId);
+    const { writeAudit } = await import("../server/audit");
+    await writeAudit({
+      actor: `user:${context.userId}`,
+      actorUserId: context.userId,
+      orgId: context.orgId,
+      action: "ai.safety_check.run",
+      entityType: "ai_redteam_check",
+      entityId: null,
+      detail: {
+        passed,
+        complied: view.results.filter((r) => r.complied).map((r) => r.probe),
+      },
+    });
+    return view;
+  });
+
+export const saveAgentPolicy = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => PolicyInput.parse(d))
+  .handler(async ({ data, context }) => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(context.userId, context.orgId, [...SETTINGS_ROLES]);
+    if (data.agentType.startsWith("studio:")) {
+      const { publishedStudioAgent, hasGrant } = await import("../server/agents/blueprints.server");
+      const p = await publishedStudioAgent(data.agentType);
+      if (!p || !(await hasGrant(p.blueprintId, context.orgId)))
+        throw new Error("This agent is not available to your organisation.");
+      // Studio agents send nothing on their own: no pre-approved templates.
+      if (data.whitelistedTemplates?.length) data.whitelistedTemplates = [];
+    }
+    // Every AI phone call is reviewed: the Voice Guard stays on while a phone agent is.
+    if (data.agentType === "voice_guard" && !data.enabled) {
+      const { VOICE_CALL_AGENTS } = await import("../server/agents/policy");
+      const on = await db
+        .select({ t: agentPolicies.agentType })
+        .from(agentPolicies)
+        .where(
+          and(
+            eq(agentPolicies.orgId, context.orgId),
+            inArray(agentPolicies.agentType, [...VOICE_CALL_AGENTS]),
+            eq(agentPolicies.enabled, true),
+          ),
+        )
+        .limit(1);
+      if (on.length)
+        throw new Error(
+          "The Voice Guard reviews every AI phone call, so it stays on while an AI phone agent is on. Switch the phone agents off first.",
+        );
+    }
+    // Autonomous needs a passed model safety check for the model in use
+    // (docs/red-team.md). Checked when switching to it, never on other edits.
+    if (data.agentType !== "*" && data.autonomy === "autonomous") {
+      const [current] = await db
+        .select({ autonomy: agentPolicies.autonomy })
+        .from(agentPolicies)
+        .where(
+          and(
+            eq(agentPolicies.orgId, context.orgId),
+            eq(agentPolicies.agentType, data.agentType as never),
+          ),
+        )
+        .limit(1);
+      if (current?.autonomy !== "autonomous") {
+        const { hasValidSafetyCheck, AUTONOMY_NEEDS_CHECK } =
+          await import("../server/redteam/check.server");
+        if (!(await hasValidSafetyCheck(context.orgId))) throw new Error(AUTONOMY_NEEDS_CHECK);
+      }
+    }
+    const now = new Date();
+    const values = {
+      enabled: data.enabled,
+      ...(data.agentType !== "*" && data.autonomy ? { autonomy: data.autonomy } : {}),
+      ...(data.agentType !== "*" && data.whitelistedTemplates
+        ? { whitelistedTemplates: data.whitelistedTemplates }
+        : {}),
+      ...(data.agentType !== "*" && data.monthlyTokenBudget !== undefined
+        ? { monthlyTokenBudget: data.monthlyTokenBudget }
+        : {}),
+      ...(data.agentType !== "*" && data.maxStepsPerLeg !== undefined
+        ? { maxStepsPerLeg: data.maxStepsPerLeg }
+        : {}),
+      ...(data.agentType !== "*" && data.maxTokensPerLeg !== undefined
+        ? { maxTokensPerLeg: data.maxTokensPerLeg }
+        : {}),
+      updatedBy: context.userId,
+      updatedAt: now,
+    };
+    await db
+      .insert(agentPolicies)
+      .values({ orgId: context.orgId, agentType: data.agentType as never, ...values })
+      .onConflictDoUpdate({ target: [agentPolicies.orgId, agentPolicies.agentType], set: values });
+    const { writeAudit } = await import("../server/audit");
+    await writeAudit({
+      actor: `user:${context.userId}`,
+      actorUserId: context.userId,
+      orgId: context.orgId,
+      action: "agent.policy.updated",
+      entityType: "agent_policy",
+      entityId: null,
+      detail: data,
+    });
+    // A changed budget re-checks runs parked on the old one right away.
+    if (data.agentType !== "*" && data.monthlyTokenBudget !== undefined) {
+      const { releaseBudgetPaused } = await import("../server/agents/runtime.server");
+      if (await releaseBudgetPaused(context.orgId, data.agentType)) {
+        const { kickAgents } = await import("../server/agents/orchestrator.server");
+        kickAgents(context.orgId);
+      }
+    }
+    // Switching an agent on (or un-pausing all) continues the hiring-desk
+    // threads that were waiting for it.
+    if (data.enabled) {
+      try {
+        const { ensureAgentsRegistered } = await import("../server/agents");
+        ensureAgentsRegistered();
+        const { resumeThreadsForAgent } = await import("../server/desk/desk.server");
+        await resumeThreadsForAgent(context.orgId, data.agentType);
+      } catch (e) {
+        const { log } = await import("../server/log");
+        log.warn("desk.resume_failed", { org_id: context.orgId, error: e as Error });
+      }
+    }
+    return { ok: true as const };
+  });
+
+export { ROLES as AGENT_TASK_ROLES };
+
+/* ----------------------------------------------------- observability views */
+
+export type AgentRunDetail = {
+  id: string;
+  traceId: string;
+  steps: {
+    seq: number;
+    kind: string;
+    tool: string | null;
+    status: string;
+    detail: string;
+    tokens: number;
+    durationMs: number;
+    at: string;
+  }[];
+};
+
+/** Run inspector: the step trail of one run (redacted summaries, no provider text). */
+export const getAgentRun = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<AgentRunDetail> => {
+    const { agentSteps } = await import("@db/schema");
+    const [run] = await db
+      .select({ id: agentRuns.id, traceId: agentRuns.traceId })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.id, data.runId), eq(agentRuns.orgId, context.orgId)))
+      .limit(1);
+    if (!run) throw new Error("Run not found");
+    const steps = await db
+      .select()
+      .from(agentSteps)
+      .where(and(eq(agentSteps.runId, run.id), eq(agentSteps.orgId, context.orgId)))
+      .orderBy(agentSteps.seq);
+    return {
+      id: run.id,
+      traceId: run.traceId,
+      steps: steps.map((s) => {
+        // Model-call failures carry provider text; keep it server-side.
+        const output =
+          s.kind === "model" && s.status === "error" ? { error: GENERIC_RUN_ERROR } : s.output;
+        const detail = JSON.stringify({ input: s.input ?? undefined, output: output ?? undefined });
+        return {
+          seq: s.seq,
+          kind: s.kind,
+          tool: s.toolName,
+          status: s.status,
+          detail: clip(detail === "{}" ? "" : detail, 1200) ?? "",
+          tokens: s.promptTokens + s.completionTokens,
+          durationMs: s.durationMs,
+          at: s.createdAt.toISOString(),
+        };
+      }),
+    };
+  });
+
+export type AgentSummary = {
+  days: number;
+  runsStarted: number;
+  runsDone: number;
+  runsFailed: number;
+  tokens: number;
+  toolErrors: number;
+  decisions: number;
+  approved: number;
+  rejected: number;
+  edited: number;
+  avgWaitMinutes: number | null;
+};
+
+/** Org dashboard numbers for the last 30 days, from agent_metrics_daily. */
+export const agentSummary = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .handler(async ({ context }): Promise<AgentSummary> => {
+    const { agentMetricsDaily } = await import("@db/schema");
+    const { gte, sql } = await import("drizzle-orm");
+    const days = 30;
+    const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
+    const [r] = await db
+      .select({
+        runsStarted: sql<number>`coalesce(sum(${agentMetricsDaily.runsStarted}), 0)::int`,
+        runsDone: sql<number>`coalesce(sum(${agentMetricsDaily.runsDone}), 0)::int`,
+        runsFailed: sql<number>`coalesce(sum(${agentMetricsDaily.runsFailed}), 0)::int`,
+        tokens: sql<number>`coalesce(sum(${agentMetricsDaily.promptTokens} + ${agentMetricsDaily.completionTokens}), 0)::bigint`,
+        toolErrors: sql<number>`coalesce(sum(${agentMetricsDaily.toolErrors}), 0)::int`,
+        approved: sql<number>`coalesce(sum(${agentMetricsDaily.tasksApproved}), 0)::int`,
+        rejected: sql<number>`coalesce(sum(${agentMetricsDaily.tasksRejected}), 0)::int`,
+        edited: sql<number>`coalesce(sum(${agentMetricsDaily.tasksEdited}), 0)::int`,
+        waitMs: sql<number>`coalesce(sum(${agentMetricsDaily.hitlWaitMsTotal}), 0)::bigint`,
+      })
+      .from(agentMetricsDaily)
+      .where(and(eq(agentMetricsDaily.orgId, context.orgId), gte(agentMetricsDaily.day, since)));
+    const decisions = Number(r?.approved ?? 0) + Number(r?.rejected ?? 0);
+    return {
+      days,
+      runsStarted: Number(r?.runsStarted ?? 0),
+      runsDone: Number(r?.runsDone ?? 0),
+      runsFailed: Number(r?.runsFailed ?? 0),
+      tokens: Number(r?.tokens ?? 0),
+      toolErrors: Number(r?.toolErrors ?? 0),
+      decisions,
+      approved: Number(r?.approved ?? 0),
+      rejected: Number(r?.rejected ?? 0),
+      edited: Number(r?.edited ?? 0),
+      avgWaitMinutes: decisions ? Math.round(Number(r?.waitMs ?? 0) / decisions / 60000) : null,
+    };
+  });
+
+/* ------------------------------------------------------------ ask the agents */
+
+/**
+ * Start a Copilot run for the signed-in member from a free-text request. The
+ * Copilot plans and proposes starting a specialist agent; under `suggest` that
+ * proposal is an approval the member confirms in the inbox.
+ */
+export const askAgents = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ message: z.string().trim().min(5).max(2000) }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { ensureAgentsRegistered } = await import("../server/agents");
+    ensureAgentsRegistered();
+    const { loadPolicy } = await import("../server/agents/policy");
+    const policy = await loadPolicy(context.orgId, "copilot");
+    if (!policy.enabled) {
+      throw new Error("Switch on Aditi in Agent settings first.");
+    }
+    const { resolveAiConfig } = await import("./ai-gateway.server");
+    const cfg = await resolveAiConfig(context.orgId);
+    if (!cfg.apiKey) {
+      throw new Error("Add your organisation's AI model key in Integrations first.");
+    }
+    const { startRun } = await import("../server/agents/runtime.server");
+    const { runId } = await startRun({
+      orgId: context.orgId,
+      agentType: "copilot",
+      principalUserId: context.userId,
+      goal: data.message,
+    });
+    const { kickAgents } = await import("../server/agents/orchestrator.server");
+    kickAgents(context.orgId);
+    return { runId };
+  });
+
+/**
+ * Start a run of an Agent studio agent granted to this organisation (settings
+ * roles; the agent must be switched on). It acts as the person who starts it.
+ */
+export const startStudioAgentRun = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) =>
+    z
+      .object({
+        agentType: z.string().regex(/^studio:[a-z0-9_]{1,60}$/),
+        goal: z.string().trim().min(5).max(4000),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(context.userId, context.orgId, [...SETTINGS_ROLES]);
+    const { ensureAgentsRegistered } = await import("../server/agents");
+    ensureAgentsRegistered();
+    const { loadPolicy } = await import("../server/agents/policy");
+    const policy = await loadPolicy(context.orgId, data.agentType as AgentType);
+    if (!policy.enabled) throw new Error("Switch the agent on first.");
+    const { resolveAiConfig } = await import("./ai-gateway.server");
+    if (!(await resolveAiConfig(context.orgId)).apiKey)
+      throw new Error("Add your organisation's AI model key in Integrations first.");
+    const { startRun } = await import("../server/agents/runtime.server");
+    const { runId } = await startRun({
+      orgId: context.orgId,
+      agentType: data.agentType as AgentType,
+      principalUserId: context.userId,
+      goal: data.goal,
+    });
+    const { kickAgents } = await import("../server/agents/orchestrator.server");
+    kickAgents(context.orgId);
+    return { runId };
+  });
+
+/* ------------------------------------------------------ register and export */
+
+const GOVERNANCE_ROLES = ["hr_head", "president_cbo"] as const;
+
+export type AgentManifestView = {
+  name: string;
+  owner: string;
+  responsibility: string;
+  mustNever: string[];
+  scope: { reads: string[]; writes: string[]; external: string[] };
+  gates: string[];
+  riskTier: string;
+  evals: string[];
+  skills: string[];
+  maxSteps: number;
+  instructions: string;
+  tools: {
+    name: string;
+    description: string;
+    risk: string;
+    skills: string[];
+    preApprovable: boolean;
+    untrustedOutput: boolean;
+  }[];
+};
+
+export type AgentRegisterEntry = {
+  type: string;
+  version: string;
+  hash: string;
+  manifest: AgentManifestView;
+  /** The complete canonical manifest (incl. tool input schemas) as JSON text. */
+  manifestJson: string;
+  versions: { version: string; hash: string; firstSeen: string }[];
+  policy: { enabled: boolean; autonomy: string; monthlyTokenBudget: number | null };
+  monthTokens: number;
+  last30: { runs: number; done: number; failed: number; decisions: number; edited: number };
+};
+
+/** The agent register: what every agent is, may do and has done (governance roles). */
+export const agentRegister = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .handler(async ({ context }): Promise<AgentRegisterEntry[]> => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(context.userId, context.orgId, [...GOVERNANCE_ROLES]);
+    const { ensureAgentsRegistered } = await import("../server/agents");
+    ensureAgentsRegistered();
+    const { getTool, listAgents, skillsOf } = await import("../server/agents/registry");
+    const { canonicalManifest, manifestHash } = await import("../server/agents/manifest.server");
+    const { loadPolicy } = await import("../server/agents/policy");
+    const { monthTokens } = await import("../server/agents/runtime.server");
+    const { agentDefinitions, agentMetricsDaily } = await import("@db/schema");
+    const { gte, sql } = await import("drizzle-orm");
+    const since = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+    const out: AgentRegisterEntry[] = [];
+    for (const def of listAgents()) {
+      const versions = await db
+        .select({
+          version: agentDefinitions.version,
+          hash: agentDefinitions.hash,
+          firstSeen: agentDefinitions.createdAt,
+        })
+        .from(agentDefinitions)
+        .where(eq(agentDefinitions.agentType, def.type))
+        .orderBy(desc(agentDefinitions.createdAt));
+      const [m] = await db
+        .select({
+          runs: sql<number>`coalesce(sum(${agentMetricsDaily.runsStarted}), 0)::int`,
+          done: sql<number>`coalesce(sum(${agentMetricsDaily.runsDone}), 0)::int`,
+          failed: sql<number>`coalesce(sum(${agentMetricsDaily.runsFailed}), 0)::int`,
+          decisions: sql<number>`coalesce(sum(${agentMetricsDaily.tasksApproved} + ${agentMetricsDaily.tasksRejected}), 0)::int`,
+          edited: sql<number>`coalesce(sum(${agentMetricsDaily.tasksEdited}), 0)::int`,
+        })
+        .from(agentMetricsDaily)
+        .where(
+          and(
+            eq(agentMetricsDaily.orgId, context.orgId),
+            eq(agentMetricsDaily.agentType, def.type),
+            gte(agentMetricsDaily.day, since),
+          ),
+        );
+      const policy = await loadPolicy(context.orgId, def.type);
+      out.push({
+        type: def.type,
+        version: def.version,
+        hash: manifestHash(def),
+        manifest: {
+          name: def.name,
+          owner: def.owner,
+          responsibility: def.responsibility,
+          mustNever: def.mustNever,
+          scope: def.scope,
+          gates: def.gates,
+          riskTier: def.riskTier,
+          evals: def.evals,
+          skills: skillsOf(def),
+          maxSteps: def.maxSteps ?? 20,
+          instructions: def.system,
+          tools: def.tools.map((name) => {
+            const t = getTool(name);
+            return {
+              name,
+              description: t?.description ?? "(missing)",
+              risk: t?.risk ?? "unknown",
+              skills: t?.skills ?? [],
+              preApprovable: Boolean(t?.templateOf),
+              untrustedOutput: Boolean(t?.untrustedOutput),
+            };
+          }),
+        },
+        manifestJson: JSON.stringify(canonicalManifest(def), null, 2),
+        versions: versions.map((v) => ({ ...v, firstSeen: v.firstSeen.toISOString() })),
+        policy: {
+          enabled: policy.enabled,
+          autonomy: policy.autonomy,
+          monthlyTokenBudget: policy.monthlyTokenBudget,
+        },
+        monthTokens: await monthTokens(context.orgId, def.type),
+        last30: {
+          runs: Number(m?.runs ?? 0),
+          done: Number(m?.done ?? 0),
+          failed: Number(m?.failed ?? 0),
+          decisions: Number(m?.decisions ?? 0),
+          edited: Number(m?.edited ?? 0),
+        },
+      });
+    }
+    return out;
+  });
+
+/**
+ * One run's complete, self-contained audit trail as JSON: the run, the exact
+ * manifest it executed under, every step, every human decision, the audit
+ * rows and the AI requests it caused (without vendor or model names).
+ */
+export const exportAgentRun = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<{ fileName: string; json: string }> => {
+    const schema = await import("@db/schema");
+    const [run] = await db
+      .select()
+      .from(agentRuns)
+      .where(and(eq(agentRuns.id, data.runId), eq(agentRuns.orgId, context.orgId)))
+      .limit(1);
+    if (!run) throw new Error("Run not found");
+    if (run.principalUserId !== context.userId) {
+      const { assertRole } = await import("./auth.middleware");
+      await assertRole(context.userId, context.orgId, [...GOVERNANCE_ROLES]);
+    }
+    const [definition] = run.definitionId
+      ? await db
+          .select()
+          .from(schema.agentDefinitions)
+          .where(eq(schema.agentDefinitions.id, run.definitionId))
+          .limit(1)
+      : [];
+    const steps = await db
+      .select()
+      .from(schema.agentSteps)
+      .where(and(eq(schema.agentSteps.runId, run.id), eq(schema.agentSteps.orgId, context.orgId)))
+      .orderBy(schema.agentSteps.seq);
+    const tasks = await db
+      .select()
+      .from(agentTasks)
+      .where(and(eq(agentTasks.runId, run.id), eq(agentTasks.orgId, context.orgId)));
+    const taskIds = tasks.map((t) => t.id);
+    const audit = await db
+      .select()
+      .from(schema.auditLog)
+      .where(
+        and(
+          eq(schema.auditLog.orgId, context.orgId),
+          or(
+            eq(schema.auditLog.entityId, run.id),
+            taskIds.length ? inArray(schema.auditLog.entityId, taskIds) : undefined,
+          ),
+        ),
+      )
+      .orderBy(schema.auditLog.createdAt);
+    const ai = await db
+      .select({
+        at: schema.aiUsageEvents.createdAt,
+        feature: schema.aiUsageEvents.feature,
+        status: schema.aiUsageEvents.status,
+        promptTokens: schema.aiUsageEvents.promptTokens,
+        completionTokens: schema.aiUsageEvents.completionTokens,
+        totalTokens: schema.aiUsageEvents.totalTokens,
+        attempt: schema.aiUsageEvents.attempt,
+        durationMs: schema.aiUsageEvents.durationMs,
+      })
+      .from(schema.aiUsageEvents)
+      .where(eq(schema.aiUsageEvents.agentRunId, run.id))
+      .orderBy(schema.aiUsageEvents.createdAt);
+    const { writeAudit } = await import("../server/audit");
+    await writeAudit({
+      actor: `user:${context.userId}`,
+      actorUserId: context.userId,
+      orgId: context.orgId,
+      action: "agent.run.exported",
+      entityType: "agent_run",
+      entityId: run.id,
+    });
+    const trail = {
+      exportedAt: new Date().toISOString(),
+      exportedBy: context.memberEmail,
+      run: {
+        ...run,
+        lastError: run.lastError
+          ? SAFE_RUN_ERRORS.has(run.lastError)
+            ? run.lastError
+            : GENERIC_RUN_ERROR
+          : null,
+      },
+      definition: definition
+        ? { version: definition.version, hash: definition.hash, manifest: definition.manifest }
+        : null,
+      steps: steps.map((s) =>
+        s.kind === "model" && s.status === "error"
+          ? { ...s, output: { error: GENERIC_RUN_ERROR } }
+          : s,
+      ),
+      decisions: tasks,
+      audit,
+      aiRequests: ai,
+    };
+    return {
+      fileName: `agent-run-${run.agentType}-${run.id.slice(0, 8)}.json`,
+      json: JSON.stringify(trail, null, 2),
+    };
+  });
+
+/* ------------------------------------------------------- dry-run replays */
+
+/**
+ * Re-execute a finished run as a dry run under the agent's current
+ * definition (docs/agentic-plan.md §11). HR head / CBO / owner.
+ */
+export const replayAgentRun = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { assertRole } = await import("./auth.middleware");
+    await assertRole(context.userId, context.orgId, [...GOVERNANCE_ROLES]);
+    const { ensureAgentsRegistered } = await import("../server/agents");
+    ensureAgentsRegistered();
+    const { startReplay } = await import("../server/agents/runtime.server");
+    const r = await startReplay({
+      orgId: context.orgId,
+      runId: data.runId,
+      userId: context.userId,
+    });
+    const { kickAgents } = await import("../server/agents/orchestrator.server");
+    kickAgents(context.orgId);
+    return r;
+  });
+
+export type AgentRunComparison = import("../server/agents/replay.server").RunComparison;
+
+export const compareAgentRun = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .validator((d: unknown) => z.object({ runId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<AgentRunComparison> => {
+    const { compareRuns } = await import("../server/agents/replay.server");
+    return compareRuns(context.orgId, data.runId);
+  });
+
+/* ------------------------------------------- act and notify: acted for you */
+
+export type AgentActionView = {
+  stepId: string;
+  runId: string;
+  agentType: string;
+  tool: string;
+  goal: string;
+  at: string;
+  seen: boolean;
+};
+
+/** Actions agents ran on the caller's behalf under "act and notify" (last 14 days). */
+export const myAgentActions = createServerFn({ method: "GET" })
+  .middleware([requireOrg])
+  .handler(async ({ context }): Promise<AgentActionView[]> => {
+    const { agentSteps } = await import("@db/schema");
+    const { gte, isNotNull } = await import("drizzle-orm");
+    const rows = await db
+      .select({
+        stepId: agentSteps.id,
+        runId: agentRuns.id,
+        agentType: agentRuns.agentType,
+        tool: agentSteps.toolName,
+        goal: agentRuns.goal,
+        at: agentSteps.createdAt,
+        state: agentSteps.notifyState,
+      })
+      .from(agentSteps)
+      .innerJoin(agentRuns, eq(agentRuns.id, agentSteps.runId))
+      .where(
+        and(
+          eq(agentSteps.orgId, context.orgId),
+          eq(agentRuns.principalUserId, context.userId),
+          isNotNull(agentSteps.notifyState),
+          gte(agentSteps.createdAt, new Date(Date.now() - 14 * 864e5)),
+        ),
+      )
+      .orderBy(desc(agentSteps.createdAt))
+      .limit(100);
+    return rows.map((r) => ({
+      stepId: r.stepId,
+      runId: r.runId,
+      agentType: r.agentType,
+      tool: r.tool ?? "",
+      goal: plainPreview(r.goal, 200) ?? "",
+      at: r.at.toISOString(),
+      seen: r.state === "seen",
+    }));
+  });
+
+export const markAgentActionsSeen = createServerFn({ method: "POST" })
+  .middleware([requireOrg])
+  .handler(async ({ context }) => {
+    const { agentSteps } = await import("@db/schema");
+    const mine = db
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(
+        and(eq(agentRuns.orgId, context.orgId), eq(agentRuns.principalUserId, context.userId)),
+      );
+    const done = await db
+      .update(agentSteps)
+      .set({ notifyState: "seen" })
+      .where(
+        and(
+          eq(agentSteps.orgId, context.orgId),
+          eq(agentSteps.notifyState, "pending"),
+          inArray(agentSteps.runId, mine),
+        ),
+      )
+      .returning({ id: agentSteps.id });
+    return { seen: done.length };
+  });
