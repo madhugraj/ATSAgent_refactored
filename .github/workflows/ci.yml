@@ -61,8 +61,11 @@ jobs:
       - name: Dependency rules (depcruise ratchet, review C3)
         run: node tools/depcruise-check.mjs
       - name: Apply database schema
-        run: node scripts/migrate-pg.mjs
+        run: node packages/db/scripts/migrate-pg.mjs
 
+      # Package unit tests (packages/*/test), via each package's own script.
+      - name: Package tests (turbo)
+        run: bunx turbo run test
       # One bun process per file: bun's mock.module is process-global, so a
       # combined `bun test scripts/` run would leak one file's mocks into
       # every later file (empty agent registry, fake db).

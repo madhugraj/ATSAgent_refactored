@@ -80,7 +80,14 @@ export default defineConfig(({ command }) => ({
         // module-graph references, and without it `vite build` errors exactly like
         // dev did.
         behavior: { dev: "mock", build: "mock" },
-        client: { files: ["**/server/**"], specifiers: ["server-only"] },
+        // "**/server/**" covers the shims left behind at src/server/*; the
+        // "@ats/*/server" specifiers cover the workspace packages those shims
+        // re-export (Phase 2 L0); "@tanstack/react-start/server-only" is the marker
+        // every package server entry opens with (bare "server-only" is eslint-banned).
+        client: {
+          files: ["**/server/**"],
+          specifiers: ["server-only", "@ats/*/server", "@tanstack/react-start/server-only"],
+        },
       },
     }),
     // Self-hosted deploys (Docker/GKE/Cloud Run) run a Node server:
