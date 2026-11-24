@@ -70,3 +70,11 @@ test_data/
 !.env.example
 SECURITY_AUDIT_REPORT*
 .turbo/
+
+# Phase 9 Python services (uv/pytest artifacts)
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

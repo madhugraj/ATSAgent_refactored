@@ -1,6 +1,6 @@
 # ATSAgent_refactored
 
-ATSAgent restructured as a monorepo: one TanStack Start web app, two worker apps, and layered domain packages.
+ATSAgent restructured as a monorepo: one TanStack Start web app, two worker apps, layered domain packages, and (Phase 9, parallel track) Python services under `services/` — scaffolded from `services/_template`, quality-gated by the `python-services` CI job.
 
 Read in this order:
 
