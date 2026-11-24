@@ -629,7 +629,7 @@ async function postToThread(
   how: string,
 ) {
   if (!call.applicationId) return;
-  const desk = await import("../desk/desk.server");
+  const desk = await import("@ats/desk-core/server");
   const convId = await desk.conversationForSubject(orgId, "application", call.applicationId);
   if (!convId) return;
   const name = brief?.candidateName ?? "The candidate";

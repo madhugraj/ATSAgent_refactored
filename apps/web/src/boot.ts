@@ -19,6 +19,9 @@
 import { onAgentEvent } from "@ats/kernel/server";
 import { log, setAgentAlertMailer, setSloNotifier } from "@ats/observability/server";
 import { platformAdmins } from "@db/schema";
+import { registerDeskThreadEffects } from "@ats/desk-core/server";
+import { registerAppAgentPort } from "./agent-port.server";
+import { afterSubjectsDeleted, cancelRun } from "./server/agents/runtime.server";
 
 // Load-once assertion for the platform packages (map §5 rule 10): importing
 // each server entry here arms its module-level single-instance guard at
@@ -72,8 +75,21 @@ setSloNotifier(async (notice) => {
   return sent ? ["email"] : [];
 });
 
-// Placeholder (later phases): register the AgentPort implementation
-// (registerAgentPort from @ats/kernel/server — enqueue/cancelStale/
-// afterSubjectsDeleted/kick over the orchestrator and runtime) and the
-// remaining domain-event (onDomainEvent) and subject-deletion
-// (onSubjectsDeleted) subscribers here.
+// Thread deletion in @ats/desk-core stops a chat's agent runs through the
+// injected runtime effects (map §4 L2: the store package never imports the
+// agents runtime). Same calls, same order as the pre-extraction lazy imports
+// in desk.server.ts; desk.server.ts registers the same pair at load so
+// direct desk imports (tests) are wired too.
+registerDeskThreadEffects({ cancelRun, afterSubjectsDeleted });
+
+// The domains start and stop agent runs through the kernel's AgentPort and
+// the org run effects (map §4 L2/§5 "AgentPort.enqueue/kick"): org-context
+// starts its build run and org-profile kicks the scheduler through the port,
+// and a profile reset stops runs through the injected cancelRun — all the
+// same runtime/orchestrator calls the pre-port dynamic imports made, in the
+// same order. apps/web/src/lib/org-profile.server.ts registers the same pair
+// at load so direct shim imports (tests, server-fn wrappers) are wired too.
+registerAppAgentPort();
+
+// Placeholder (later phases): the remaining domain-event (onDomainEvent) and
+// subject-deletion (onSubjectsDeleted) subscribers register here.

@@ -530,7 +530,7 @@ async function settle(
 /** What the role's hiring-desk thread hears when a scheduling call booked nothing. */
 async function postToThread(orgId: string, call: Call, how: string, dueAt: Date | null = null) {
   if (!call.applicationId) return;
-  const desk = await import("../desk/desk.server");
+  const desk = await import("@ats/desk-core/server");
   const convId = await desk.conversationForSubject(orgId, "application", call.applicationId);
   if (!convId) return;
   const [row] = await db

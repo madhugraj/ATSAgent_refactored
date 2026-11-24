@@ -143,7 +143,7 @@ export async function recordPanelCheck(
   }
   if (held)
     try {
-      const desk = await import("../desk/desk.server");
+      const desk = await import("@ats/desk-core/server");
       const conv = await desk.conversationForRequisition(ctx.orgId, r.requisitionId);
       const [c] = await db
         .select({ name: candidates.fullName })
@@ -485,7 +485,7 @@ export async function performReviewGate(
   }
   if (cancelled)
     try {
-      const desk = await import("../desk/desk.server");
+      const desk = await import("@ats/desk-core/server");
       const conv = await desk.conversationForRequisition(orgId, app.requisitionId);
       if (conv)
         await desk.postMessage(conv, {

@@ -16,7 +16,7 @@ import { db } from "../db";
 import { hiringConversations, hiringMessages } from "@db/schema";
 import { INJECTION_RULES, aiJson, untrusted } from "@/lib/ai-gateway.server";
 import { log } from "../log";
-import { loadConversation, postMessage } from "./desk.server";
+import { loadConversation, postMessage } from "@ats/desk-core/server";
 import { PROFILE_SECTIONS } from "@/lib/org-profile";
 
 type Conversation = typeof hiringConversations.$inferSelect;
