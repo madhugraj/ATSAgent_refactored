@@ -12,14 +12,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
 
-const { db } = await import("../apps/web/src/server/db");
-const { auditLog, orgAgreements, organizations, users } =
-  await import("../apps/web/drizzle/schema");
-const legal = await import("../apps/web/src/lib/legal/agreements");
+const { db } = await import("@ats/db/server");
+const { auditLog, orgAgreements, organizations, users } = await import("@ats/db/server");
+const legal = await import("@ats/legal/shared");
 const { AgreementAcceptanceInput, agreementMissing, agreementPayload, EMPTY_AGREEMENT } =
-  await import("../apps/web/src/lib/legal/acceptance");
-const { CreateInput } = await import("../apps/web/src/lib/org.functions");
-const core = await import("../apps/web/src/server/org-agreements.server");
+  await import("@ats/legal/shared");
+const { CreateInput } = await import("../../../apps/web/src/lib/org.functions");
+const core = await import("@ats/legal/server");
 
 const stamp = Date.now();
 let orgId: string;
@@ -35,11 +34,11 @@ const signed = () =>
   });
 
 beforeAll(async () => {
-  const url = process.env.DATABASE_URL ?? "";
+  const url = process.env["DATABASE_URL"] ?? "";
   if (!["127.0.0.1", "localhost", "::1"].includes(new URL(url).hostname))
     throw new Error("Refusing non-local database");
   owner = (await db.insert(users).values({ email: ownerEmail }).returning({ id: users.id }))[0]!.id;
-  [orgId, otherOrgId] = await Promise.all(
+  const orgIds = await Promise.all(
     ["a", "b"].map(
       async (tag) =>
         (
@@ -50,6 +49,8 @@ beforeAll(async () => {
         )[0]!.id,
     ),
   );
+  orgId = orgIds[0]!;
+  otherOrgId = orgIds[1]!;
 });
 
 afterAll(async () => {

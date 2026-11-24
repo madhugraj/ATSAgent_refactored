@@ -1,7 +1,9 @@
 import { BrandLogo } from "@/components/Brand";
 import { AGREEMENTS, type AgreementKind, formatVersionDate } from "@/lib/legal/agreements";
-
-export type LegalSection = { title: string; body: string[] };
+// SHIM: remove in Phase 8 — the type moved to @ats/legal/shared (the one
+// allowed component edit of the legal move; map §4 L2 findings A6).
+import type { LegalSection } from "@ats/legal/shared";
+export type { LegalSection };
 
 /** Shared reading layout for the policy pages. */
 export function LegalPage({

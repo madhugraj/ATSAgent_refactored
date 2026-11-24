@@ -19,11 +19,11 @@
 import { hostname } from "node:os";
 import { and, eq, gte, inArray, isNotNull, lt, sql } from "drizzle-orm";
 
-import { db } from "@/server/db";
+import { db } from "@ats/db/server";
 import { env } from "@ats/config/server";
-import { writeAudit } from "@/server/audit";
+import { writeAudit } from "@ats/audit/server";
 import { log } from "./log";
-import { safeFetch } from "@/server/safe-fetch";
+import { safeFetch } from "@ats/security/server";
 import {
   DURATION_BUCKETS,
   drainClosedSliMinutes,
@@ -43,7 +43,7 @@ import {
   type Slo,
   type SloId,
 } from "./slo";
-import { agentRuns, serviceRequestMinutes, sloAlerts } from "@db/schema";
+import { agentRuns, serviceRequestMinutes, sloAlerts } from "@ats/db/server";
 
 const RETENTION_DAYS = 35;
 export const INSTANCE_ID = `${hostname().slice(0, 60)}-${Math.random().toString(16).slice(2, 8)}`;
