@@ -28,6 +28,7 @@ import {
   smallint,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
@@ -4869,4 +4870,28 @@ export const policyBriefings = pgTable(
       sql`${t.status} in ('pending','approved','rejected','superseded')`,
     ),
   ],
+);
+
+/* ------------------------------------ internal service tokens (Phase 9/0092) */
+
+/**
+ * Bearer tokens for the internal service-to-service API (refactor plan Phase 9:
+ * the Python services call POST /api/internal/ai with one). Platform-scoped on
+ * purpose — no orgId column: a service token authenticates a service, never a
+ * tenant. Tokens are stored through encryptSecret so a database dump yields no
+ * live credential, and rotation goes through audit_log
+ * (rotateServiceToken in apps/web/src/server/internal-ai.server.ts). Before the
+ * first rotation the SERVICE_TOKENS env list bootstraps access.
+ */
+export const serviceTokens = pgTable(
+  "service_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    service: text("service").notNull(),
+    tokenEncrypted: text("token_encrypted").notNull(),
+    rotatedAt: timestamp("rotated_at", { withTimezone: true }).notNull().defaultNow(),
+    rotatedBy: uuid("rotated_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique("service_tokens_service_key").on(t.service)],
 );

@@ -5,21 +5,32 @@
  * A service posts `{feature, input: {system, prompt, orgId}}` with its service
  * token; this route calls the AI gateway exactly like other server code, so
  * the ledger (`ai_usage_events`), spend caps, consent, training capture and
- * prompt-injection hygiene all still apply. The reply carries no vendor or
- * model names (deep-stripped below) and no database reads happen here — the
- * gateway resolves the org's own credentials itself.
+ * vendor stripping all still apply. The forwarded prompt is data-bearing (a
+ * parsed CV or JD text the service extracted), so it enters the model only
+ * through `untrusted(...)` and the system prompt starts with INJECTION_RULES —
+ * the same injection hygiene every other AI call keeps.
  *
- * Auth is the same SERVICE_TOKENS env the Python side uses (constant-time
- * compare, generic 401). The `/api/internal` prefix is rate-limited in
- * src/server.ts — the prefix is stable, the limiter keys on it.
+ * Defence in depth, in the order it runs:
+ *  1. Ingress (production only): a public client IP gets a bare 404 — the
+ *     prefix must only be reachable over internal ingress.
+ *  2. Service token (service_tokens row via encryptSecret, or the
+ *     SERVICE_TOKENS env bootstrap), constant-time compared, generic 401.
+ *  3. Body validation against the shared zod contract, 400.
+ *  4. Tenancy: the org must exist and have opted into AI (its own saved
+ *     provider credential); anything else is the same generic 403, so the
+ *     endpoint cannot be used to probe which orgs exist.
+ * The reply carries no vendor or model names (deep-stripped below).
  */
-import { timingSafeEqual } from "node:crypto";
-
 import { AiCallbackRequest } from "@/lib/ai-callback.contract";
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 
 import { AI_FEATURES } from "@/server/ai-usage";
+import {
+  internalIngressAllowed,
+  orgHasAiConsent,
+  serviceTokenAuthorized,
+} from "@/server/internal-ai.server";
 
 const NO_STORE = { "cache-control": "no-store" } as const;
 
@@ -43,29 +54,20 @@ function stripVendor(value: unknown): unknown {
   return value;
 }
 
-/** SERVICE_TOKENS — the same comma-separated bootstrap list the services use. */
-function tokenMatches(given: string): boolean {
-  const tokens = (process.env["SERVICE_TOKENS"] ?? "")
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
-  if (!tokens.length) return false;
-  const a = Buffer.from(given);
-  for (const token of tokens) {
-    const b = Buffer.from(token);
-    if (a.length === b.length && timingSafeEqual(a, b)) return true;
-  }
-  return false;
-}
-
-function isAuthorized(request: Request): boolean {
+function bearerToken(request: Request): string | null {
   const header = request.headers.get("authorization") ?? "";
-  if (!/^bearer\s+/i.test(header)) return false;
-  return tokenMatches(header.replace(/^bearer\s+/i, "").trim());
+  if (!/^bearer\s+/i.test(header)) return null;
+  const token = header.replace(/^bearer\s+/i, "").trim();
+  return token || null;
 }
 
 async function handle(request: Request): Promise<Response> {
-  if (!isAuthorized(request)) {
+  if (!internalIngressAllowed(request)) {
+    return new Response("Not found", { status: 404, headers: NO_STORE });
+  }
+
+  const token = bearerToken(request);
+  if (!token || !(await serviceTokenAuthorized(token))) {
     return Response.json(
       { ok: false, message: "Unauthorized" },
       { status: 401, headers: NO_STORE },
@@ -93,10 +95,19 @@ async function handle(request: Request): Promise<Response> {
     );
   }
 
-  const { aiJson } = await import("@/lib/ai-gateway.server");
+  if (!(await orgHasAiConsent(parsed.data.input.orgId))) {
+    return Response.json(
+      { ok: false, message: "AI is not enabled for this organisation." },
+      { status: 403, headers: NO_STORE },
+    );
+  }
+
+  const { aiJson, INJECTION_RULES, untrusted } = await import("@/lib/ai-gateway.server");
   const result = await aiJson({
-    system: parsed.data.input.system,
-    prompt: parsed.data.input.prompt,
+    // The service's own instructions, hardened with the injection rules; the
+    // forwarded text is data from an external person and enters as such.
+    system: `${INJECTION_RULES}\n\n${parsed.data.input.system}`,
+    prompt: untrusted("service_input", parsed.data.input.prompt),
     orgId: parsed.data.input.orgId,
     feature: parsed.data.feature,
   });

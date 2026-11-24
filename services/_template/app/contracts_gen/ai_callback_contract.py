@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 class AiCallbackRequest(BaseModel):
     system: str = Field(min_length=1, max_length=20000)
-    prompt: str = Field(min_length=1, max_length=120000)
+    prompt: str = Field(min_length=1, max_length=60000)
     orgId: uuid.UUID
 
 

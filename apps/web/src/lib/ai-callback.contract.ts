@@ -15,7 +15,10 @@ import { z } from "zod";
 /** The `input` member of a callback request body. */
 export const AiCallbackRequest = z.object({
   system: z.string().min(1).max(20_000),
-  prompt: z.string().min(1).max(120_000),
+  // The route wraps the prompt with untrusted(...), which truncates at 60_000
+  // chars — bound the contract to the same number so an oversized payload is
+  // a clear 400 instead of a silently truncated prompt.
+  prompt: z.string().min(1).max(60_000),
   /** Ledger + credential scope (plan Phase 9 rule 3: every request carries orgId). */
   orgId: z.string().uuid(),
 });

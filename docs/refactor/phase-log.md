@@ -80,6 +80,58 @@ package.json, depcruise config, bun.lock).
 
 Open questions → ask Dev 1 (shared files) or the product owner via the phase-log.
 
+### Phase 9a hardening handoff (Dev 3 → reviewer, 2026-11-24)
+
+Task list above is **done** on `services/9a-template`, in the `../ATSAgent_refactored-p9` worktree. Commit + PR
+opened as `refactor/p9a-internal-ai`. Gate: ruff / mypy strict / pytest (18) green; contract `--check` green;
+turbo typecheck green; root eslint 0 errors; agents:lock no diff; migration 0092 applied twice (idempotent);
+web build green; client bundle grep clean; new tests 22 pass.
+
+1. **Durable token storage:** new `service_tokens` table (schema + `packages/db/drizzle/pg-migrations/0092_service_tokens.sql`,
+   platform-scoped by design — a service token authenticates a service, never a tenant). Stored via
+   `encryptSecret` ("enc:v1.…" asserted in tests), read via `decryptSecret` per request, constant-time compare
+   over env bootstrap list + all stored tokens. `SERVICE_TOKENS` env stays as the pre-rotation bootstrap.
+2. **Rotation through writeAudit:** `rotateServiceToken` in `apps/web/src/server/internal-ai.server.ts`
+   (generate → encrypt → upsert → `internal.service_token.rotated` audit row). Platform-admin gated server
+   functions in the new `apps/web/src/lib/platform-service-tokens.functions.ts` (`rotateServiceTokenFn` —
+   returns the plaintext once; `listServiceTokens` — metadata only). New file on purpose: not a shared-file change.
+3. **CSRF exemption:** documented in the route comment; the guard scopes `/api/auth` + `/_serverFn` only, and
+   the endpoint is token-authenticated with no cookies.
+4. **Internal ingress:** two layers — production runtime check (`internalIngressAllowed`: private-range client
+   IP via `clientIp()`, fail-closed on "unknown"/public, 404) + comment note in `apps/web/infra/gke/20-ingress.yaml`
+   (services must call the cluster-internal service, never the public host).
+5. **Tenancy check:** `orgHasAiConsent(orgId)` = org row exists AND the org has a saved AI provider credential.
+   **Deviation from the handoff's suggestion** (training_settings): training consent gates _capture_, not AI
+   use; the only "this org opted into AI" signal in the app today is its own BYO-key credential, and the
+   gateway refuses without one anyway. Unknown org and consent-missing return the same generic 403, so the
+   endpoint cannot probe org existence. Reviewer: confirm this reading.
+6. **untrusted(...)** wrapping: prompt arrives as `<untrusted_data label="service_input">…</untrusted_data>`
+   and the system prompt is prefixed with `INJECTION_RULES` (fence look-alikes in the payload are sanitised —
+   tested). Note: taken from `@/lib/ai-gateway.server` — the `@ats/ai` package lands in Phase 3; the import
+   moves then. Contract `prompt` max lowered to 60_000 to match `untrusted()`'s truncation bound, so oversize
+   payloads are a 400 rather than a silently truncated prompt (contracts regenerated, `--check` green).
+7. **Tests:** `scripts/internal-ai-route.test.ts` (21: 401 ×3 incl. empty-list fail-closed and an
+   encryptSecret round-trip with a look-alike reject; ingress unit cases; 400 ×6; 403 ×3 incl. orgId-scoped
+   credential check; injection-hygiene ×2; vendor stripping ×3) and `scripts/internal-ai-rate-limit.test.ts`
+   (429 burst through the real `server.ts` dispatch with the SSR entry stubbed — kept in its own file so the
+   server-entry mock doesn't leak into other suites).
+
+**Worktree pitfall found and fixed (affects every Phase 9 worktree):** `ATSAgent_refactored-p9/node_modules`
+was a symlink to the main checkout's `node_modules`, so every `@ats/*` import resolved to the **main
+checkout's** package sources — a schema change made in a worktree silently didn't exist at runtime, and any
+other session's relink mutated this worktree's dependency graph mid-run. Fixed by giving the worktree its own
+`bun install` (real `node_modules`). If a worktree sees "stale package" behaviour, check
+`readlink -f node_modules/@ats/db` first.
+
+**Known gaps / follow-ups:** the ER diagram generator does not exist in the monorepo yet — table 0092 needs to
+be added when `gen-er-diagram` lands (source-repo rule). `SERVICE_TOKENS` and `NODE_ENV` reads stay in
+`internal-ai.server.ts` (not `@ats/config`'s env schema) to keep the changeset off Dev 1's shared files —
+fold into the config package when convenient. Rotation UI on the platform console is not built (server
+functions only) — fine for 9a, needed before 9b's first real service.
+
+**Question for reviewer:** approve the two documented deviations (consent = BYO-key credential;
+token table platform-scoped with env bootstrap) in the 9a review.
+
 ### Phase 2 handoff: 2026-11-23
 
 - **Branch / PRs:** `refactor/p2-l0-foundation` on madhugraj/ATSAgent_refactored, 7 commits:

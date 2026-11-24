@@ -1,5 +1,12 @@
 # Public entry: www.scouts.yavar.ai (TLS by a Google-managed certificate) and
 # scouts.yavar.ai, both on one global static IP. HTTP is redirected to HTTPS.
+#
+# Phase 9: this ingress is public, so anything it routes is externally
+# reachable. The internal service API prefix /api/internal must NOT be routed
+# here in production — Python services call the app over the cluster-internal
+# service (scouts-app.scouts.svc.cluster.local), never through this host.
+# Defence in depth: the route itself 404s any request whose client IP is not
+# private while NODE_ENV=production (server/internal-ai.server.ts).
 apiVersion: networking.gke.io/v1
 kind: ManagedCertificate
 metadata:
