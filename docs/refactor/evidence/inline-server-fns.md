@@ -59,7 +59,7 @@ to covered cores (`storeOnboardingDocument`, `readinessFor`, `extractDocument`, 
    rules worth cores, list/read fns arguably don't.
 2. Real-AI happy paths remain locked at the vendor-neutral refusal everywhere (BYO-key); they are
    covered by evals, not suites.
-3. Mutation-result caveat (reviewer, verified on #96): a mutation on a *second* org-scoped read
+3. Mutation-result caveat (reviewer, verified on #96): a mutation on a _second_ org-scoped read
    proves nothing — e.g. `offers.functions.ts:263` (release-gate read) is redundant behind the
    org-scoped load at `:217`; no test can observe removing it. Keep such defence-in-depth checks;
    don't treat "mutation survives" there as a coverage gap.
