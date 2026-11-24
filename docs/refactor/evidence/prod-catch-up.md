@@ -281,7 +281,27 @@ needed)` line.
 - **Post-rollback checks:** smoke GET `/` = 200, agent tick advancing (agent_events), outbox draining,
   voice heartbeat, `/metrics` scrape green.
 
-## 9. Approval and timing
+## 9. Approval, timing and pre-cut-over checks
+
+**Check 1 — custom import hosts and the uuid-chain duplicate window (from ATSAgent#93/#94).**
+The external-id fallback fix (#94, merged) changes what `importFromProvider` stores: records that previously
+got a **random** external id (the old chain ignored a bare provider `uuid` field) will get the **provider's
+uuid** on the first import after the fix — so cross-import dedupe will miss and create **one duplicate
+candidate per uuid-only record**. This applies **only to custom import hosts**; built-in providers
+(naukri/indeed) carry `id` and are unaffected.
+
+```bash
+# read-only: does production import from any custom host?
+kubectl -n atsiq get secret atsiq-env -o jsonpath='{.data.INTEGRATION_ALLOWED_HOSTS}' | base64 -d
+```
+
+If it is unset or empty: no exposure, note it here and move on. If it lists hosts: before the first
+re-import of any of them in production, (a) count the exposed integrations on the prod DB (read-only), and
+(b) schedule a dedupe pass over the candidates created by that first re-import — the repo's candidates
+`dedupe` core is the tool; run it right after the import rather than letting duplicates accumulate. Record
+the outcome in this file.
+
+**Approval and timing**
 
 - The product owner approves the release and its timing (team brief). The z-atsiq path has no technical
   approval gate (the scouts pipeline's GitHub `production` Environment reviewers don't exist here) — the
