@@ -727,7 +727,7 @@ export const markInterviewOutcomeCore = createServerOnlyFn(async function markIn
     payload: { requisitionId: r.requisitionId, level: r.level, outcome: data.outcome },
   });
   try {
-    const desk = await import("../server/desk/desk.server");
+    const desk = await import("@ats/desk-core/server");
     const conv = await desk.conversationForRequisition(ctx.orgId, r.requisitionId);
     if (conv)
       await desk.postMessage(conv, {
@@ -845,7 +845,7 @@ export const interviewerUnavailableCore = createServerOnlyFn(
       },
     });
     try {
-      const desk = await import("../server/desk/desk.server");
+      const desk = await import("@ats/desk-core/server");
       const conv = await desk.conversationForRequisition(ctx.orgId, r.requisitionId);
       if (conv)
         await desk.postMessage(conv, {

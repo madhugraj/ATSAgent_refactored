@@ -43,7 +43,7 @@ const accessible = createServerOnlyFn(async function accessible(
   ctx: { orgId: string; userId: string; isOwner: boolean },
   id: string,
 ) {
-  const { loadConversation } = await import("../server/desk/desk.server");
+  const { loadConversation } = await import("@ats/desk-core/server");
   const conv = await loadConversation(ctx.orgId, id);
   if (conv.createdBy !== ctx.userId && !(await isLeadership(ctx.userId, ctx.orgId, ctx.isOwner)))
     throw new Error("Conversation not found.");
@@ -58,7 +58,7 @@ const echoClick = createServerOnlyFn(async function echoClick(
   conv: { id: string; orgId: string },
   text: string,
 ) {
-  const { postMessage } = await import("../server/desk/desk.server");
+  const { postMessage } = await import("@ats/desk-core/server");
   await postMessage(conv, { role: "user", body: text });
 });
 
@@ -331,7 +331,7 @@ const deskConversationView = createServerOnlyFn(async function deskConversationV
     canStart: Boolean(await startStage(conv, context.userId, { dryRun: true })),
     canEditAgents: await canEditAgents(context.userId, context.orgId),
     canDelete: await (async () => {
-      const { deletionAllowed } = await import("../server/desk/desk.server");
+      const { deletionAllowed } = await import("@ats/desk-core/server");
       const d = await deletionAllowed(conv, context.userId);
       return d
         ? d.kind === "chat"
@@ -340,7 +340,7 @@ const deskConversationView = createServerOnlyFn(async function deskConversationV
         : null;
     })(),
     tracks: await (async () => {
-      const { deskSiblings } = await import("../server/desk/desk.server");
+      const { deskSiblings } = await import("@ats/desk-core/server");
       const sibs = await deskSiblings(context.orgId, conv.id);
       const self = {
         id: conv.id,
@@ -780,7 +780,7 @@ export const deleteDeskConversation = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const conv = await accessible(context, data.id);
-    const { deleteThreads } = await import("../server/desk/desk.server");
+    const { deleteThreads } = await import("@ats/desk-core/server");
     return deleteThreads(conv, context.userId, data.reason, data.scope);
   });
 
@@ -789,7 +789,7 @@ export const listDeletedDeskConversations = createServerFn({ method: "GET" })
   .middleware([requireOrg])
   .handler(async ({ context }) => {
     if (!context.isOwner) return [];
-    const { deletedThreads, RESTORE_DAYS } = await import("../server/desk/desk.server");
+    const { deletedThreads, RESTORE_DAYS } = await import("@ats/desk-core/server");
     const now = Date.now();
     return (await deletedThreads(context.orgId)).map((t) => ({
       id: t.id,
@@ -806,6 +806,6 @@ export const restoreDeskConversation = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { restoreThread } = await import("../server/desk/desk.server");
+    const { restoreThread } = await import("@ats/desk-core/server");
     return restoreThread(context.orgId, context.userId, data.id);
   });

@@ -280,7 +280,7 @@ export const sendOrgDeskMessage = createServerFn({ method: "POST" })
     await actorCtx(context);
     await needsAiKey(context.orgId);
     await registered();
-    const { loadConversation } = await import("../server/desk/desk.server");
+    const { loadConversation } = await import("@ats/desk-core/server");
     const conv = await loadConversation(context.orgId, data.id);
     if (conv.kind !== "org_profile") throw new Error("Conversation not found.");
     const { handleOrgUserMessage } = await import("../server/desk/org-desk.server");
@@ -297,7 +297,7 @@ export const confirmWebsiteFromDesk = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await actorCtx(context);
     await registered();
-    const { loadConversation } = await import("../server/desk/desk.server");
+    const { loadConversation } = await import("@ats/desk-core/server");
     const conv = await loadConversation(context.orgId, data.id);
     if (conv.kind !== "org_profile") throw new Error("Conversation not found.");
     const { confirmWebsiteFromChat } = await import("../server/desk/org-desk.server");
@@ -312,7 +312,7 @@ export const readWebsiteFromDesk = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await actorCtx(context);
     await registered();
-    const { loadConversation, postMessage } = await import("../server/desk/desk.server");
+    const { loadConversation, postMessage } = await import("@ats/desk-core/server");
     const conv = await loadConversation(context.orgId, data.id);
     if (conv.kind !== "org_profile") throw new Error("Conversation not found.");
     await postMessage(conv, { role: "user", body: "Read the website now" });
@@ -328,7 +328,7 @@ export const buildFromDesk = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await actorCtx(context);
     await registered();
-    const { loadConversation, postMessage } = await import("../server/desk/desk.server");
+    const { loadConversation, postMessage } = await import("@ats/desk-core/server");
     const conv = await loadConversation(context.orgId, data.id);
     if (conv.kind !== "org_profile") throw new Error("Conversation not found.");
     await postMessage(conv, { role: "user", body: "Build the draft now" });
@@ -344,7 +344,7 @@ export const retryOrgDeskRun = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await actorCtx(context);
     await registered();
-    const { loadConversation } = await import("../server/desk/desk.server");
+    const { loadConversation } = await import("@ats/desk-core/server");
     const conv = await loadConversation(context.orgId, data.id);
     if (conv.kind !== "org_profile") throw new Error("Conversation not found.");
     const { retryRun } = await import("../server/desk/desk.server");
@@ -362,7 +362,7 @@ export const clearOrgDeskChat = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await actorCtx(context);
     await registered();
-    const { loadConversation } = await import("../server/desk/desk.server");
+    const { loadConversation } = await import("@ats/desk-core/server");
     const conv = await loadConversation(context.orgId, data.id);
     if (conv.kind !== "org_profile") throw new Error("Conversation not found.");
     const { agentRuns } = await import("@db/schema");

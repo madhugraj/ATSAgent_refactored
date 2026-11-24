@@ -188,7 +188,7 @@ async function chaseOne(orgId: string, r: Round, email: string, now: number): Pr
         ? `${name}'s L${r.level} scorecard for ${cand} is due and missing (${overdue} h after the round). ${cand} is blocked on feedback until it is in.`
         : `${name}'s L${r.level} scorecard for ${cand} is still missing, ${overdue} h after the round. ${cand} cannot move on; chase ${name} or ask another panelist.`;
     try {
-      const desk = await import("../server/desk/desk.server");
+      const desk = await import("@ats/desk-core/server");
       const conv = await desk.conversationForRequisition(orgId, ctx.requisitionId);
       if (conv) await desk.postMessage(conv, { role: "desk", body });
     } catch {

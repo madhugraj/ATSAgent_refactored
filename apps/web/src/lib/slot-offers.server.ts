@@ -832,7 +832,7 @@ async function whenText(orgId: string, at: Date) {
 
 async function tellThread(orgId: string, requisitionId: string, body: string) {
   try {
-    const desk = await import("../server/desk/desk.server");
+    const desk = await import("@ats/desk-core/server");
     const conv = await desk.conversationForRequisition(orgId, requisitionId);
     if (conv) await desk.postMessage(conv, { role: "desk", body });
   } catch {

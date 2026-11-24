@@ -9,8 +9,14 @@ import { departments, masterItems, orgMembers, organizations, userRoles } from "
 import { registrableDomain, workEmailProblem } from "@/lib/work-email";
 import { isCurrencyCode } from "@/lib/iso";
 import { AgreementAcceptanceInput } from "@/lib/legal/acceptance";
+import { inviteMemberCore, notifyInvitedMember } from "@ats/org/server";
 
 export type { AppRole } from "@/lib/auth.middleware";
+
+// SHIM: remove in Phase 8 — the member-administration cores moved to
+// @ats/org/server (Phase 4, map §4 L2); this re-export keeps the file's
+// export surface (and the server-function ids) exactly as before.
+export { inviteMemberCore } from "@ats/org/server";
 
 const ROLES = [
   "recruiter",
@@ -64,49 +70,6 @@ export type MyOrg = {
   /** Holds only the interviewer role: the app shows the panel view and nothing else. */
   panelOnly: boolean;
 };
-
-const ROLE_LABELS: Record<AppRole, string> = {
-  recruiter: "Recruiter",
-  hiring_manager: "Hiring manager",
-  department_head: "Department head",
-  hr_head: "HR head",
-  president_cbo: "President / CBO",
-  interviewer: "Interviewer",
-};
-
-/**
- * Tell an invited colleague they now have access. Best-effort: the roster entry
- * is already saved, so a mail failure must never fail the invitation.
- */
-const notifyInvitedMember = createServerOnlyFn(async function notifyInvitedMember(args: {
-  email: string;
-  orgName: string;
-  role: AppRole;
-  title?: string | null;
-  inviteeName?: string | null;
-  inviterName?: string | null;
-  memberId?: string | null;
-  orgId?: string | null;
-}) {
-  try {
-    const { sendTemplateEmail } = await import("@/lib/email-templates/send-email");
-    await sendTemplateEmail("member-invited", args.email, {
-      idempotencyKey: `member-invited:${args.memberId ?? args.email}`,
-      orgId: args.orgId ?? null,
-      templateData: {
-        orgName: args.orgName,
-        roleLabel: ROLE_LABELS[args.role],
-        title: args.title ?? undefined,
-        inviteeName: args.inviteeName ?? undefined,
-        inviterName: args.inviterName ?? undefined,
-        email: args.email,
-      },
-    });
-  } catch (e) {
-    const { redactEmail } = await import("../server/audit");
-    console.error("invitation email failed", redactEmail(args.email), e);
-  }
-});
 
 function slugify(name: string) {
   const base = name
@@ -580,94 +543,6 @@ export const inviteMember = createServerFn({ method: "POST" })
     const orgId = await assertAdmin(context.userId);
     return inviteMemberCore(orgId, context.userId, data);
   });
-
-/**
- * Invite a person into the organisation with one approval role (the caller has
- * checked the inviter is an admin). Company-domain gate as before; audited
- * `member.invited` — an invite is a role grant.
- */
-export const inviteMemberCore = createServerOnlyFn(async function inviteMemberCore(
-  orgId: string,
-  inviterUserId: string,
-  data: { email: string; role: AppRole; title: string; fullName: string },
-): Promise<{ ok: true; notified: true }> {
-  const context = { userId: inviterUserId };
-  const [org] = await db
-    .select({ status: organizations.status })
-    .from(organizations)
-    .where(eq(organizations.id, orgId))
-    .limit(1);
-  if ((org?.status ?? "active") !== "active")
-    throw new Error(
-      "Your organisation is not approved yet — internal users can be added after approval.",
-    );
-  const email = data.email.toLowerCase();
-  const problem = workEmailProblem(email);
-  if (problem) throw new Error(problem);
-
-  // The owner's verified domain defines who counts as an internal user.
-  const [owner] = await db
-    .select({ email: orgMembers.email })
-    .from(orgMembers)
-    .where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.isOwner, true)))
-    .limit(1);
-  if (owner?.email && registrableDomain(owner.email) !== registrableDomain(email))
-    throw new Error(
-      `Only ${registrableDomain(owner.email)} addresses can be invited into this organisation.`,
-    );
-
-  const [existingUser] = await db
-    .select({ id: orgMembers.id })
-    .from(orgMembers)
-    .where(and(eq(orgMembers.orgId, orgId), ilike(orgMembers.email, email)))
-    .limit(1);
-  if (existingUser) throw new Error("That email is already on the roster.");
-
-  const [row] = await db
-    .insert(orgMembers)
-    .values({
-      orgId,
-      email,
-      fullName: data.fullName.trim() || null,
-      title: data.title.trim() || null,
-      invitedRole: data.role,
-      invitedBy: context.userId,
-      status: "invited",
-    })
-    .returning({ id: orgMembers.id });
-
-  const [orgRow] = await db
-    .select({ name: organizations.name })
-    .from(organizations)
-    .where(eq(organizations.id, orgId))
-    .limit(1);
-  const [inviter] = await db
-    .select({ fullName: orgMembers.fullName, email: orgMembers.email })
-    .from(orgMembers)
-    .where(and(eq(orgMembers.userId, context.userId), eq(orgMembers.orgId, orgId)))
-    .limit(1);
-  await notifyInvitedMember({
-    orgId,
-    email,
-    orgName: orgRow?.name ?? "your organisation",
-    role: data.role,
-    title: data.title.trim() || null,
-    inviteeName: data.fullName.trim() || null,
-    inviterName: inviter?.fullName ?? inviter?.email ?? null,
-    memberId: row?.id ?? null,
-  });
-  const { writeAudit } = await import("../server/audit");
-  await writeAudit({
-    actor: inviter?.email ?? `user:${inviterUserId}`,
-    actorUserId: inviterUserId,
-    orgId,
-    action: "member.invited",
-    entityType: "org_member",
-    entityId: row?.id ?? null,
-    detail: { email, role: data.role },
-  });
-  return { ok: true, notified: true };
-});
 
 export const setMemberRole = createServerFn({ method: "POST" })
   .middleware([requireIdentity])
