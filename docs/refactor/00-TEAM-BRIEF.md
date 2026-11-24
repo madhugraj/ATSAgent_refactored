@@ -431,6 +431,11 @@ handoff: docs/refactor/phase-log.md#phase-N-handoff
 
 ## Part F: Escalation and decisions
 
+**Merging under branch protection (2026-11-24):** with only one GitHub account available, merges happen by
+admin override **only after** the reviewer's file (`docs/refactor/reviews/phase-N-review.md`) records an
+approval/verdict for the phase. CI must be green on the merge commit's head. If a second reviewer account is
+added later, this reverts to normal PR approvals.
+
 Stop and write a question in the handoff note (and tell the lead) when:
 
 - a file is not covered by `domains.mjs` / map §4, or seems to belong to two packages;

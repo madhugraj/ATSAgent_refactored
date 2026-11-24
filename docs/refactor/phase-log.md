@@ -1,5 +1,7 @@
 # Refactor phase log
 
+Feature freeze (2026-11-24, product owner): from Phase 3's start, **only bug fixes merge to the source repo** until cut-over.
+
 Baseline (`SOURCE_SHA`): `dcb6a4b` — after the pre-Phase-1 source PRs (#81 whole-repo prettier format,
 #83 second interview-panel race, #82 review R1 stage-guard fix), 2026-11-23, CI green.
 

@@ -17,39 +17,41 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 // emit a package.json whose "imports" map resolves every such specifier to a
 // stub, so the bundle boots without node_modules. Phase 7 removes this whole
 // class of problem by de-scoping the Start server from the worker.
-function emitHashImportStubs(outdir, bundleFile) {
-  const text = readFileSync(join(outdir, bundleFile), "utf8");
-  const names = new Map(); // specifier -> imported binding names
-  const re = /import\s*\{([^}]*)\}\s*from\s*["'](#[^"']+)["']/g;
-  for (const [, bindings, spec] of text.matchAll(re)) {
-    const list = names.get(spec) ?? [];
+function emitHashImportStubs(OUTDIR) {
+  const text = readFileSync(join(OUTDIR, "index.mjs"), "utf8");
+  const names = new Map();
+  for (const [, bindings, spec] of text.matchAll(
+    /import\s*\{([^}]*)\}\s*from\s*["'](#[^"']+)["']/g,
+  )) {
+    const list = names.get(spec) ?? new Set();
     for (const b of bindings.split(",")) {
       const n = b
         .trim()
-        .split(/\s+as\s+/)
-        .pop()
+        .split(/\s+as\s+/)[0]
         .trim();
-      if (n) list.push(n);
+      if (n) list.add(n);
     }
     names.set(spec, list);
   }
+  for (const [spec] of text.matchAll(/import\s*["'](#[^"']+)["']/g))
+    if (!names.has(spec)) names.set(spec, new Set());
   if (!names.size) return;
-  const stub = [...names.entries()]
-    .flatMap(([spec, list]) =>
-      list.map((n) => `export const ${n} = undefined; // dead code in the worker; never called`),
+  const all = new Set([...names.values()].flatMap((s) => [...s]));
+  const stub = [...all]
+    .map(
+      (n) =>
+        `export const ${n} = () => {\n  throw new Error("${n}: server functions are not available in the voice worker");\n};`,
     )
     .join("\n");
-  writeFileSync(join(outdir, "tanstack-hash-stubs.mjs"), stub + "\n");
+  writeFileSync(join(OUTDIR, "tanstack-hash-stubs.mjs"), (stub || "export {};") + "\n");
   writeFileSync(
-    join(outdir, "package.json"),
+    join(OUTDIR, "package.json"),
     JSON.stringify({
       type: "module",
-      imports: Object.fromEntries(
-        [...names.keys()].map((spec) => [spec, "./tanstack-hash-stubs.mjs"]),
-      ),
+      imports: Object.fromEntries([...names.keys()].map((s) => [s, "./tanstack-hash-stubs.mjs"])),
     }) + "\n",
   );
-  console.log(`hash-import stubs: ${names.size} specifier(s) -> tanstack-hash-stubs.mjs`);
+  console.log(`voice worker: stubbed ${names.size} "#" import(s): ${[...names.keys()].join(", ")}`);
 }
 
 const out = await Bun.build({
