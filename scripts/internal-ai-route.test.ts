@@ -141,6 +141,8 @@ const VALID = {
 
 beforeAll(() => {
   process.env["SERVICE_TOKENS"] = `first-token,${TOKEN}`;
+  // The bootstrap list is feature-scoped too: explicit lists only.
+  process.env["SERVICE_TOKEN_FEATURES"] = "candidate_score,resume_parse";
   process.env["SECRET_ENCRYPTION_KEY"] = "0PEoUE8mAJNIF5HQca+ale2U77KcQF0Vt8lAJa0+6VY="; // 32 bytes
   // Default tenancy fixtures (DB column names — the fake matches predicates):
   // the org exists and has a saved provider key.
@@ -175,7 +177,7 @@ describe("service-token auth", () => {
   test("a token stored through encryptSecret authenticates; a look-alike does not", async () => {
     const stored = realCrypto.encryptSecret("svc_stored-token-abcdef0123456789");
     expect(stored).toMatch(/^enc:v1\./); // never plaintext at rest
-    setRows(serviceTokens, [{ tokenEncrypted: stored, allowed: [] }]);
+    setRows(serviceTokens, [{ tokenEncrypted: stored, allowed: ["candidate_score"] }]);
     try {
       const ok = await post(VALID, { authorization: "Bearer svc_stored-token-abcdef0123456789" });
       expect(ok.status).toBe(200);
@@ -263,17 +265,31 @@ describe("per-service feature allow-list (review 9a A1)", () => {
     }
   });
 
-  test("an empty allow-list means every feature", async () => {
-    const stored = realCrypto.encryptSecret("svc_unrestricted-0123456789abcdef");
+  test("an empty allow-list denies everything (explicit lists only)", async () => {
+    const stored = realCrypto.encryptSecret("svc_nolist-token-0123456789abcd");
     setRows(serviceTokens, [{ tokenEncrypted: stored, allowed: [] }]);
     try {
-      const ok = await post(
+      const res = await post(
         { ...VALID, feature: "resume_parse" },
-        { authorization: "Bearer svc_unrestricted-0123456789abcdef" },
+        { authorization: "Bearer svc_nolist-token-0123456789abcd" },
       );
-      expect(ok.status).toBe(200);
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { message: string }).message).toContain(
+        "not allowed to call this feature",
+      );
     } finally {
       setRows(serviceTokens, []);
+    }
+  });
+
+  test("the env bootstrap without SERVICE_TOKEN_FEATURES authorises no feature", async () => {
+    const prev = process.env["SERVICE_TOKEN_FEATURES"];
+    delete process.env["SERVICE_TOKEN_FEATURES"];
+    try {
+      const res = await authed(VALID);
+      expect(res.status).toBe(403);
+    } finally {
+      process.env["SERVICE_TOKEN_FEATURES"] = prev;
     }
   });
 });

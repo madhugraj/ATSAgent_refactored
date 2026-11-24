@@ -25,7 +25,8 @@ export const rotateServiceTokenFn = createServerFn({ method: "POST" })
     z
       .object({
         service: KNOWN_SERVICES,
-        // AI_FEATURES allow-list; empty/omitted = every feature.
+        // AI_FEATURES allow-list; empty/omitted = allows nothing (explicit
+        // lists only).
         allowedFeatures: z.array(z.string().max(64)).max(64).default([]),
       })
       .parse(data),

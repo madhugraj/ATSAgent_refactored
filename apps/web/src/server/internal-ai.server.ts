@@ -35,12 +35,21 @@ import { writeAudit } from "./audit";
 
 /**
  * The env bootstrap list (comma-separated) accepted before the first rotation.
- * Lifecycle: once every service has a stored token, the operator deletes
- * SERVICE_TOKENS from the deployment env — from then on only encrypted
- * `service_tokens` rows authenticate.
+ * Its feature scope comes from SERVICE_TOKEN_FEATURES (same format) — an empty
+ * or missing list authorises no feature at all (review 9a follow-up: allow
+ * lists are explicit; empty denies everything). Lifecycle: once every service
+ * has a stored token, the operator deletes both env vars — from then on only
+ * encrypted `service_tokens` rows authenticate.
  */
 function envServiceTokens(): string[] {
   return (process.env["SERVICE_TOKENS"] ?? "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+function envServiceTokenFeatures(): string[] {
+  return (process.env["SERVICE_TOKEN_FEATURES"] ?? "")
     .split(",")
     .map((t) => t.trim())
     .filter(Boolean);
@@ -58,13 +67,12 @@ export type ServiceAuth = { authorized: false } | { authorized: true; allowedFea
 
 /**
  * Resolve `given` against the env bootstrap list and the stored service
- * tokens. An empty allowedFeatures means the token may call every feature
- * (the bootstrap list and any token rotated without a restriction); a
- * non-empty list is enforced by the route.
+ * tokens. allowedFeatures is always an explicit allow-list — an empty list
+ * allows no feature — and the route enforces it on every call.
  */
 export async function resolveServiceToken(given: string): Promise<ServiceAuth> {
   if (constantTimeMatch(envServiceTokens(), given)) {
-    return { authorized: true, allowedFeatures: [] };
+    return { authorized: true, allowedFeatures: envServiceTokenFeatures() };
   }
   const rows = await db
     .select({
@@ -103,8 +111,8 @@ export async function orgHasAiConsent(orgId: string): Promise<boolean> {
 
 /**
  * Generate, store (encrypted) and audit a fresh token for `service`. The
- * optional allow-list restricts which AI_FEATURES slugs the token may call
- * (empty or omitted = every feature). Returns the plaintext once — it is
+ * allow-list restricts which AI_FEATURES slugs the token may call; empty or
+ * omitted allows nothing (lists are always explicit). Returns the plaintext once — it is
  * never recoverable from the database again, so the caller must show it to
  * the operator immediately.
  */

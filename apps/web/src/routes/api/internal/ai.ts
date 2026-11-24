@@ -19,8 +19,8 @@
  *     SERVICE_TOKENS env bootstrap, deleted after the first rotation),
  *     constant-time compared, generic 401.
  *  3. Body validation against the shared zod contract, 400.
- *  4. Feature allow-list per service token, 403 (an empty list = every
- *     feature).
+ *  4. Feature allow-list per service token, 403 — always explicit: an empty
+ *     list allows nothing.
  *  5. Tenancy: the org must exist and have opted into AI — meaning it has
  *     saved its own AI provider key. That is *AI-use* consent and is separate
  *     from training-capture consent (training_settings), which gates what may
@@ -104,9 +104,11 @@ async function handle(request: Request): Promise<Response> {
     );
   }
 
-  // Per-service budget fence (review 9a A1): a token with an allow-list may
-  // not spend the org's key on another service's features.
-  if (auth.allowedFeatures.length > 0 && !auth.allowedFeatures.includes(parsed.data.feature)) {
+  // Per-service budget fence (review 9a A1 + follow-up): the allow-list is
+  // always explicit — an empty list (env bootstrap without
+  // SERVICE_TOKEN_FEATURES, or a token rotated without one) authorises no
+  // feature at all.
+  if (!auth.allowedFeatures.includes(parsed.data.feature)) {
     return Response.json(
       { ok: false, message: "This service token is not allowed to call this feature." },
       { status: 403, headers: NO_STORE },

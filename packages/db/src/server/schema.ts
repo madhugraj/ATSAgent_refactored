@@ -4882,8 +4882,9 @@ export const policyBriefings = pgTable(
  * live credential, and rotation goes through audit_log
  * (rotateServiceToken in apps/web/src/server/internal-ai.server.ts). Before the
  * first rotation the SERVICE_TOKENS env list bootstraps access; after it the
- * env var is deleted. allowedFeatures is the AI_FEATURES allow-list (empty =
- * every feature) so one service cannot spend another's budget.
+ * env var is deleted. allowedFeatures is an explicit AI_FEATURES
+ * allow-list — an empty list allows nothing — so one service cannot spend
+ * another's budget.
  */
 export const serviceTokens = pgTable(
   "service_tokens",

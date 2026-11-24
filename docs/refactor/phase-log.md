@@ -444,3 +444,12 @@ All blockers and notes from `reviews/phase-9a-review.md` are addressed on `servi
 
 Gate re-run: 25 tests green (route 24 + 429 dispatch), ruff/mypy/pytest green, contracts `--check` green,
 turbo typecheck green, eslint 0 errors, `agents:lock` no diff, table-owners check "every table owned".
+
+### Phase 9a follow-up (pre-9b, 2026-11-24): allow-lists are explicit
+
+Per the reviewer's approval condition: an **empty allowedFeatures now denies every feature** (previously
+empty = unrestricted). The route 403s any feature not in the token's list, and the env bootstrap list is
+scoped by a new `SERVICE_TOKEN_FEATURES` var (empty/missing = authorises nothing) — so nothing can call the
+callback without an explicit list. 26 tests green (new: empty list denies; bootstrap without features
+denies). Operators rotate tokens with explicit lists; `SERVICE_TOKENS`/`SERVICE_TOKEN_FEATURES` are deleted
+together after the first rotation.
