@@ -1489,14 +1489,28 @@ const capture = () => import("../server/training/capture.server");
  * training cutoff — a role that started this year reads as "future-dated", a
  * current job as a short stint.
  */
+// Composed from UTC parts, not Intl rendering: ICU's default en-GB date join
+// differs between engines (bun 1.3.14 on linux: "Tuesday 24 November 2026";
+// bun 1.4.5 and Node: "Tuesday, 24 November 2026") and the prompt must read
+// the same everywhere. Production runs Node; this matches its output exactly.
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
 export function withToday(system: string, now = new Date()): string {
-  const day = now.toLocaleDateString("en-GB", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  });
+  const day = `${WEEKDAYS[now.getUTCDay()]}, ${now.getUTCDate()} ${MONTHS[now.getUTCMonth()]} ${now.getUTCFullYear()}`;
   return `Today is ${day} (${now.toISOString().slice(0, 10)}, UTC). Dates up to today are in the past; judge tenure, recency and gaps against today.\n\n${system}`;
 }
 

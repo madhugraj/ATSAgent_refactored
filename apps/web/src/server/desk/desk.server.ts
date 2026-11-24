@@ -2430,7 +2430,12 @@ const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
 /** An ISO date-time as a person reads it, in the organisation's time zone. */
 function fmtWhen(v: string, timeZone?: string): string {
   try {
-    return new Intl.DateTimeFormat("en-GB", {
+    // Assembled from formatToParts, not .format(): the part VALUES are stable
+    // across engines, but the default en-GB join is not (bun 1.3.14 on linux
+    // renders "Mon 12 Oct at 10:00 GMT+5:30" where Node renders
+    // "Mon 12 Oct, 10:00 GMT+5:30"). Pin the layout so agents and tests see
+    // one string everywhere; identical to Node's rendering in production.
+    const parts = new Intl.DateTimeFormat("en-GB", {
       weekday: "short",
       day: "numeric",
       month: "short",
@@ -2438,7 +2443,9 @@ function fmtWhen(v: string, timeZone?: string): string {
       minute: "2-digit",
       timeZoneName: "short",
       ...(timeZone ? { timeZone } : {}),
-    }).format(new Date(v));
+    }).formatToParts(new Date(v));
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    return `${get("weekday")} ${get("day")} ${get("month")}, ${get("hour")}:${get("minute")} ${get("timeZoneName")}`;
   } catch {
     return v;
   }
