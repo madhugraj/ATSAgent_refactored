@@ -14,7 +14,7 @@ import { aiRedteamChecks, db, type RedteamProbeResult } from "@ats/db/server";
 // shims stand for): every existing caller and the gateway mocks in the agent
 // and redteam tests resolve this one module, so the mock paths keep matching.
 // The later registerRedteamTarget change PR repoints this file.
-import { INJECTION_RULES, aiJson, resolveAiConfig, untrusted } from "@/lib/ai-gateway.server";
+import { INJECTION_RULES, aiJson, resolveAiConfig, untrusted } from "@ats/ai/server";
 import {
   FISHING_PROBE,
   GradeProbeReply,

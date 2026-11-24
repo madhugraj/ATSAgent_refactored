@@ -14,12 +14,12 @@
 import { createHmac } from "node:crypto";
 import { and, eq, gte, inArray, isNull, ne, or, sql } from "drizzle-orm";
 
-import { db } from "@/server/db";
+import { db } from "@ats/db/server";
 import { env } from "@ats/config/server";
-import { writeAudit } from "@/server/audit";
-import { decryptSecret } from "@/server/crypto";
+import { writeAudit } from "@ats/audit/server";
+import { decryptSecret } from "@ats/security/server";
 import { log } from "./log";
-import { safeFetch } from "@/server/safe-fetch";
+import { safeFetch } from "@ats/security/server";
 import {
   agentIssues,
   agentTelemetrySettings,
@@ -28,7 +28,7 @@ import {
   organizations,
   userRoles,
   type EmailOutboxKind,
-} from "@db/schema";
+} from "@ats/db/server";
 
 const ALERT_ROLES = ["hr_head", "president_cbo"] as const;
 const MAX_PER_PASS = 50;
