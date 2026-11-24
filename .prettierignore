@@ -29,3 +29,12 @@ scripts/refactor/edges*.json
 scripts/refactor/analyze-*.txt
 .turbo/
 .gitleaks.toml
+
+# Phase 9 Python services: ruff owns Python formatting; prettier has no
+# Python, TOML or Dockerfile parser. contracts/*.ts stays prettier-checked.
+services/**/*.py
+services/**/pyproject.toml
+services/**/uv.lock
+services/**/Dockerfile
+services/**/.venv/
+services/**/__pycache__/
