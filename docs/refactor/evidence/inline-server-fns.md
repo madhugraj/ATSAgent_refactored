@@ -53,6 +53,14 @@ to covered cores (`storeOnboardingDocument`, `readinessFor`, `extractDocument`, 
 
 ## Notes for Phase 5/6
 
+0. **Model-bearing DB writes → core** (reviewer, 2026-11-25, after the ai-call-path audit
+   false-positive check): the `model:` literals inside `salary-benchmark.functions` (`.values`),
+   `verification.functions` (two `.values`), `assessment.functions` (`.set`) and
+   `onboarding.functions` (`.set`) are persisted DB columns, not wire returns — verified false
+   positives, none reach the client. Their extraction into cores (e.g. `saveBenchmarkRun`,
+   `persistVerification`, `persistAssessmentResult`, `persistDocumentExtraction`) belongs to the
+   Phase 6 change PRs for offers / interviews / onboarding, NOT the freeze. The route-level
+   duplicate insert in `routes/api/public/sync-candidates.ts` can dedupe onto the same core then.
 1. Total: **~26 inline entry points**, concentrated in `collaboration.functions.ts` and
    `requisitions.functions.ts`. The collaboration file moves to `@ats/candidates` with handler logic
    intact unless cores are extracted first — decide per function; referrals/notes have real business
