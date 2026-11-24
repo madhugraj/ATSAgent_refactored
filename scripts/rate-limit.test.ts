@@ -82,9 +82,17 @@ const server = (await import("../apps/web/src/server")).default as {
   fetch: (request: Request) => Promise<Response>;
 };
 
-function call(path: string, ip: string, method = "GET"): Promise<Response> {
+function call(
+  path: string,
+  ip: string,
+  method = "GET",
+  headers: Record<string, string> = {},
+): Promise<Response> {
   return server.fetch(
-    new Request(`http://localhost${path}`, { method, headers: { "x-forwarded-for": ip } }),
+    new Request(`http://localhost${path}`, {
+      method,
+      headers: { "x-forwarded-for": ip, ...headers },
+    }),
   );
 }
 
@@ -116,6 +124,13 @@ describe("auth read endpoints (server dispatch)", () => {
     expect(AUTH_RATE_LIMIT).toBeLessThan(RATE_LIMIT);
   });
 
+  test(`POST /api/auth/login is 429 after the tighter ${AUTH_RATE_LIMIT} mutation budget`, async () => {
+    const ip = "10.1.0.12";
+    for (let i = 0; i < AUTH_RATE_LIMIT; i++)
+      expect((await call("/api/auth/login", ip, "POST")).status).toBe(200);
+    expect((await call("/api/auth/login", ip, "POST")).status).toBe(429);
+  });
+
   test(`POST /api/auth/confirm still hits the ${AUTH_RATE_LIMIT} mutation budget`, async () => {
     const ip = "10.1.0.4";
     for (let i = 0; i < AUTH_RATE_LIMIT; i++)
@@ -137,5 +152,65 @@ describe("auth read endpoints (server dispatch)", () => {
     expect((await call("/api/auth/session", ip)).status).toBe(429);
     expect((await call("/api/auth/login", ip, "POST")).status).toBe(200);
     expect((await call("/api/auth/confirm", ip)).status).toBe(200);
+  });
+});
+
+describe("public RPC, cron and /metrics surface (server dispatch)", () => {
+  // The shared-store tests above leave the postgres store selected; these run
+  // against the in-process window, so reset it before each one.
+  beforeEach(() => {
+    delete process.env["RATE_LIMIT_STORE"];
+  });
+
+  test(`POST /api/public/agent-tick is 429 after the normal ${RATE_LIMIT}/min budget`, async () => {
+    const ip = "10.1.0.7";
+    for (let i = 0; i < RATE_LIMIT; i++)
+      expect((await call("/api/public/agent-tick", ip, "POST")).status).toBe(200);
+    expect((await call("/api/public/agent-tick", ip)).status).toBe(429);
+  });
+
+  test(`POST /_serverFn/<id> is 429 after the normal ${RATE_LIMIT}/min budget`, async () => {
+    const ip = "10.1.0.8";
+    for (let i = 0; i < RATE_LIMIT; i++)
+      expect((await call("/_serverFn/abc123", ip, "POST")).status).toBe(200);
+    expect((await call("/_serverFn/abc123", ip)).status).toBe(429);
+  });
+
+  test("GET /metrics is 404 without a token and 401 with a wrong one", async () => {
+    const ip = "10.1.0.9";
+    const saved = process.env["METRICS_TOKEN"];
+    delete process.env["METRICS_TOKEN"];
+    try {
+      // Off (404) unless METRICS_TOKEN is at least 16 chars — never a leak.
+      expect((await call("/metrics", ip)).status).toBe(404);
+      process.env["METRICS_TOKEN"] = "metrics-token-0123456789abcdef";
+      expect((await call("/metrics", ip)).status).toBe(401);
+    } finally {
+      if (saved === undefined) delete process.env["METRICS_TOKEN"];
+      else process.env["METRICS_TOKEN"] = saved;
+    }
+  });
+});
+
+describe("CSRF guard on the server dispatch", () => {
+  beforeEach(() => {
+    delete process.env["RATE_LIMIT_STORE"];
+  });
+
+  test("a cross-site POST to a server function is refused before the limiter", async () => {
+    const ip = "10.1.0.10";
+    const refused = await call("/_serverFn/abc123", ip, "POST", { "sec-fetch-site": "cross-site" });
+    expect(refused.status).toBe(403);
+    // The guard runs before the budget is touched: the same caller without the
+    // Fetch-Metadata header (not a browser) still has its full allowance.
+    expect((await call("/_serverFn/abc123", ip, "POST")).status).toBe(200);
+  });
+
+  test("same-origin POSTs pass; a POST with no Fetch-Metadata or origin passes", async () => {
+    const ip = "10.1.0.11";
+    expect(
+      (await call("/_serverFn/abc123", ip, "POST", { "sec-fetch-site": "same-origin" })).status,
+    ).toBe(200);
+    expect((await call("/_serverFn/def456", ip, "POST")).status).toBe(200);
   });
 });

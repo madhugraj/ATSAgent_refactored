@@ -38,6 +38,79 @@ Phase 0 notes found during the merge:
 
 <!-- Append one handoff note per phase below, using template E2 in 00-TEAM-BRIEF.md. -->
 
+### Phase 3 gate re-run: 2026-11-24 (gate agent)
+
+- Full Gate 3 re-run on the same uncommitted tree, all PASS: turbo typecheck 11/11 · lint 0 errors /
+  271 warnings (baseline, unchanged) · `turbo run test` 10/10 suites, 118 tests, 0 fail · `agents:lock`
+  23 agents, no diff · attribution re-verified field-level (agent-governance 7 pass: in-run usage rows
+  carry `agentRunId`, out-of-run rows `null`; training-data 12 pass: `training_inferences` carries
+  `candidateId` resolved from the application) · rate-limit dispatch suite extended from 10 to **16**
+  tests (new: `/api/public/agent-tick` burst 429, `/_serverFn` burst 429, `/api/auth/login` mutation
+  burst 429, `/metrics` 404 without token + 401 with a wrong one, cross-site `sec-fetch-site: cross-site`
+  POST to `/_serverFn` → 403 before the budget) · the 8 named gate files 163 pass · full per-file
+  scripts suite **82 files, exit 0** · `turbo run build --force` + `worker-boot-smoke.sh` green (both
+  workers and web boot bare; `slo-alert:` ×1; each load-once guard ×1 per bundle) · `prettier --check .`
+  clean · grep audit clean (no orchestrator import in kernel, no mail import in observability, provider
+  endpoints only inside the ai gateway, all four `require*` names in `auth.middleware.ts`, `writeAudit`
+  from `@ats/audit/server`).
+- Fixes made during the gate: (1) the @ats/audit move had been left as copy + modified original;
+  converted to a staged `git mv` rename + untracked shim, matching the other four packages; (2) the
+  rate-limit dispatch tests above (the gate brief assumed login/`_serverFn` bursts, agent-tick,
+  `/metrics` and CSRF coverage existed — they did not; tests only, no pipeline change).
+- Attribution note: the `training.capture_failed … BigInt` warn in packages/ai/test/training-data.test.ts
+  is the designed fire-and-forget proof ("capture never breaks the call it records" injects `1n`), not a
+  regression.
+
+### Phase 3 handoff: 2026-11-24 (final-code-step agent; L1 packages uncommitted in the tree)
+
+- **Branch / PRs:** `refactor/p3-l1-platform`, working tree left uncommitted for the coordinator. The five
+  package moves (@ats/audit, @ats/auth, @ats/ai, @ats/kernel, @ats/platform-http: staged `git mv` renames,
+  shims marked `// SHIM: remove in Phase 8`, tests moved to `packages/<pkg>/test/`) and the composition-root
+  wiring (`apps/web/src/boot.ts`, slimmed `server.ts`, observability mailer/SLO notifier injection) are the
+  earlier sequential agents' work; this note covers the final code step and the gates.
+- **Final code step — load-once assertion (map §5 rule 10):** `@ats/kernel`, `@ats/ai` and `@ats/observability`
+  each arm a module-level symbol in their `/server` entry: `globalThis.__atsPackageInstances["<pkg>"] = Symbol(…)`,
+  throwing a named error ("[ats] @ats/<pkg> loaded twice in one runtime — … (map §5 rule 10)") on a second
+  instance. The guards live in the package barrels, not the individual ALS files, because everything loads
+  those modules through the barrel (shims re-export it); each barrel's comment names exactly what it protects
+  (kernel: event/tool registries + policy; ai: `agentRunScope`/`aiSubjectScope` in `context.ts` + the training
+  `callScope`; observability: the per-request trace ALS in `request-context.ts`). `boot.ts` — imported first by
+  `server.ts` — loads all three barrels before any route or server-fn code.
+- **Finding fixed — boot did not reach the production build:** `apps/web/package.json` has carried
+  `"sideEffects": false` since Phase 1 (inherited from the source repo). Under it, rolldown tree-shakes
+  `import "./boot"` (a side-effects-only import) out of the built server bundle: dev worked, but the built app
+  silently lost the kernel inline-kick registration, the agent alert/digest mailer and the SLO notifier — i.e.
+  the pre-move behaviour (alert e-mails, inline kicks) would have regressed in production only. Fix:
+  `"sideEffects": ["./src/boot.ts"]` (everything else stays tree-shakable; boot is server-only and never in the
+  client graph), plus a header comment in `boot.ts` explaining the coupling. Verified by building and booting
+  `.output/server` (SSR `/` → 200 with trace ids; kernel/ai chunks now in the service module graph; each guard
+  exactly once across the whole bundle).
+- **Smoke extended:** `scripts/worker-boot-smoke.sh` gains a web step — boots `apps/web/.output/server` from a
+  bare copy (dead DATABASE_URL, dummy env, requires the srvx "Listening on" line) and statically asserts
+  (a) a boot-only literal (`slo-alert:`) appears exactly once (fails when the boot exception is dropped again)
+  and (b) each of the three guards appears exactly once per bundle (voice worker also 3×1; parser worker 0 —
+  it imports none of the three packages). Mutation-tested: reverting to `"sideEffects": false` and rebuilding
+  makes the smoke fail with `expected 1 occurrence(s) of 'slo-alert:', found 0` (exit 1).
+- **Deviations from the brief:** the assertion text of the brief suggested per-context-module symbols
+  (`Symbol.for("ats.<pkg>.instance")`); the implemented per-package barrel symbols are equivalent for every
+  reachable load path and avoid key fragmentation between barrel and context module (a shared key would
+  false-positive, since a barrel's imports evaluate before the barrel body). The brief's named test file
+  `scripts/agent-gateway.test.ts` moved to `packages/ai/test/agent-gateway.test.ts` with this phase's moves.
+- **Gate output:** `bunx turbo run typecheck` 11/11 ✓ · `bun run lint` 0 errors, 271 pre-existing warnings
+  (unchanged) · all 10 package suites pass (ai 32, audit 3, auth 5, kernel 7, platform-http 20, observability
+  21, config 7, security 11, storage 11, db 1) · named ALS files: `agent-runtime` 25 pass,
+  `agent-gateway` 14 pass — no false positive on the single-copy layout · `bun run agents:lock` 23 agents,
+  no diff ✓ · 15 representative `scripts/*.test.ts` consume the moved modules via shims (rate-limit,
+  agent-alert-digest, agent-event-lineage, pipeline, guardrails, guardrails-p1, agent-governance, agent-health,
+  agent-unhappy-paths, agent-phase5, agent-workflows, run-limits, desk-clarity + the two named) — all pass ·
+  `bash scripts/worker-boot-smoke.sh` green incl. the new web step ✓ · prettier clean on touched files.
+- **Follow-ups for the coordinator / next phases:** package-level `AGENTS.md` invariant tables (which module
+  must be single-instance per package) do not exist yet — the mapping lives in the barrel comments and map
+  §5 rule 10; write them when the Phase 10 AGENTS.md rewrite lands. `docs/refactor/notes/
+phase3-agents-md-path-updates.md` has sections only for @ats/ai and @ats/kernel — audit/auth/platform-http
+  rows should be appended at merge. The depcruise ratchet and the full per-file scripts suite were not re-run
+  in this step (no packaged code changed by it); run them with the merge gate.
+
 ### Phase 2 handoff: 2026-11-23
 
 - **Branch / PRs:** `refactor/p2-l0-foundation` on madhugraj/ATSAgent_refactored, 7 commits:
