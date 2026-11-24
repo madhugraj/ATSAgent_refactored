@@ -335,24 +335,54 @@ every tracked source path must exist at its new path or sit on the written exclu
 3. The phase closes only when the gate is green and the sign-off is written in `phase-log.md`.
    The map is updated if a decision changed.
 
-## Effort and staffing (3–4 TS devs + 1–2 Python devs on the Phase 9 parallel track)
+## Effort and staffing: 3 developers (decided 2026-11-24)
 
-| Phase       | Weeks             | Parallelism                                                                                       |
-| ----------- | ----------------- | ------------------------------------------------------------------------------------------------- |
-| 0 Fix first | 0.7               | 2 devs                                                                                            |
-| 1 Bootstrap | 1                 | 1–2                                                                                               |
-| 2 L0        | 1                 | 2                                                                                                 |
-| 3 L1        | 1.5               | 2–3                                                                                               |
-| 4 L2        | 1.5               | 3                                                                                                 |
-| 5 L3 wave 1 | 2                 | 3–4                                                                                               |
-| 6 L3 wave 2 | 2                 | 3–4                                                                                               |
-| 7 L4        | 2                 | 3                                                                                                 |
-| 8 Apps      | 1.5               | 3–4                                                                                               |
-| 10 Cut-over | 1                 | all                                                                                               |
-| **Total**   | **≈ 14–15 weeks** | Phase 9 runs in parallel (≈4 weeks of Python work); +1 week at the end if a service misses parity |
+**The pace so far:** one developer working with AI sessions finished Phases 0–2 in about 2 days. With three developers
+split by **package ownership**, the work left (Phases 3–8 and 10, plus the Phase 9 Python track) is planned at
+**about 15 working days (3 weeks)**. That replaces the original 14-week estimate.
 
-v1 estimated 8–10 weeks. The extra time pays for the Phase 0 fixes, the hook and event inversions, and the splits of
-the five mixed server-function files, `desk.server` and `ai-gateway`, which v1 didn't account for.
+Three days isn't achievable. The layers depend on each other in a fixed order (L1 → L2 → L3 → L4 → apps → cut-over),
+and every phase ends with a gate and an independent review.
+
+**Who owns what:**
+
+- **Dev 1, critical path:** the platform core and the riskiest moves.
+- **Dev 2, domains:** the hiring domain packages, in parallel inside each phase.
+- **Dev 3, Python + infra:** Phase 9 and the deploy/image work.
+
+| Days  | Dev 1 (critical path)                                                                                     | Dev 2 (domains)                                                                                                                                                                                           | Dev 3 (Python + infra)                                                                                                    |
+| ----- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| 1–3   | **Phase 3 L1:** `audit` → `auth` → `ai` → `kernel` → `platform-http`, SLO notify injection, ALS assertion | **Phase 4–5 prep in the source repo** (test-only PRs): domain test suites for `org`, `legal`, `comms`, `integrations`; a plan for each of the 9 `KNOWN_STAGE_WRITERS`; `mock.module` path list per domain | **Phase 9a:** `services/_template`, contracts, service token, `/api/internal/ai` route hardened to spec, CI job           |
+| 4–6   | **Phase 4:** `desk-core` + `org`; then review Dev 2's PRs as a peer                                       | **Phase 4:** `legal`, `comms`, `integrations`                                                                                                                                                             | **Phase 8 prep:** one `.output` layout, Dockerfile builds web + both workers, image boot proof, deploy workflows restored |
+| 7–10  | **Phase 5:** `pipeline` (stage writers → cores, `KNOWN_STAGE_WRITERS` driven to empty)                    | **Phase 5:** `requisitions`, `candidates`, `distribution`; **Phase 6:** `matching`, `interviews`                                                                                                          | **9b:** `parser` service in shadow mode                                                                                   |
+| 11–13 | **Phase 7:** `agents`, `desk`, `voice`, `workspace`                                                       | **Phase 6:** `offers`, `onboarding`; **Phase 7:** `analytics`                                                                                                                                             | **Phase 8:** apps and the voice/parser worker apps; staging deploy                                                        |
+| 14–15 | **Phase 10 cut-over:** staging soak, production deploy, rollback window                                   | Fix whatever cut-over turns up; Phase 10 doc updates                                                                                                                                                      | **9b:** `matching-ml` in shadow mode. 9c switch-overs happen **after** cut-over, per service, at parity.                  |
+
+**Rules for working in parallel:**
+
+1. **One owner per package.** Nobody edits a package they don't own. Cross-package changes are agreed in the PR, and
+   the owner makes them.
+2. **The phase gate stays per phase, not per developer.** A phase's review starts when every package in it has merged.
+   Packages in the next phase may start as soon as their _dependencies_ have merged. They don't need to wait for the
+   whole previous phase.
+3. **`main` stays green.** Package PRs merge one at a time, rebased on `main`. Rebase before you ask for review.
+4. **Sync once per phase, by Dev 1 only.** Dev 1 moves `SOURCE_SHA`, so other developers never sync on their own.
+5. **Shared files** (`turbo.json`, root `package.json`, `ci.yml`, `tools/depcruise.cjs`, `bun.lock`): Dev 1 owns them.
+   Others ask for changes in their PR description.
+6. **`WARN_MAX` only goes down.** Whoever lowers the warning count lowers the ratchet in the same PR.
+7. **Reviews:** the reviewer (Claude) reviews package PR sets as they arrive. A developer may peer-review another
+   developer's PR, but the reviewer's verdict file still decides each phase.
+8. **Before cut-over:** the current source `main` must be released to production first. Production runs a
+   28-day-old image (`atsiq:17f59fa`) with about 20 migrations pending. Owner: Dev 3 with the product owner, by
+   day 10.
+
+**Risks of the compressed schedule:**
+
+- The reviewer becomes the bottleneck. Mitigate by sending small PR sets often.
+- Merge conflicts in shared files. Rule 5 covers this.
+- Phase 5 `pipeline` can slip. It has the most hidden writers. If it slips, Phase 7 `agents` waits, and Dev 2 takes
+  `analytics` early.
+- Skipping a gate to catch up is **not allowed**. Recover time by working in parallel, not by cutting checks.
 
 ## Top risks
 
