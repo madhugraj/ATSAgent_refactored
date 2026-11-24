@@ -21,12 +21,21 @@ const KNOWN_SERVICES = z.enum(["parser", "matching-ml", "analytics-ml", "voice",
 
 export const rotateServiceTokenFn = createServerFn({ method: "POST" })
   .middleware([requirePlatformAdmin])
-  .validator((data: unknown) => z.object({ service: KNOWN_SERVICES }).parse(data))
+  .validator((data: unknown) =>
+    z
+      .object({
+        service: KNOWN_SERVICES,
+        // AI_FEATURES allow-list; empty/omitted = every feature.
+        allowedFeatures: z.array(z.string().max(64)).max(64).default([]),
+      })
+      .parse(data),
+  )
   .handler(async ({ data, context }) => {
     const token = await rotateServiceToken({
       service: data.service,
       actorEmail: context.email,
       actorUserId: context.userId,
+      allowedFeatures: data.allowedFeatures,
     });
     // Shown once — only its encryption lives in the database from here on.
     return { ok: true, token };
@@ -38,6 +47,7 @@ export const listServiceTokens = createServerFn({ method: "GET" })
     const rows = await db
       .select({
         service: serviceTokens.service,
+        allowedFeatures: serviceTokens.allowedFeatures,
         rotatedAt: serviceTokens.rotatedAt,
         rotatedBy: serviceTokens.rotatedBy,
       })
@@ -46,6 +56,7 @@ export const listServiceTokens = createServerFn({ method: "GET" })
     // Never the token itself — metadata only.
     return rows.map((r) => ({
       service: r.service,
+      allowedFeatures: r.allowedFeatures,
       rotatedAt: r.rotatedAt.toISOString(),
       rotatedBy: r.rotatedBy,
     }));

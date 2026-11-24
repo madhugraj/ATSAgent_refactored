@@ -4872,7 +4872,7 @@ export const policyBriefings = pgTable(
   ],
 );
 
-/* ------------------------------------ internal service tokens (Phase 9/0092) */
+/* ------------------------------------ internal service tokens (Phase 9/0094) */
 
 /**
  * Bearer tokens for the internal service-to-service API (refactor plan Phase 9:
@@ -4881,7 +4881,9 @@ export const policyBriefings = pgTable(
  * tenant. Tokens are stored through encryptSecret so a database dump yields no
  * live credential, and rotation goes through audit_log
  * (rotateServiceToken in apps/web/src/server/internal-ai.server.ts). Before the
- * first rotation the SERVICE_TOKENS env list bootstraps access.
+ * first rotation the SERVICE_TOKENS env list bootstraps access; after it the
+ * env var is deleted. allowedFeatures is the AI_FEATURES allow-list (empty =
+ * every feature) so one service cannot spend another's budget.
  */
 export const serviceTokens = pgTable(
   "service_tokens",
@@ -4889,6 +4891,10 @@ export const serviceTokens = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     service: text("service").notNull(),
     tokenEncrypted: text("token_encrypted").notNull(),
+    allowedFeatures: jsonb("allowed_features")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     rotatedAt: timestamp("rotated_at", { withTimezone: true }).notNull().defaultNow(),
     rotatedBy: uuid("rotated_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

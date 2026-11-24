@@ -11,14 +11,22 @@
  * the same injection hygiene every other AI call keeps.
  *
  * Defence in depth, in the order it runs:
- *  1. Ingress (production only): a public client IP gets a bare 404 — the
- *     prefix must only be reachable over internal ingress.
+ *  1. Ingress (production only): any request that carries X-Forwarded-For
+ *     gets a bare 404 — in-cluster callers connect directly and carry none,
+ *     anything proxied through the public LB does. Infra also denies
+ *     /api/internal/* at the LB (apps/web/infra/gke/20-ingress.yaml).
  *  2. Service token (service_tokens row via encryptSecret, or the
- *     SERVICE_TOKENS env bootstrap), constant-time compared, generic 401.
+ *     SERVICE_TOKENS env bootstrap, deleted after the first rotation),
+ *     constant-time compared, generic 401.
  *  3. Body validation against the shared zod contract, 400.
- *  4. Tenancy: the org must exist and have opted into AI (its own saved
- *     provider credential); anything else is the same generic 403, so the
- *     endpoint cannot be used to probe which orgs exist.
+ *  4. Feature allow-list per service token, 403 (an empty list = every
+ *     feature).
+ *  5. Tenancy: the org must exist and have opted into AI — meaning it has
+ *     saved its own AI provider key. That is *AI-use* consent and is separate
+ *     from training-capture consent (training_settings), which gates what may
+ *     be captured for training, not what may be called. Unknown org and
+ *     consent-missing are the same generic 403, so the endpoint cannot be
+ *     used to probe which orgs exist.
  * The reply carries no vendor or model names (deep-stripped below).
  */
 import { AiCallbackRequest } from "@/lib/ai-callback.contract";
@@ -29,7 +37,7 @@ import { AI_FEATURES } from "@/server/ai-usage";
 import {
   internalIngressAllowed,
   orgHasAiConsent,
-  serviceTokenAuthorized,
+  resolveServiceToken,
 } from "@/server/internal-ai.server";
 
 const NO_STORE = { "cache-control": "no-store" } as const;
@@ -67,7 +75,8 @@ async function handle(request: Request): Promise<Response> {
   }
 
   const token = bearerToken(request);
-  if (!token || !(await serviceTokenAuthorized(token))) {
+  const auth = token ? await resolveServiceToken(token) : { authorized: false as const };
+  if (!token || !auth.authorized) {
     return Response.json(
       { ok: false, message: "Unauthorized" },
       { status: 401, headers: NO_STORE },
@@ -92,6 +101,15 @@ async function handle(request: Request): Promise<Response> {
           "Invalid request: feature must be an AI_FEATURES slug and input needs system, prompt, orgId.",
       },
       { status: 400, headers: NO_STORE },
+    );
+  }
+
+  // Per-service budget fence (review 9a A1): a token with an allow-list may
+  // not spend the org's key on another service's features.
+  if (auth.allowedFeatures.length > 0 && !auth.allowedFeatures.includes(parsed.data.feature)) {
+    return Response.json(
+      { ok: false, message: "This service token is not allowed to call this feature." },
+      { status: 403, headers: NO_STORE },
     );
   }
 

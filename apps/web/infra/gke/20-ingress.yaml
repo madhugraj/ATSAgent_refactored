@@ -5,8 +5,12 @@
 # reachable. The internal service API prefix /api/internal must NOT be routed
 # here in production — Python services call the app over the cluster-internal
 # service (scouts-app.scouts.svc.cluster.local), never through this host.
-# Defence in depth: the route itself 404s any request whose client IP is not
-# private while NODE_ENV=production (server/internal-ai.server.ts).
+# Enforce the denial at the LB, not just in the app: a Cloud Armor security
+# policy (or BackendConfig) on this ingress that denies paths under
+# /api/internal/* (review 9a B1). Defence in depth: the route itself 404s any
+# request that carries X-Forwarded-For while NODE_ENV=production
+# (server/internal-ai.server.ts) — in-cluster callers connect directly and
+# carry none.
 apiVersion: networking.gke.io/v1
 kind: ManagedCertificate
 metadata:

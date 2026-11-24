@@ -419,3 +419,28 @@ token table platform-scoped with env bootstrap) in the 9a review.
      `SOURCE_SHA` = `ca7599c`.
   3. The pre-commit hook will keep reformatting hand-written docs that fail `prettier --check` on touch;
      leave as-is (CI doesn't gate it) or a deliberate whole-repo format commit?
+
+### Phase 9a review fixes (Dev 3, 2026-11-24 — review 9a, changes requested)
+
+All blockers and notes from `reviews/phase-9a-review.md` are addressed on `services/9a-template`:
+
+- **B1 ingress:** IP heuristic removed. Production now 404s any request that **carries X-Forwarded-For**
+  (in-cluster callers connect directly and carry none); no-XFF + valid token → allowed. Both production-mode
+  tests added. Infra note in `20-ingress.yaml` now instructs a Cloud Armor policy / BackendConfig denying
+  `/api/internal/*` at the public LB. (The reviewer's point was correct and the old test proved it: the
+  real in-cluster caller has no XFF, `clientIp()` returns "unknown", the heuristic 404'd it.)
+- **B2:** migration renamed `0092_service_tokens.sql` → `0094_service_tokens.sql` (source repo's 0092/0093
+  land at Dev 1's next sync); `service_tokens` added to `scripts/refactor/table-owners.mjs` → **platform**
+  and recorded in map §7 with date/reason. Applied twice locally against `atsagent_test` (old 0092 artifacts
+  dropped first).
+- **A1 (done now):** `service_tokens.allowed_features` jsonb column; `rotateServiceToken` and the platform
+  rotation server fn take an allow-list; the route 403s a non-listed feature ("empty list = every feature",
+  documented). **Deferred explicitly:** the service name in the ledger — `ai_usage_events` has no metadata
+  column, and adding one plus a `recordAiUsage` signature change touches the shared ledger + gateway that
+  Dev 1 is moving in Phase 3. Propose folding it there; flag if it should happen sooner.
+- **Notes:** route comment now spells out that "AI consent" = the org's own saved provider key (AI-use
+  consent), separate from training-capture consent (`training_settings`); the SERVICE_TOKENS env bootstrap
+  lifecycle (delete the var after the first rotation) is documented in `internal-ai.server.ts` and the route.
+
+Gate re-run: 25 tests green (route 24 + 429 dispatch), ruff/mypy/pytest green, contracts `--check` green,
+turbo typecheck green, eslint 0 errors, `agents:lock` no diff, table-owners check "every table owned".

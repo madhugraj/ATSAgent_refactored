@@ -175,7 +175,7 @@ describe("service-token auth", () => {
   test("a token stored through encryptSecret authenticates; a look-alike does not", async () => {
     const stored = realCrypto.encryptSecret("svc_stored-token-abcdef0123456789");
     expect(stored).toMatch(/^enc:v1\./); // never plaintext at rest
-    setRows(serviceTokens, [{ tokenEncrypted: stored }]);
+    setRows(serviceTokens, [{ tokenEncrypted: stored, allowed: [] }]);
     try {
       const ok = await post(VALID, { authorization: "Bearer svc_stored-token-abcdef0123456789" });
       expect(ok.status).toBe(200);
@@ -196,24 +196,85 @@ describe("internal ingress (production)", () => {
       headers: ip ? { "x-forwarded-for": ip } : {},
     });
 
-  test("a public client IP is refused in production", () => {
+  test("in production any proxied request (X-Forwarded-For present) is refused", () => {
     process.env["NODE_ENV"] = "production";
+    // The real callers (in-cluster services) carry no XFF at all — review 9a
+    // B1 removed the IP heuristic because clientIp() is "unknown" for them.
+    expect(internalIngressAllowed(req("10.1.2.3"))).toBe(false);
     expect(internalIngressAllowed(req("203.0.113.9"))).toBe(false);
-    // No proxy header at all (direct hit / unconfigured ingress): fail closed.
-    expect(internalIngressAllowed(req(""))).toBe(false);
+    expect(internalIngressAllowed(req(""))).toBe(true);
   });
 
-  test("internal addresses pass in production", () => {
+  test("in production an XFF-carrying request 404s even with a valid token", async () => {
     process.env["NODE_ENV"] = "production";
-    for (const ip of ["10.1.2.3", "172.16.0.9", "192.168.1.1", "127.0.0.1", "::1", "fd00::5"]) {
-      expect(internalIngressAllowed(req(ip))).toBe(true);
+    try {
+      const res = await post(VALID, {
+        authorization: `Bearer ${TOKEN}`,
+        "x-forwarded-for": "10.9.8.7",
+      });
+      expect(res.status).toBe(404);
+    } finally {
+      process.env["NODE_ENV"] = previous;
     }
   });
 
-  test("outside production any address is allowed (dev/test services)", () => {
+  test("in production a direct call with a valid token reaches the gateway", async () => {
+    process.env["NODE_ENV"] = "production";
+    try {
+      aiJsonCalls.length = 0;
+      const res = await authed(VALID);
+      expect(res.status).toBe(200);
+      expect(aiJsonCalls.length).toBe(1);
+    } finally {
+      process.env["NODE_ENV"] = previous;
+    }
+  });
+
+  test("outside production any ingress is allowed (dev/test services)", () => {
     process.env["NODE_ENV"] = "test";
     expect(internalIngressAllowed(req("203.0.113.9"))).toBe(true);
     process.env["NODE_ENV"] = previous;
+  });
+});
+
+describe("per-service feature allow-list (review 9a A1)", () => {
+  test("a token restricted to screening_kit gets 403 on candidate_score", async () => {
+    const stored = realCrypto.encryptSecret("svc_restricted-token-0123456789ab");
+    setRows(serviceTokens, [
+      { tokenEncrypted: stored, allowed: ["screening_kit", "screening_grade"] },
+    ]);
+    try {
+      const res = await post(
+        { ...VALID, feature: "candidate_score" },
+        { authorization: "Bearer svc_restricted-token-0123456789ab" },
+      );
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { message: string }).message).toContain(
+        "not allowed to call this feature",
+      );
+      // And an allowed feature goes through.
+      const ok = await post(
+        { ...VALID, feature: "screening_kit" },
+        { authorization: "Bearer svc_restricted-token-0123456789ab" },
+      );
+      expect(ok.status).toBe(200);
+    } finally {
+      setRows(serviceTokens, []);
+    }
+  });
+
+  test("an empty allow-list means every feature", async () => {
+    const stored = realCrypto.encryptSecret("svc_unrestricted-0123456789abcdef");
+    setRows(serviceTokens, [{ tokenEncrypted: stored, allowed: [] }]);
+    try {
+      const ok = await post(
+        { ...VALID, feature: "resume_parse" },
+        { authorization: "Bearer svc_unrestricted-0123456789abcdef" },
+      );
+      expect(ok.status).toBe(200);
+    } finally {
+      setRows(serviceTokens, []);
+    }
   });
 });
 

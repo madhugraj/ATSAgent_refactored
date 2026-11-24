@@ -15,11 +15,13 @@
  *   the only opt-in signal the app has; the gateway refuses without a key
  *   anyway, but this check turns that into an explicit refusal instead of a
  *   confusing gateway failure.
- * - In production the /api/internal prefix must only be reachable over
- *   internal ingress (Cloud Run ingress=internal / GKE internal LB): requests
- *   whose client IP is public never arrive through those paths, so a public
- *   client IP here is either a misconfigured ingress or a bypass attempt —
- *   both get a bare 404. Dev and test (NODE_ENV !== production) allow any IP.
+ * - In production the /api/internal prefix must not be reachable from the
+ *   public load balancer: infra denies /api/internal/* there (Cloud Armor /
+ *   BackendConfig — see apps/web/infra/gke/20-ingress.yaml), and the route
+ *   refuses any request that carries X-Forwarded-For — an in-cluster caller
+ *   connects directly and carries none, anything proxied through the public
+ *   LB does. No IP heuristics: clientIp() is "unknown" for the real callers.
+ *   Dev and test (NODE_ENV !== production) allow any ingress.
  */
 import { randomBytes, timingSafeEqual } from "node:crypto";
 
@@ -29,10 +31,14 @@ import { aiProviderCredentials, organizations, serviceTokens } from "@db/schema"
 
 import { db } from "./db";
 import { decryptSecret, encryptSecret } from "./crypto";
-import { clientIp } from "./client-ip";
 import { writeAudit } from "./audit";
 
-/** The env bootstrap list (comma-separated) accepted before the first rotation. */
+/**
+ * The env bootstrap list (comma-separated) accepted before the first rotation.
+ * Lifecycle: once every service has a stored token, the operator deletes
+ * SERVICE_TOKENS from the deployment env — from then on only encrypted
+ * `service_tokens` rows authenticate.
+ */
 function envServiceTokens(): string[] {
   return (process.env["SERVICE_TOKENS"] ?? "")
     .split(",")
@@ -48,14 +54,31 @@ function constantTimeMatch(candidates: string[], given: string): boolean {
   });
 }
 
-/** True when `given` matches the env bootstrap list or a stored service token. */
-export async function serviceTokenAuthorized(given: string): Promise<boolean> {
-  if (constantTimeMatch(envServiceTokens(), given)) return true;
+export type ServiceAuth = { authorized: false } | { authorized: true; allowedFeatures: string[] };
+
+/**
+ * Resolve `given` against the env bootstrap list and the stored service
+ * tokens. An empty allowedFeatures means the token may call every feature
+ * (the bootstrap list and any token rotated without a restriction); a
+ * non-empty list is enforced by the route.
+ */
+export async function resolveServiceToken(given: string): Promise<ServiceAuth> {
+  if (constantTimeMatch(envServiceTokens(), given)) {
+    return { authorized: true, allowedFeatures: [] };
+  }
   const rows = await db
-    .select({ tokenEncrypted: serviceTokens.tokenEncrypted })
+    .select({
+      tokenEncrypted: serviceTokens.tokenEncrypted,
+      allowed: serviceTokens.allowedFeatures,
+    })
     .from(serviceTokens);
-  const stored = rows.map((r) => decryptSecret(r.tokenEncrypted)).filter(Boolean);
-  return constantTimeMatch(stored, given);
+  const stored = rows.filter((r) => {
+    const plain = decryptSecret(r.tokenEncrypted);
+    return plain.length > 0 && constantTimeMatch([plain], given);
+  });
+  if (!stored.length) return { authorized: false };
+  const allowed = (stored[0]!.allowed ?? []) as string[];
+  return { authorized: true, allowedFeatures: Array.isArray(allowed) ? allowed : [] };
 }
 
 /**
@@ -79,28 +102,34 @@ export async function orgHasAiConsent(orgId: string): Promise<boolean> {
 }
 
 /**
- * Generate, store (encrypted) and audit a fresh token for `service`. Returns
- * the plaintext once — it is never recoverable from the database again, so
- * the caller must show it to the operator immediately.
+ * Generate, store (encrypted) and audit a fresh token for `service`. The
+ * optional allow-list restricts which AI_FEATURES slugs the token may call
+ * (empty or omitted = every feature). Returns the plaintext once — it is
+ * never recoverable from the database again, so the caller must show it to
+ * the operator immediately.
  */
 export async function rotateServiceToken(input: {
   service: string;
   actorEmail: string;
   actorUserId?: string | null;
+  allowedFeatures?: string[];
 }): Promise<string> {
   const token = `svc_${randomBytes(32).toString("base64url")}`;
   const encrypted = encryptSecret(token);
+  const allowed = input.allowedFeatures ?? [];
   await db
     .insert(serviceTokens)
     .values({
       service: input.service,
       tokenEncrypted: encrypted,
+      allowedFeatures: allowed,
       rotatedBy: input.actorUserId ?? null,
     })
     .onConflictDoUpdate({
       target: serviceTokens.service,
       set: {
         tokenEncrypted: encrypted,
+        allowedFeatures: allowed,
         rotatedAt: new Date(),
         rotatedBy: input.actorUserId ?? null,
       },
@@ -111,17 +140,19 @@ export async function rotateServiceToken(input: {
     action: "internal.service_token.rotated",
     entityType: "service_token",
     entityId: input.service,
-    detail: { service: input.service },
+    detail: { service: input.service, allowedFeatures: allowed },
   });
   return token;
 }
 
-/** IPv4 private/loopback/link-local/CGNAT and IPv6 loopback/unique-local. */
-const PRIVATE_CLIENT =
-  /^(127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|::1$|[fF][cCdD]|localhost$)/;
-
-/** In production, /api/internal is only legitimate from internal ingress. */
+/**
+ * In production, /api/internal is only legitimate from direct in-cluster
+ * callers — those carry no X-Forwarded-For; anything that passed the public
+ * load balancer does. (Review 9a B1: no IP heuristics — clientIp() is
+ * "unknown" for the real callers, so an IP check 404s the services it is
+ * meant to protect.)
+ */
 export function internalIngressAllowed(request: Request): boolean {
   if (process.env["NODE_ENV"] !== "production") return true;
-  return PRIVATE_CLIENT.test(clientIp(request));
+  return request.headers.get("x-forwarded-for") === null;
 }
