@@ -211,21 +211,19 @@ console.log(`source:     ${sourceArg}`);
 console.log(`refactored: ${refactoredArg}`);
 
 if (problems.length === 0) {
-  if (problems.length === 0) {
-    const okPrefixes = diffSets(
-      "limiter path prefixes",
-      new Set(extractPathPrefixes(source, "source", problems).keys()),
-      new Set(extractPathPrefixes(refactored, "refactored", problems).keys()),
-    );
-    const okOrigins = diffSets(
-      "csrf origins (order-insensitive)",
-      extractOrigins(source, "source", problems),
-      extractOrigins(refactored, "refactored", problems),
-    );
-    if (okPrefixes && okOrigins && problems.length === 0) {
-      console.log("parity: ok");
-      process.exit(0);
-    }
+  const okPrefixes = diffSets(
+    "limiter path prefixes",
+    new Set(extractPathPrefixes(source, "source", problems).keys()),
+    new Set(extractPathPrefixes(refactored, "refactored", problems).keys()),
+  );
+  const okOrigins = diffSets(
+    "csrf origins (order-insensitive)",
+    extractOrigins(source, "source", problems),
+    extractOrigins(refactored, "refactored", problems),
+  );
+  if (okPrefixes && okOrigins && problems.length === 0) {
+    console.log("parity: ok");
+    process.exit(0);
   }
 }
 for (const p of problems) console.error(`error: ${p}`);
