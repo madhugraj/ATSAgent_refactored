@@ -183,7 +183,7 @@ src/lib/document-hidden-text.ts,security,shared
 src/lib/email-brand.functions.ts,web/server-fn,web
 src/lib/email-outbox.server.ts,comms,server
 src/lib/email-settings.functions.ts,web/server-fn,web
-src/lib/email-settings.shared.ts,comms,server
+src/lib/email-settings.shared.ts,comms,shared
 src/lib/email-templates/agent-digest.tsx,comms,server
 src/lib/email-templates/application-ack.tsx,comms,server
 src/lib/email-templates/assessment-invite.tsx,comms,server
