@@ -1,10 +1,11 @@
 /**
- * safeFetch (src/server/safe-fetch.ts): private addresses stay refused, and only
- * connect-phase failures (nothing sent) move on to the host's next vetted address.
+ * safeFetch (@ats/security/server, moved from src/server/safe-fetch.ts): private
+ * addresses stay refused, and only connect-phase failures (nothing sent) move
+ * on to the host's next vetted address.
  */
 import { describe, expect, test } from "bun:test";
 
-const { isConnectFailure, safeFetch } = await import("../apps/web/src/server/safe-fetch");
+const { isConnectFailure, safeFetch } = await import("@ats/security/server");
 
 const failure = (code: string) => Object.assign(new TypeError("fetch failed"), { cause: { code } });
 

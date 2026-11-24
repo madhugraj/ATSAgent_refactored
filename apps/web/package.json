@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "node ../../scripts/migrate-pg.mjs"
+    "db:migrate": "node ../../packages/db/scripts/migrate-pg.mjs"
   },
   "overrides": {
     "rolldown": "1.2.1",

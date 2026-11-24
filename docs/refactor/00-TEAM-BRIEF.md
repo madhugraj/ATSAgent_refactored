@@ -454,3 +454,5 @@ Decisions are recorded by updating the map (with date and reason) in the same PR
 - [ ] I changed a URL prefix or route path.
 - [ ] I fixed a bug only in the new repo.
 - [ ] I committed `.env*`, `test_data/`, `ai_interviewer/` or a security report.
+- [ ] The client-bundle grep's single known exception: the org-ontology skill-tag UI carries a regex
+      literal naming databases ("sql|postgres|mysql|…") — UI data, not a credential (phase-2 review).

@@ -1,0 +1,14 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    // Interim (until the Phase 2 db and security moves land): the moved
+    // server files still consume app-side modules (`@/server/{db,audit,crypto,safe-fetch}`,
+    // `@db/schema`). Same aliases as apps/web/tsconfig.json, so this package
+    // and the app resolve them to the same files.
+    "paths": {
+      "@/*": ["../../apps/web/src/*"],
+      "@db/*": ["../../apps/web/drizzle/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

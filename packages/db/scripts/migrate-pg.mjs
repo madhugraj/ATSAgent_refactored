@@ -1,5 +1,5 @@
-// Idempotent SQL migration runner for drizzle/pg-migrations.
-// Usage: DATABASE_URL=postgres://... node scripts/migrate-pg.mjs
+// Idempotent SQL migration runner for the @ats/db package's drizzle/pg-migrations.
+// Usage: DATABASE_URL=postgres://... node packages/db/scripts/migrate-pg.mjs
 // Applies every not-yet-recorded *.sql file in filename order and records it
 // in a `pg_migrations` table. Safe to re-run; safe to run in CI.
 import postgres from "postgres";
@@ -13,16 +13,9 @@ if (!url) {
   process.exit(1);
 }
 
-// Resolved from this script (repo root), not cwd: CI and local-db.sh
+// Resolved from this script (the package root), not cwd: CI and local-db.sh
 // both run it from the repo root, drizzle-kit from apps/web.
-const dir = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "apps",
-  "web",
-  "drizzle",
-  "pg-migrations",
-);
+const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "drizzle", "pg-migrations");
 const files = readdirSync(dir)
   .filter((f) => f.endsWith(".sql"))
   .sort();

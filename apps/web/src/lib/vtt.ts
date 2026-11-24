@@ -1,13 +1,11 @@
-/** WebVTT transcripts from meeting providers (docs/silent-panel-agent-plan.md, S0). */
+// SHIM: remove in Phase 8 — TranscriptSegment moved to @ats/db/server
+// (packages/db/src/server/json-types/vtt.ts); parseVtt stays until the
+// interviews package lands (map §4 L3).
+export type { TranscriptSegment } from "@ats/db/server";
 
-export type TranscriptSegment = {
-  /** As the provider names them (display name), or null when it does not say. */
-  speaker: string | null;
-  text: string;
-  /** Milliseconds from the start of the transcript. */
-  startMs: number;
-  endMs: number;
-};
+import type { TranscriptSegment } from "@ats/db/server";
+
+/** WebVTT transcripts from meeting providers (docs/silent-panel-agent-plan.md, S0). */
 
 const MAX_SEGMENTS = 5_000;
 

@@ -7,11 +7,13 @@
 #  - a dev database and a separate disposable test database;
 #  - compressed daily backups with rotation, and a checked restore.
 #
-# Usage: scripts/local-db.sh <init|start|stop|status|migrate|backup|restore FILE|schedule-backups|unschedule-backups>
+# Usage: packages/db/scripts/local-db.sh <init|start|stop|status|migrate|backup|restore FILE|schedule-backups|unschedule-backups>
 # Settings (env): ATSAGENT_PG_BIN, ATSAGENT_PG_DATA, ATSAGENT_PG_PORT, ATSAGENT_BACKUP_DIR, ATSAGENT_BACKUP_KEEP
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# The script lives at packages/db/scripts; ROOT stays the repo root (where
+# .env.local and the other apps live).
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 ENV_FILE="$ROOT/.env.local"
 PG_MAJOR=14
 PG_BIN="${ATSAGENT_PG_BIN:-}"
@@ -104,7 +106,7 @@ cmd_status() {
 cmd_migrate() {
   local pw; pw="$(password)"
   for db in "$DEV_DB" "$TEST_DB"; do
-    (cd "$ROOT" && DATABASE_URL="$(url "$pw" "$db")" node scripts/migrate-pg.mjs >/dev/null) && echo "Migrated $db."
+    (cd "$ROOT" && DATABASE_URL="$(url "$pw" "$db")" node packages/db/scripts/migrate-pg.mjs >/dev/null) && echo "Migrated $db."
   done
 }
 

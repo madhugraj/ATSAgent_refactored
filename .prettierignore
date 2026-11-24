@@ -28,3 +28,4 @@ scripts/refactor/graph*.json
 scripts/refactor/edges*.json
 scripts/refactor/analyze-*.txt
 .turbo/
+.gitleaks.toml

@@ -3,7 +3,7 @@
 Development uses a local PostgreSQL that behaves like production: same major
 version (Cloud SQL `POSTGRES_14`), password authentication, and backups that
 are verified and can be restored. One script manages it:
-`scripts/local-db.sh` (`bun run db:local <command>`).
+`packages/db/scripts/local-db.sh` (`bun run db:local <command>`).
 
 | Command                                   | What it does                                                                                                                                                                                                                        |
 | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -34,7 +34,7 @@ and `integration.verify` truncates everything) — never against `atsagent`.
   The server had no password and there was no backup, so the development
   data (test organisations, requisitions, desk threads) was not recoverable.
   Production and CI were not affected (CI builds its own database).
-- **Fix:** `scripts/local-db.sh` — durable folder (temporary folders
+- **Fix:** `packages/db/scripts/local-db.sh` — durable folder (temporary folders
   refused), password auth on 127.0.0.1, verified daily backups with
   rotation, a confirmed restore, and CI moved from Postgres 16 to 14 to
   match production.

@@ -1,3 +1,12 @@
+// SHIM: remove in Phase 8 — the interview plan's zod schemas and inferred
+// types moved to @ats/db/server (packages/db/src/server/json-types/
+// interview-plan.ts); the plan's pure helpers stay until the interviews
+// package lands (map §4 L3), because client components import them at runtime.
+export { Anchor, PlanRound, InterviewPlanSchema, PlanReviewSchema } from "@ats/db/server";
+export type { InterviewPlan, PlanRoundT, AnchorT, PlanReview } from "@ats/db/server";
+
+import type { InterviewPlan, PlanRoundT } from "@ats/db/server";
+
 /**
  * A role's interview plan (client-safe): how many rounds, what each round is
  * for, the competencies interviewers rate (built from the role's must-haves so
@@ -21,42 +30,6 @@
  * - anchors: what a 1, a 3 and a 5 look like for that competency in this
  *   role, shown on the scorecard so interviewers read the scale the same way.
  */
-import { z } from "zod";
-
-export const Anchor = z.object({
-  low: z.string().trim().max(200).default(""),
-  mid: z.string().trim().max(200).default(""),
-  high: z.string().trim().max(200).default(""),
-});
-
-export const PlanRound = z.object({
-  level: z.number().int().min(1).max(3),
-  name: z.string().trim().min(2).max(60),
-  focus: z.string().trim().max(300).default(""),
-  competencies: z.array(z.string().trim().min(2).max(60)).min(1).max(8),
-  panelSize: z.number().int().min(1).max(3).default(1),
-  /**
-   * Competency → weight; missing = 1. The hiring team picks ×1–×5; a panel
-   * change approved by the hiring manager stores the split in percent (1–100).
-   * Only the ratios count.
-   */
-  weights: z.record(z.string(), z.number().int().min(1).max(100)).optional(),
-  /** Competency → what a 1, 3 and 5 look like in this role. */
-  anchors: z.record(z.string(), Anchor).optional(),
-});
-
-export const InterviewPlanSchema = z
-  .object({
-    rounds: z.array(PlanRound).min(1).max(3),
-    verdictPolicy: z.enum(["recommend", "immediate"]).default("recommend"),
-  })
-  .refine((p) => p.rounds.every((r, i) => r.level === i + 1), {
-    message: "Rounds must be numbered 1, 2, 3 in order.",
-  });
-
-export type InterviewPlan = z.infer<typeof InterviewPlanSchema>;
-export type PlanRoundT = z.infer<typeof PlanRound>;
-export type AnchorT = z.infer<typeof Anchor>;
 
 /**
  * Drop weights and anchors for competencies the round no longer lists, and
@@ -184,28 +157,6 @@ export function roundVerdict(verdicts: Verdict[]): Verdict {
 
 /** How far a panelist may move any existing competency's share of the overall. */
 export const PANEL_SHARE_LIMIT = 0.1;
-
-/** The AI's review of a proposed change (stored; shown to the approver). */
-export const PlanReviewSchema = z.object({
-  verdict: z.enum(["fits", "concerns"]).catch("concerns"),
-  summary: z
-    .string()
-    .trim()
-    .transform((t) => t.slice(0, 600)),
-  findings: z
-    .array(
-      z.object({
-        kind: z.enum(["coverage", "relevance", "fairness", "clarity"]).catch("relevance"),
-        text: z
-          .string()
-          .trim()
-          .transform((t) => t.slice(0, 300)),
-      }),
-    )
-    .default([])
-    .transform((f) => f.slice(0, 8)),
-});
-export type PlanReview = z.infer<typeof PlanReviewSchema>;
 
 const norm = (s: string) => s.trim().toLowerCase();
 

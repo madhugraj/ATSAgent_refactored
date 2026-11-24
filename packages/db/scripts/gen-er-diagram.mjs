@@ -1,7 +1,8 @@
 /**
- * Generate docs/er-diagram.md from drizzle/schema.ts.
+ * Generate apps/web/docs/er-diagram.md from the @ats/db schema
+ * (packages/db/src/server/schema.ts).
  *
- * Usage: node scripts/gen-er-diagram.mjs
+ * Usage: node packages/db/scripts/gen-er-diagram.mjs
  * The schema file remains the source of truth; re-run after any schema change
  * and commit the refreshed diagram.
  */
@@ -9,8 +10,9 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const src = readFileSync(join(root, "apps/web/drizzle/schema.ts"), "utf8");
+const pkg = join(dirname(fileURLToPath(import.meta.url)), "..");
+const root = join(pkg, "..", "..");
+const src = readFileSync(join(pkg, "src", "server", "schema.ts"), "utf8");
 
 /** snake table name -> documentation domain */
 const DOMAINS = {
@@ -242,7 +244,7 @@ for (const [table, def] of [...tables.entries()].sort()) {
   md += `| \`${table}\` | ${DOMAINS[table] ?? "—"} | ${def.cols.size} | ${uniques.join(", ") || "—"} |\n`;
 }
 
-const out = join(root, "docs", "er-diagram.md");
+const out = join(root, "apps", "web", "docs", "er-diagram.md");
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, md);
 console.log(`Wrote ${out}: ${tables.size} tables, ${edges.length} FK relationships.`);

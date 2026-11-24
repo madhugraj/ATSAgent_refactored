@@ -1,0 +1,4872 @@
+/**
+ * ATSIQ schema — single source of truth for plain-Postgres deployments.
+ *
+ * Ported from the retired Supabase-era migrations (0000-0027) with:
+ *  - all RLS policies / grants / auth.uid()-dependent helpers removed
+ *    (authorization is enforced in server code — see src/server/auth.ts)
+ *  - auth.users replaced by the `users` table
+ *  - new: users, sessions, audit_log
+ *  - org_id backfill triggers removed: server code always sets org_id explicitly
+ *
+ * Baseline SQL is generated: `bunx drizzle-kit generate` (out: drizzle/pg-migrations).
+ */
+import { sql } from "drizzle-orm";
+import {
+  type AnyPgColumn,
+  bigint,
+  boolean,
+  check,
+  date,
+  doublePrecision,
+  index,
+  integer,
+  jsonb,
+  numeric,
+  pgEnum,
+  pgTable,
+  primaryKey,
+  smallint,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
+
+/* ------------------------------------------------------------------ enums */
+
+export const reqTypeEnum = pgEnum("req_type", ["new", "replacement"]);
+
+export const reqStatusEnum = pgEnum("req_status", [
+  "draft",
+  "pending_dh",
+  "pending_hr",
+  "pending_cbo",
+  "approved",
+  "rejected",
+  "on_hold",
+  "closed",
+]);
+
+export const jdStatusEnum = pgEnum("jd_status", [
+  "draft",
+  "pending_dh",
+  "approved",
+  "changes_requested",
+]);
+
+export const appStageEnum = pgEnum("app_stage", [
+  "sourced",
+  "applied",
+  "ai_screened",
+  "shortlisted",
+  "l1",
+  "l2",
+  "l3",
+  "offer",
+  "hired",
+  "rejected",
+  "offer_pending",
+  "offer_released",
+  "offer_accepted",
+  "offer_declined",
+  "joined",
+  "no_show",
+  "joining_deferred",
+  "withdrawn",
+  "on_hold",
+  "reserve",
+]);
+
+export const recommendationEnum = pgEnum("recommendation", ["select", "reject", "hold"]);
+
+export const offerStatusEnum = pgEnum("offer_status", [
+  "draft",
+  "pending_hr",
+  "pending_cbo",
+  "approved",
+  "released",
+  "accepted",
+  "declined",
+  "revoked",
+  "countered",
+]);
+
+export const appRoleEnum = pgEnum("app_role", [
+  "recruiter",
+  "hiring_manager",
+  "department_head",
+  "hr_head",
+  "president_cbo",
+  /** Panel only: their own interview rounds and scorecards (migration 0081). */
+  "interviewer",
+]);
+
+/* ------------------------------------------------------- identity (new) */
+
+export const users = pgTable(
+  "users",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: text("email").notNull(),
+    emailConfirmedAt: timestamp("email_confirmed_at", { withTimezone: true }),
+    /** Versioned hash: `scrypt$N$r$p$salt$hash`, or imported `bcrypt$...`. */
+    passwordHash: text("password_hash"),
+    fullName: text("full_name"),
+    avatarUrl: text("avatar_url"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("users_email_key").on(t.email)],
+);
+
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** sha256 hex of the cookie token — the raw token is never stored. */
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }).notNull().defaultNow(),
+    userAgent: text("user_agent"),
+    ip: text("ip"),
+    /** Last password re-entry in this session (step-up, migration 0066). */
+    reauthenticatedAt: timestamp("reauthenticated_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("sessions_token_hash_key").on(t.tokenHash),
+    index("sessions_user_idx").on(t.userId),
+    index("sessions_expires_at_idx").on(t.expiresAt),
+  ],
+);
+
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id"),
+    actorUserId: uuid("actor_user_id"),
+    /** Email of the acting user, or "ai" / "system". */
+    actor: text("actor").notNull(),
+    action: text("action").notNull(),
+    entityType: text("entity_type"),
+    entityId: uuid("entity_id"),
+    detail: jsonb("detail"),
+    ip: text("ip"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("audit_log_org_created_idx").on(t.orgId, t.createdAt)],
+);
+
+/* ------------------------------------------------------------- tenancy */
+
+export const organizations = pgTable(
+  "organizations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    emailDomain: text("email_domain"),
+    inboxSlug: text("inbox_slug"),
+    legalName: text("legal_name"),
+    industry: text("industry"),
+    hqCountry: text("hq_country"),
+    hqCity: text("hq_city"),
+    employeeBand: text("employee_band"),
+    /** Reporting currency: what pay is normalised to across zones (docs/pay-terms-plan.md). */
+    currency: text("currency").notNull().default("INR"),
+    /** How pay is usually quoted when a role has no pay zone (0073). */
+    payBasisDefault: text("pay_basis_default").notNull().default("annual"),
+    hoursPerWeekDefault: numeric("hours_per_week_default", { precision: 5, scale: 2 })
+      .notNull()
+      .default("40"),
+    kindsOfWork: text("kinds_of_work")
+      .array()
+      .notNull()
+      .default(sql`'{permanent}'::text[]`),
+    /** Over a band's ceiling by more than this % is a blocker; less is a flag (0074). */
+    payFarAbovePct: integer("pay_far_above_pct").notNull().default(20),
+    /** End-to-end hiring SLA: days from application to offer (migration 0088). */
+    hiringSlaDays: smallint("hiring_sla_days").notNull().default(5),
+    fiscalYearStartMonth: smallint("fiscal_year_start_month").notNull().default(4),
+    careersEmail: text("careers_email"),
+    onboardingStep: text("onboarding_step").notNull().default("profile"),
+    onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
+    createdBy: uuid("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    status: text("status").notNull().default("active"),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    archivedReason: text("archived_reason"),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    approvedBy: uuid("approved_by"),
+    rejectedAt: timestamp("rejected_at", { withTimezone: true }),
+    rejectionReason: text("rejection_reason"),
+    /** Shared bearer token for the browser-companion capture endpoint. */
+    captureToken: text("capture_token"),
+    /** SHA-256 of the capture token — lookup key so the token itself can be encrypted. */
+    captureTokenHash: text("capture_token_hash"),
+    /**
+     * SHA-256 of the capture key's distribution-surface token (HMAC of the key,
+     * computed by the extension) — a leak from a job-board destination cannot be
+     * replayed against candidate capture (2026-11 audit N-15).
+     */
+    distributionTokenHash: text("distribution_token_hash"),
+    /** E-mail branding (migration 0091): logo object key under `${orgId}/branding/`. */
+    brandLogoPath: text("brand_logo_path"),
+    brandLogoContentType: text("brand_logo_content_type"),
+    /** E-mail brand colour, "#rrggbb"; null = the ATSIQ default. */
+    brandColor: text("brand_color"),
+  },
+  (t) => [
+    uniqueIndex("organizations_slug_key").on(t.slug),
+    uniqueIndex("organizations_capture_token_key").on(t.captureToken),
+    uniqueIndex("organizations_capture_token_hash_key").on(t.captureTokenHash),
+    uniqueIndex("organizations_distribution_token_hash_key").on(t.distributionTokenHash),
+    uniqueIndex("organizations_inbox_slug_key")
+      .on(sql`lower(${t.inboxSlug})`)
+      .where(sql`${t.inboxSlug} is not null`),
+    uniqueIndex("organizations_careers_email_key")
+      .on(sql`lower(${t.careersEmail})`)
+      .where(sql`${t.careersEmail} is not null`),
+    index("organizations_status_idx").on(t.status),
+    check("organizations_pay_far_above_pct_check", sql`${t.payFarAbovePct} between 0 and 100`),
+    index("organizations_email_domain_idx")
+      .on(t.emailDomain)
+      .where(sql`${t.emailDomain} is not null`),
+  ],
+);
+
+export const orgMembers = pgTable(
+  "org_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    fullName: text("full_name"),
+    title: text("title"),
+    status: text("status").notNull().default("invited"),
+    isOwner: boolean("is_owner").notNull().default(false),
+    invitedRole: appRoleEnum("invited_role"),
+    invitedBy: uuid("invited_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    joinedAt: timestamp("joined_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("org_members_org_email_key").on(t.orgId, t.email),
+    uniqueIndex("org_members_org_user_key")
+      .on(t.orgId, t.userId)
+      .where(sql`${t.userId} is not null`),
+    index("org_members_user_idx").on(t.userId),
+    index("org_members_email_idx").on(sql`lower(${t.email})`),
+  ],
+);
+
+/**
+ * An organisation's acceptance of a versioned legal document (Terms of
+ * Service, Privacy Policy, Data Processing Agreement — src/lib/legal). One row
+ * per document version accepted; a new version needs a new row, so the owner
+ * is asked again. The signatory's name, title and email are copied so the
+ * record survives the user being removed; the IP is kept only as an HMAC.
+ */
+export const orgAgreements = pgTable(
+  "org_agreements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    version: text("version").notNull(),
+    acceptedBy: uuid("accepted_by").references(() => users.id, { onDelete: "set null" }),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull().defaultNow(),
+    accepterName: text("accepter_name").notNull(),
+    accepterTitle: text("accepter_title").notNull(),
+    accepterEmail: text("accepter_email").notNull(),
+    ipHash: text("ip_hash"),
+  },
+  (t) => [
+    check("org_agreements_kind_check", sql`${t.kind} in ('terms','privacy','dpa')`),
+    uniqueIndex("org_agreements_org_kind_version_key").on(t.orgId, t.kind, t.version),
+    index("org_agreements_org_idx").on(t.orgId, t.acceptedAt),
+  ],
+);
+
+/** Who interviews, on what, how often — registered once by the admin (docs/interview-panel-plan.md). */
+export const memberInterviewerProfiles = pgTable(
+  "member_interviewer_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    memberId: uuid("member_id")
+      .notNull()
+      .references(() => orgMembers.id, { onDelete: "cascade" }),
+    active: boolean("active").notNull().default(true),
+    /** Skills and competencies they assess, matched to a round's competencies. */
+    areas: text("areas")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    /** Interview rounds they take (1–3). */
+    rounds: integer("rounds")
+      .array()
+      .notNull()
+      .default(sql`'{1,2,3}'::integer[]`),
+    weeklyCap: integer("weekly_cap").notNull().default(4),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("member_interviewer_profiles_member_key").on(t.memberId),
+    index("member_interviewer_profiles_org_idx").on(t.orgId, t.active),
+    check("member_interviewer_profiles_weekly_cap_check", sql`${t.weeklyCap} between 1 and 20`),
+    check(
+      "member_interviewer_profiles_rounds_check",
+      sql`${t.rounds} <@ array[1,2,3] and cardinality(${t.rounds}) >= 1`,
+    ),
+    check("member_interviewer_profiles_areas_check", sql`cardinality(${t.areas}) <= 20`),
+  ],
+);
+
+/**
+ * The panel directory (docs/panel-directory.md, migration 0070): everyone who may
+ * sit on an interview panel — internal (an org member, or an employee without a
+ * login) or external (a client, an advisor). Added in the hiring desk when the
+ * Interview coordinator asks for someone new; whoever types them in approves them
+ * (self-approval recorded). Every org member is an internal panelist.
+ */
+export const panelists = pgTable(
+  "panelists",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"internal" | "external">().notNull().default("internal"),
+    /** The org member this panelist is (internal panelists with a login). */
+    memberId: uuid("member_id").references(() => orgMembers.id, { onDelete: "cascade" }),
+    fullName: text("full_name").notNull(),
+    email: text("email").notNull(),
+    title: text("title"),
+    /** For external panelists: their organisation. */
+    company: text("company"),
+    areas: text("areas")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    rounds: integer("rounds")
+      .array()
+      .notNull()
+      .default(sql`'{1,2,3}'::integer[]`),
+    weeklyCap: integer("weekly_cap").notNull().default(4),
+    active: boolean("active").notNull().default(true),
+    addedBy: uuid("added_by").references(() => users.id, { onDelete: "set null" }),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    /** The person who typed them in also approved them. */
+    selfApproved: boolean("self_approved").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("panelists_org_email_key").on(t.orgId, sql`lower(${t.email})`),
+    uniqueIndex("panelists_member_key")
+      .on(t.memberId)
+      .where(sql`${t.memberId} is not null`),
+    index("panelists_org_idx").on(t.orgId, t.active),
+    check("panelists_kind_check", sql`${t.kind} in ('internal', 'external')`),
+    check("panelists_external_member_check", sql`${t.kind} = 'internal' or ${t.memberId} is null`),
+    check(
+      "panelists_rounds_check",
+      sql`${t.rounds} <@ array[1,2,3] and cardinality(${t.rounds}) >= 1`,
+    ),
+    check("panelists_weekly_cap_check", sql`${t.weeklyCap} between 1 and 20`),
+    check("panelists_areas_check", sql`cardinality(${t.areas}) <= 20`),
+  ],
+);
+
+export const userRoles = pgTable(
+  "user_roles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: appRoleEnum("role").notNull(),
+  },
+  (t) => [uniqueIndex("user_roles_org_user_role_key").on(t.orgId, t.userId, t.role)],
+);
+
+export const platformAdmins = pgTable(
+  "platform_admins",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: text("email").notNull(),
+    userId: uuid("user_id"),
+    note: text("note"),
+    createdBy: uuid("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("platform_admins_email_key").on(t.email),
+    index("platform_admins_email_idx").on(sql`lower(${t.email})`),
+  ],
+);
+
+/* -------------------------------------------------- requisitions & JDs */
+
+export const departments = pgTable(
+  "departments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    headName: text("head_name"),
+    budgetedHeadcount: integer("budgeted_headcount").notNull().default(0),
+    budgetedCost: numeric("budgeted_cost", { precision: 14, scale: 2 }).notNull().default("0"),
+    period: text("period").notNull().default("FY26"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("departments_org_name_key").on(t.orgId, t.name)],
+);
+
+export const masterItems = pgTable(
+  "master_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    name: text("name").notNull(),
+    category: text("category"),
+    sortOrder: integer("sort_order").notNull().default(100),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "master_items_kind_check",
+      sql`${t.kind} in ('skill','location','education','employment_type','industry','role_title','billing_type','engagement_type','client','rejection_reason')`,
+    ),
+    uniqueIndex("master_items_kind_name_unique").on(t.orgId, t.kind, sql`lower(${t.name})`),
+    index("master_items_kind_idx").on(t.kind, t.active),
+  ],
+);
+
+export const requisitions = pgTable(
+  "requisitions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    title: text("title").notNull(),
+    departmentId: uuid("department_id").references(() => departments.id, { onDelete: "set null" }),
+    reqType: reqTypeEnum("req_type").notNull().default("new"),
+    status: reqStatusEnum("status").notNull().default("draft"),
+    location: text("location"),
+    /** onsite | hybrid | remote (migration 0041); null for older roles. */
+    workMode: text("work_mode").$type<"onsite" | "hybrid" | "remote">(),
+    openings: integer("openings").notNull().default(1),
+    experienceMin: integer("experience_min").notNull().default(0),
+    experienceMax: integer("experience_max").notNull().default(5),
+    budgetCtc: numeric("budget_ctc", { precision: 14, scale: 2 }).notNull().default("0"),
+    hiringManager: text("hiring_manager"),
+    /** The role's hiring manager as a member (approves its interview panels). */
+    hiringManagerMemberId: uuid("hiring_manager_member_id").references(() => orgMembers.id, {
+      onDelete: "set null",
+    }),
+    mustHaveSkills: text("must_have_skills")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    goodToHaveSkills: text("good_to_have_skills")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    responsibilities: text("responsibilities"),
+    educationRequirement: text("education_requirement"),
+    weightSkills: integer("weight_skills").notNull().default(40),
+    weightExperience: integer("weight_experience").notNull().default(15),
+    weightCareer: integer("weight_career").notNull().default(10),
+    weightImpact: integer("weight_impact").notNull().default(10),
+    weightEducation: integer("weight_education").notNull().default(10),
+    weightSocial: integer("weight_social").notNull().default(15),
+    /** Organisation-specific scoring dimensions (label + scoring hint + weight). */
+    customWeights: jsonb("custom_weights")
+      .$type<{ key: string; label: string; hint: string; weight: number }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    approvalTrail: jsonb("approval_trail")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Member who raised it; agents act for this person (docs/agentic-plan.md §6.1). */
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    billingType: text("billing_type").notNull().default("non_billable"),
+    engagementType: text("engagement_type").notNull().default("internal"),
+    clientName: text("client_name"),
+    costCenter: text("cost_center"),
+    ijpEnabled: boolean("ijp_enabled").notNull().default(false),
+    ijpPostedAt: timestamp("ijp_posted_at", { withTimezone: true }),
+    ijpNotes: text("ijp_notes"),
+    /** Interview rounds, rubric and verdict policy for this role (null = the default from its must-haves). */
+    interviewPlan:
+      jsonb("interview_plan").$type<import("./json-types/interview-plan").InterviewPlan>(),
+    /**
+     * What the role's hiring manager said the role really needs, captured by
+     * the Role expert interview agent and approved by them (migration 0057):
+     * must-haves with why, deal-breakers, must-ask screening questions and
+     * each round's focus. Null until approved.
+     */
+    expertBrief: jsonb("expert_brief").$type<import("./json-types/expert-brief").ExpertBrief>(),
+    ctcBandMin: numeric("ctc_band_min", { precision: 14, scale: 2 }),
+    ctcBandMax: numeric("ctc_band_max", { precision: 14, scale: 2 }),
+    /** Ladder key the budget CTC was benchmarked against (see career-ladder.ts). */
+    careerLevel: text("career_level"),
+    /** TA-corrected job-card zones + slot values for this requisition. */
+    jobCardOverrides: jsonb("job_card_overrides")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    maxNoticePeriodDays: integer("max_notice_period_days"),
+    workAuthorizationRequired: text("work_authorization_required"),
+    /* Pay terms (0073, docs/pay-terms-plan.md): the band above is in this currency and basis. */
+    kindOfWork: text("kind_of_work").notNull().default("permanent"),
+    payBasis: text("pay_basis").notNull().default("annual"),
+    payCurrency: text("pay_currency").notNull().default("INR"),
+    payZoneId: uuid("pay_zone_id").references(() => payZones.id, { onDelete: "set null" }),
+    hoursPerWeek: numeric("hours_per_week", { precision: 5, scale: 2 }),
+    daysPerWeek: numeric("days_per_week", { precision: 3, scale: 1 }),
+    contractMonths: integer("contract_months"),
+    extendable: boolean("extendable"),
+    contractType: text("contract_type"),
+    paysByLocation: boolean("pays_by_location").notNull().default(false),
+    /** The date the role must be filled by — its urgency (joining after it is checked). */
+    neededBy: date("needed_by"),
+  },
+  (t) => [
+    uniqueIndex("requisitions_org_code_key").on(t.orgId, t.code),
+    check("requisitions_pay_currency_check", sql`${t.payCurrency} ~ '^[A-Z]{3}$'`),
+    check(
+      "requisitions_pay_basis_check",
+      sql`${t.payBasis} in ('annual','monthly','daily','hourly')`,
+    ),
+    check(
+      "requisitions_kind_of_work_check",
+      sql`${t.kindOfWork} in ('permanent','fixed_term','contract_hourly','part_time','intern')`,
+    ),
+  ],
+);
+
+/**
+ * The approved interview panel for one role and round (docs/interview-panel-plan.md,
+ * P2): proposed by the Interview coordinator, approved or changed by a person,
+ * reused for every candidate of that role and round. `version` counts approvals.
+ */
+export const rolePanels = pgTable(
+  "role_panels",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    requisitionId: uuid("requisition_id")
+      .notNull()
+      .references(() => requisitions.id, { onDelete: "cascade" }),
+    level: integer("level").notNull(),
+    /** Superseded by panelistIds (migration 0070); kept for code that predates it. */
+    memberIds: uuid("member_ids")
+      .array()
+      .notNull()
+      .default(sql`'{}'::uuid[]`),
+    /** The panel, in order: panel directory ids (panelists.id). */
+    panelistIds: uuid("panelist_ids").array(),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull().defaultNow(),
+    version: integer("version").notNull().default(1),
+  },
+  (t) => [
+    uniqueIndex("role_panels_requisition_level_key").on(t.requisitionId, t.level),
+    index("role_panels_org_idx").on(t.orgId),
+    check("role_panels_level_check", sql`${t.level} between 1 and 3`),
+    check(
+      "role_panels_panelists_check",
+      sql`${t.panelistIds} is null or cardinality(${t.panelistIds}) between 1 and 3`,
+    ),
+  ],
+);
+
+export const jobDescriptions = pgTable("job_descriptions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  requisitionId: uuid("requisition_id")
+    .notNull()
+    .references(() => requisitions.id, { onDelete: "cascade" }),
+  orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+  version: integer("version").notNull().default(1),
+  status: jdStatusEnum("status").notNull().default("draft"),
+  purpose: text("purpose"),
+  responsibilities: text("responsibilities"),
+  mustHave: text("must_have")
+    .array()
+    .notNull()
+    .default(sql`'{}'::text[]`),
+  goodToHave: text("good_to_have")
+    .array()
+    .notNull()
+    .default(sql`'{}'::text[]`),
+  qualifications: text("qualifications"),
+  successFactors: text("success_factors"),
+  reportingTo: text("reporting_to"),
+  fullText: text("full_text"),
+  approverComment: text("approver_comment"),
+  /** Content template that produced this version (no FK — survives template deletion). */
+  templateId: uuid("template_id"),
+  templateName: text("template_name"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Cached AI salary research — one row per benchmark run. `input_key` hashes
+ * the role inputs so identical lookups reuse a recent run instead of paying
+ * for another web-search model call.
+ */
+export const salaryBenchmarks = pgTable(
+  "salary_benchmarks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    /** sha1(lower(title)|lower(location)|experience_min|experience_max). */
+    inputKey: text("input_key").notNull(),
+    title: text("title").notNull(),
+    location: text("location"),
+    experienceMin: integer("experience_min").notNull().default(0),
+    experienceMax: integer("experience_max").notNull().default(5),
+    currency: text("currency").notNull().default("INR"),
+    /** False when the model had no live web access — numbers are an estimate. */
+    grounded: boolean("grounded").notNull().default(false),
+    confidence: text("confidence").notNull().default("medium"),
+    /** BenchmarkPayload from career-ladder.ts: per-level ranges + sources. */
+    payload: jsonb("payload").notNull(),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("salary_benchmarks_org_input_idx").on(t.orgId, t.inputKey, t.createdAt)],
+);
+
+/* ------------------------------------------------------------ candidates */
+
+export const candidates = pgTable(
+  "candidates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    fullName: text("full_name").notNull(),
+    email: text("email").notNull(),
+    phone: text("phone"),
+    location: text("location"),
+    source: text("source").notNull().default("direct"),
+    experienceYears: numeric("experience_years", { precision: 4, scale: 1 }).notNull().default("0"),
+    currentCtc: numeric("current_ctc", { precision: 14, scale: 2 }),
+    expectedCtc: numeric("expected_ctc", { precision: 14, scale: 2 }),
+    noticePeriodDays: integer("notice_period_days"),
+    education: text("education"),
+    skills: text("skills")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    resumeText: text("resume_text"),
+    linkedinUrl: text("linkedin_url"),
+    githubUrl: text("github_url"),
+    websiteUrl: text("website_url"),
+    xUrl: text("x_url"),
+    consentGiven: boolean("consent_given").notNull().default(true),
+    /** The candidate asked not to be phoned by the AI assistant: no AI call dials them again. */
+    aiCallOptOutAt: timestamp("ai_call_opt_out_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** When this person was last checked against the open roles (new CV → open roles). */
+    roleMatchCheckedAt: timestamp("role_match_checked_at", { withTimezone: true }),
+    externalId: text("external_id"),
+    externalProvider: text("external_provider"),
+    /** Path inside the private CV vault bucket: <org_id>/<candidate_id>/<file>. */
+    resumeFilePath: text("resume_file_path"),
+    ownerId: uuid("owner_id"),
+    addedBy: uuid("added_by"),
+    isInternal: boolean("is_internal").notNull().default(false),
+    employeeId: text("employee_id"),
+    currentDepartment: text("current_department"),
+    managerEndorsed: boolean("manager_endorsed").notNull().default(false),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    syncStatus: text("sync_status").notNull().default("never"),
+    currentEmployer: text("current_employer"),
+    workAuthorization: text("work_authorization"),
+    willingToRelocate: boolean("willing_to_relocate"),
+    preferredLocations: text("preferred_locations")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    /** The CV parser flagged injection-style instructions in the resume text. */
+    suspectedPromptInjection: boolean("suspected_prompt_injection").notNull().default(false),
+    referralSource: text("referral_source"),
+    employmentHistory: jsonb("employment_history")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    careerMetrics: jsonb("career_metrics"),
+    /**
+     * What this CV may be used for (migration 0045): 'pool' (any role, with
+     * consent) or 'role_only' — it came from a portal whose terms limit it to
+     * the role it was for; never reused, erased (after a person approves)
+     * once its roles are over. pool_use_source names that portal.
+     */
+    poolUse: text("pool_use").$type<"pool" | "role_only">().notNull().default("pool"),
+    poolUseSource: text("pool_use_source"),
+  },
+  (t) => [
+    index("candidates_skills_gin").using("gin", t.skills),
+    index("candidates_role_only_idx")
+      .on(t.orgId)
+      .where(sql`${t.poolUse} = 'role_only'`),
+    uniqueIndex("candidates_external_unique")
+      .on(t.externalProvider, t.externalId)
+      .where(sql`${t.externalId} is not null`),
+    index("candidates_role_match_pending_idx")
+      .on(t.orgId, t.createdAt)
+      .where(sql`${t.roleMatchCheckedAt} is null`),
+  ],
+);
+
+export const applications = pgTable(
+  "applications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    requisitionId: uuid("requisition_id")
+      .notNull()
+      .references(() => requisitions.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    stage: appStageEnum("stage").notNull().default("applied"),
+    source: text("source").notNull().default("direct"),
+    appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Last hiring-SLA state posted to the desk: at_risk | breached (migration 0088). */
+    slaFlag: text("sla_flag").$type<"at_risk" | "breached">(),
+    lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).notNull().defaultNow(),
+    stageReason: text("stage_reason"),
+    stageNote: text("stage_note"),
+  },
+  (t) => [uniqueIndex("applications_requisition_candidate_key").on(t.requisitionId, t.candidateId)],
+);
+
+export const stageEvents = pgTable(
+  "stage_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    fromStage: appStageEnum("from_stage"),
+    toStage: appStageEnum("to_stage").notNull(),
+    actor: text("actor"),
+    reason: text("reason"),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("stage_events_application_idx").on(t.applicationId, t.createdAt)],
+);
+
+export const matchScores = pgTable(
+  "match_scores",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    skillsScore: integer("skills_score").notNull().default(0),
+    experienceScore: integer("experience_score").notNull().default(0),
+    careerScore: integer("career_score").notNull().default(0),
+    impactScore: integer("impact_score").notNull().default(0),
+    innovationScore: integer("innovation_score").notNull().default(0),
+    educationScore: integer("education_score").notNull().default(0),
+    socialScore: integer("social_score").notNull().default(0),
+    overallScore: integer("overall_score").notNull().default(0),
+    weights: jsonb("weights")
+      .notNull()
+      .default(sql`'{"skills":50,"experience":25,"education":10,"social":15}'::jsonb`),
+    /** Scores for the requisition's custom dimensions, with the cited CV evidence. */
+    customScores: jsonb("custom_scores")
+      .$type<{ key: string; score: number; evidence: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    matchedSkills: text("matched_skills")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    missingSkills: text("missing_skills")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    rationale: text("rationale"),
+    riskFlags: text("risk_flags")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    recommendation: recommendationEnum("recommendation"),
+    model: text("model"),
+    recruiterOverride: recommendationEnum("recruiter_override"),
+    overrideReason: text("override_reason"),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
+    careerMetrics: jsonb("career_metrics"),
+    careerFlags: text("career_flags")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    logisticsFlags: text("logistics_flags")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    impactHighlights: text("impact_highlights")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    innovationSignals: text("innovation_signals")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+  },
+  (t) => [index("match_scores_application_idx").on(t.applicationId)],
+);
+
+export const socialProfiles = pgTable(
+  "social_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    profileUrl: text("profile_url"),
+    handle: text("handle"),
+    score: integer("score").notNull().default(0),
+    signals: jsonb("signals")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    rationale: text("rationale"),
+    raw: jsonb("raw"),
+    status: text("status").notNull().default("ok"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("social_profiles_candidate_provider_key").on(t.candidateId, t.provider)],
+);
+
+export const aiInterviews = pgTable("ai_interviews", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  applicationId: uuid("application_id")
+    .notNull()
+    .references(() => applications.id, { onDelete: "cascade" }),
+  orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+  jdMatchScore: integer("jd_match_score").notNull().default(0),
+  skillsetScore: integer("skillset_score").notNull().default(0),
+  transcript: jsonb("transcript")
+    .notNull()
+    .default(sql`'[]'::jsonb`),
+  summary: text("summary"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const interviews = pgTable(
+  "interviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    level: integer("level").notNull().default(1),
+    interviewer: text("interviewer"),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    teamsLink: text("teams_link"),
+    status: text("status").notNull().default("scheduled"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    interviewerEmail: text("interviewer_email"),
+    durationMins: integer("duration_mins").notNull().default(60),
+    mode: text("mode").notNull().default("online"),
+    agenda: text("agenda"),
+    /** Further interviewers on the panel (the first is `interviewer`): [{ name, email }]. */
+    panel: jsonb("panel")
+      .$type<{ name: string | null; email: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Why a round did not happen (no-show / cancelled), in a person's words. */
+    outcomeNote: text("outcome_note"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    /** Interviewers who said they cannot make this booked round (migration 0051). */
+    unavailable: jsonb("unavailable")
+      .$type<{ email: string; note: string | null; at: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /**
+     * Time changes a panelist made after accepting — one each per round, never
+     * past the stage's SLA deadline (migration 0090).
+     */
+    panelChanges: jsonb("panel_changes")
+      .$type<{ email: string; from: string; to: string | null; reason: string; at: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /**
+     * The meeting's provider and the reference its API finds it by after the
+     * call (Zoom id, Meet code, Teams join link) — read from the link when the
+     * round is booked (src/lib/meeting-ref.ts, migration 0059).
+     */
+    meetingProvider: text("meeting_provider").$type<"zoom" | "google_meet" | "teams">(),
+    meetingExternalId: text("meeting_external_id"),
+    /**
+     * The call's transcript for the silent panel agent (migration 0060): off |
+     * requested | ready | unavailable (detail says why) | candidate_declined.
+     */
+    transcription: text("transcription")
+      .$type<"off" | "requested" | "ready" | "unavailable" | "candidate_declined">()
+      .notNull()
+      .default("off"),
+    transcriptionDetail: text("transcription_detail"),
+    transcriptCheckedAt: timestamp("transcript_checked_at", { withTimezone: true }),
+    transcriptChecks: integer("transcript_checks").notNull().default(0),
+    /** When the current wait for the transcript started; null = the booked end (migration 0063). */
+    transcriptWaitFrom: timestamp("transcript_wait_from", { withTimezone: true }),
+  },
+  (t) => [
+    index("interviews_interviewer_email_idx").on(sql`lower(${t.interviewerEmail})`),
+    index("interviews_transcription_due_idx")
+      .on(t.orgId, t.scheduledAt)
+      .where(sql`${t.transcription} = 'requested'`),
+    check(
+      "interviews_transcription_check",
+      sql`${t.transcription} in ('off', 'requested', 'ready', 'unavailable', 'candidate_declined')`,
+    ),
+    check(
+      "interviews_meeting_provider_check",
+      sql`${t.meetingProvider} is null or ${t.meetingProvider} in ('zoom', 'google_meet', 'teams')`,
+    ),
+    check(
+      "interviews_meeting_ref_check",
+      sql`(${t.meetingProvider} is null) = (${t.meetingExternalId} is null)`,
+    ),
+  ],
+);
+
+/**
+ * For one candidate's round only, a panellist replaced by another member
+ * (docs/interview-panel-plan.md, P3): proposed by the Interview coordinator,
+ * approved by a person. The role's approved panel is unchanged.
+ */
+export const roundSubstitutes = pgTable(
+  "round_substitutes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    level: integer("level").notNull(),
+    /** Superseded by the panelist columns (migration 0070). */
+    replaceMemberId: uuid("replace_member_id").references(() => orgMembers.id, {
+      onDelete: "cascade",
+    }),
+    withMemberId: uuid("with_member_id").references(() => orgMembers.id, { onDelete: "cascade" }),
+    replacePanelistId: uuid("replace_panelist_id").references(() => panelists.id, {
+      onDelete: "cascade",
+    }),
+    withPanelistId: uuid("with_panelist_id").references(() => panelists.id, {
+      onDelete: "cascade",
+    }),
+    reason: text("reason"),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("round_substitutes_round_member_key").on(
+      t.applicationId,
+      t.level,
+      t.replaceMemberId,
+    ),
+    index("round_substitutes_org_idx").on(t.orgId),
+    check("round_substitutes_level_check", sql`${t.level} between 1 and 3`),
+    uniqueIndex("round_substitutes_round_panelist_key")
+      .on(t.applicationId, t.level, t.replacePanelistId)
+      .where(sql`${t.replacePanelistId} is not null`),
+    check(
+      "round_substitutes_panelist_distinct_check",
+      sql`${t.replacePanelistId} is null or ${t.replacePanelistId} <> ${t.withPanelistId}`,
+    ),
+  ],
+);
+
+/**
+ * An external panelist's private scorecard link for one interview (migration
+ * 0070): /scorecard/<token>, expiring, one per panelist per round. Only the
+ * SHA-256 of the token is stored.
+ */
+export const panelistScorecardLinks = pgTable(
+  "panelist_scorecard_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    interviewId: uuid("interview_id")
+      .notNull()
+      .references(() => interviews.id, { onDelete: "cascade" }),
+    panelistId: uuid("panelist_id")
+      .notNull()
+      .references(() => panelists.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("panelist_scorecard_links_token_key").on(t.tokenHash),
+    uniqueIndex("panelist_scorecard_links_round_key").on(t.interviewId, t.panelistId),
+    index("panelist_scorecard_links_org_idx").on(t.orgId),
+  ],
+);
+
+/**
+ * Interview times offered to a candidate, who picks one from a private link
+ * (/schedule/<token>). Booking happens only when they pick: the round, the
+ * meeting link and both invites are created then (migration 0033).
+ */
+export const interviewSlotOffers = pgTable(
+  "interview_slot_offers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    level: integer("level").notNull(),
+    interviewerName: text("interviewer_name"),
+    interviewerEmail: text("interviewer_email").notNull(),
+    durationMins: integer("duration_mins").notNull().default(60),
+    mode: text("mode").notNull().default("online"),
+    meetingProvider: text("meeting_provider"),
+    agenda: text("agenda"),
+    /** ISO start times offered. */
+    slots: jsonb("slots").$type<string[]>().notNull(),
+    token: text("token").notNull(),
+    /** offered | booked | declined | expired | cancelled */
+    status: text("status").notNull().default("offered"),
+    chosenAt: timestamp("chosen_at", { withTimezone: true }),
+    interviewId: uuid("interview_id").references(() => interviews.id, { onDelete: "set null" }),
+    /** The candidate's own words when none of the times work (untrusted). */
+    candidateNote: text("candidate_note"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /**
+     * When the private link was e-mailed. Null while it is held back for the
+     * scheduling call that goes first (docs/voice-scheduling-call-plan.md):
+     * released when that call ends without a booking, or cannot happen in time.
+     */
+    linkEmailedAt: timestamp("link_emailed_at", { withTimezone: true }),
+    createdBy: uuid("created_by"),
+    agentRunId: uuid("agent_run_id"),
+    /** Further interviewers on the panel: [{ name, email }]. */
+    panel: jsonb("panel")
+      .$type<{ name: string | null; email: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("interview_slot_offers_token_key").on(t.token),
+    index("interview_slot_offers_open_idx").on(t.orgId, t.status, t.expiresAt),
+    index("interview_slot_offers_application_idx").on(t.applicationId),
+    index("interview_slot_offers_held_idx")
+      .on(t.orgId, t.status)
+      .where(sql`${t.linkEmailedAt} is null`),
+  ],
+);
+
+/**
+ * A panelist's or candidate's answer to an interview time (migration 0085):
+ * for a booked round (`interviewId`) or for the times about to be e-mailed to
+ * the candidate (`offerId`). `party`: panelist | candidate. `state`: pending |
+ * accepted | declined | superseded. `note` is the person's own words (untrusted).
+ */
+export const interviewConfirmations = pgTable(
+  "interview_confirmations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    interviewId: uuid("interview_id").references(() => interviews.id, { onDelete: "cascade" }),
+    offerId: uuid("offer_id").references(() => interviewSlotOffers.id, { onDelete: "cascade" }),
+    party: text("party").$type<"panelist" | "candidate">().notNull(),
+    email: text("email").notNull(),
+    name: text("name"),
+    token: text("token").notNull(),
+    state: text("state")
+      .$type<"pending" | "accepted" | "declined" | "superseded" | "lapsed">()
+      .notNull()
+      .default("pending"),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    note: text("note"),
+    /** Offers: the offered times (ISO) this panelist can do (migration 0086). */
+    okSlots: jsonb("ok_slots").$type<string[]>(),
+    /** Another time this person suggests (migration 0086). */
+    suggestedAt: timestamp("suggested_at", { withTimezone: true }),
+    /** The answer window (migration 0088): when reminded, and when it closed unanswered. */
+    remindedAt: timestamp("reminded_at", { withTimezone: true }),
+    lapsedAt: timestamp("lapsed_at", { withTimezone: true }),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("interview_confirmations_token_key").on(t.token),
+    index("interview_confirmations_interview_idx").on(t.orgId, t.interviewId),
+    index("interview_confirmations_offer_idx").on(t.orgId, t.offerId),
+  ],
+);
+
+/**
+ * How far a missing scorecard has been chased (migration 0089): 1 reminded as
+ * the round ended, 2 reminded again, 3 the HR head told, 4+ daily escalation.
+ */
+export const scorecardChases = pgTable(
+  "scorecard_chases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    interviewId: uuid("interview_id")
+      .notNull()
+      .references(() => interviews.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    step: smallint("step").notNull().default(0),
+    lastAt: timestamp("last_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("scorecard_chases_round_person_key").on(t.interviewId, t.email)],
+);
+
+/**
+ * A panelist's proposed change to their round's scorecard (topics, competencies,
+ * weights) for a role. Checked against the role's must-haves by fixed rules,
+ * reviewed by the AI against the job, and applied only when the hiring manager
+ * (or, failing them, the HR head) approves (migration 0090).
+ */
+export const planChangeProposals = pgTable(
+  "plan_change_proposals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    requisitionId: uuid("requisition_id")
+      .notNull()
+      .references(() => requisitions.id, { onDelete: "cascade" }),
+    interviewId: uuid("interview_id").references(() => interviews.id, { onDelete: "set null" }),
+    level: smallint("level").notNull(),
+    email: text("email").notNull(),
+    name: text("name"),
+    /** The round as it stood when proposed, and as proposed. */
+    before: jsonb("before").$type<import("./json-types/interview-plan").PlanRoundT>().notNull(),
+    round: jsonb("round").$type<import("./json-types/interview-plan").PlanRoundT>().notNull(),
+    reason: text("reason").notNull(),
+    /** reviewing | awaiting_approval | approved | rejected | stale */
+    status: text("status")
+      .$type<"reviewing" | "awaiting_approval" | "approved" | "rejected" | "stale">()
+      .notNull()
+      .default("reviewing"),
+    review: jsonb("review").$type<import("./json-types/interview-plan").PlanReview>(),
+    decidedBy: uuid("decided_by"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("plan_change_proposals_req_idx").on(t.orgId, t.requisitionId, t.status),
+    check(
+      "plan_change_proposals_status_check",
+      sql`${t.status} in ('reviewing','awaiting_approval','approved','rejected','stale')`,
+    ),
+  ],
+);
+
+export const evaluations = pgTable(
+  "evaluations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    level: integer("level").notNull(),
+    evaluator: text("evaluator"),
+    focusArea: text("focus_area"),
+    rating: integer("rating"),
+    comments: text("comments"),
+    recommendation: recommendationEnum("recommendation").notNull().default("hold"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    interviewId: uuid("interview_id").references(() => interviews.id, { onDelete: "set null" }),
+    competencies: jsonb("competencies")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    submittedBy: text("submitted_by"),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    /** Who submitted (lower-case email) — one scorecard per panel member per round. */
+    evaluatorEmail: text("evaluator_email"),
+  },
+  (t) => [
+    // One scorecard per interviewer per round (panels have several per round).
+    uniqueIndex("evaluations_interview_evaluator_key")
+      .on(t.interviewId, sql`coalesce(lower(${t.evaluatorEmail}), '')`)
+      .where(sql`${t.interviewId} is not null`),
+  ],
+);
+
+export const offers = pgTable(
+  "offers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    offeredCtc: numeric("offered_ctc", { precision: 14, scale: 2 }).notNull().default("0"),
+    joiningDate: date("joining_date"),
+    status: offerStatusEnum("status").notNull().default("draft"),
+    approvalTrail: jsonb("approval_trail")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Generated offer letter payload — see generateOfferLetter. Not FK'd: templates hard-delete. */
+    letter: jsonb("letter"),
+    letterTemplateId: uuid("letter_template_id"),
+    /** The candidate's private accept / decline / ask-for-changes link (set on release). */
+    responseToken: text("response_token"),
+    /** What the candidate asked for: { expectedCtc, joiningDate, note, at }. */
+    counter: jsonb("counter").$type<{
+      expectedCtc: number | null;
+      joiningDate: string | null;
+      note: string | null;
+      at: string;
+    }>(),
+    /** Version of this offer (1, then +1 per revision after a counter). */
+    revision: integer("revision").notNull().default(1),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /* Pay terms (0075, docs/pay-terms-plan.md Phase 4): offered_ctc is in this currency and basis. */
+    currency: text("currency").notNull().default("INR"),
+    payBasis: text("pay_basis").notNull().default("annual"),
+    kindOfWork: text("kind_of_work").notNull().default("permanent"),
+    /** A contract's last day (joining date + the role's contract length). */
+    contractEnd: date("contract_end"),
+    /** The offer in the reporting currency at the rate fixed on approval. */
+    reportingAmount: numeric("reporting_amount", { precision: 16, scale: 2 }),
+    reportingCurrency: text("reporting_currency"),
+    rate: jsonb("rate").$type<{ rate: number; source: string; at: string } | null>(),
+    rateLockedAt: timestamp("rate_locked_at", { withTimezone: true }),
+    /** The offer check against the approved labour rules (0077; src/lib/offer-check.server.ts). */
+    policyCheck: jsonb("policy_check").$type<
+      import("./json-types/offer-check").OfferCheck | null
+    >(),
+    /** The HR head's override of a "fix needed" result, with the reason (audited). */
+    policyOverride: jsonb("policy_override").$type<{
+      by: string;
+      reason: string;
+      at: string;
+      checkKey: string;
+    } | null>(),
+  },
+  (t) => [
+    uniqueIndex("offers_response_token_key")
+      .on(t.responseToken)
+      .where(sql`${t.responseToken} is not null`),
+    check("offers_currency_check", sql`${t.currency} ~ '^[A-Z]{3}$'`),
+    check("offers_pay_basis_check", sql`${t.payBasis} in ('annual','monthly','daily','hourly')`),
+  ],
+);
+
+export const candidateVerifications = pgTable(
+  "candidate_verifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    authenticityScore: integer("authenticity_score").notNull().default(0),
+    claims: jsonb("claims")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    redFlags: text("red_flags")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    evidence: jsonb("evidence")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    summary: text("summary"),
+    model: text("model"),
+    status: text("status").notNull().default("ok"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("candidate_verifications_candidate_idx").on(t.candidateId, t.createdAt)],
+);
+
+export const candidateAssessments = pgTable(
+  "candidate_assessments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    token: text("token").notNull(),
+    status: text("status").notNull().default("sent"),
+    questions: jsonb("questions")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    answers: jsonb("answers")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    mindsetScore: integer("mindset_score"),
+    dimensions: jsonb("dimensions"),
+    redFlags: text("red_flags")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    strengths: text("strengths")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    summary: text("summary"),
+    model: text("model"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    /** The application it was sent for (reminders and decisions act on it). */
+    applicationId: uuid("application_id").references(() => applications.id, {
+      onDelete: "set null",
+    }),
+    /** What the candidate was told; overdue counts from here. */
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    /** When the link stops working. */
+    closesAt: timestamp("closes_at", { withTimezone: true }),
+    remindersSent: integer("reminders_sent").notNull().default(0),
+    lastRemindedAt: timestamp("last_reminded_at", { withTimezone: true }),
+    /** When it was flagged overdue (the people deciding were told). */
+    overdueAt: timestamp("overdue_at", { withTimezone: true }),
+    /** Why a person chose to go on without it (status 'waived'). */
+    waivedReason: text("waived_reason"),
+  },
+  (t) => [
+    index("candidate_assessments_open_idx")
+      .on(t.orgId, t.status, t.dueAt)
+      .where(sql`${t.status} = 'sent'`),
+    uniqueIndex("candidate_assessments_token_key").on(t.token),
+    index("candidate_assessments_candidate_idx").on(t.candidateId, t.createdAt),
+  ],
+);
+
+/* ---------------------------------------------------- integrations & AI */
+
+export const sourceIntegrations = pgTable(
+  "source_integrations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    label: text("label").notNull(),
+    enabled: boolean("enabled").notNull().default(false),
+    category: text("category").notNull().default("sourcing"),
+    config: jsonb("config")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    credentialFields: text("credential_fields")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    hasCredentials: boolean("has_credentials").notNull().default(false),
+    lastTestStatus: text("last_test_status").notNull().default("untested"),
+    lastTestMessage: text("last_test_message"),
+    lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
+    // Per-connection webhook delivery token (board application ingestion):
+    // encrypted display copy + sha256 hash lookup, capture-token precedent.
+    webhookToken: text("webhook_token"),
+    webhookTokenHash: text("webhook_token_hash"),
+    webhookConfiguredAt: timestamp("webhook_configured_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("source_integrations_org_provider_key").on(t.orgId, t.provider)],
+);
+
+export const integrationCredentials = pgTable("integration_credentials", {
+  integrationId: uuid("integration_id")
+    .primaryKey()
+    .references(() => sourceIntegrations.id, { onDelete: "cascade" }),
+  orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+  secrets: jsonb("secrets")
+    .notNull()
+    .default(sql`'{}'::jsonb`),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const aiSettings = pgTable(
+  "ai_settings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    singleton: boolean("singleton").notNull().default(true),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull().default("openai"),
+    model: text("model").notNull().default("gpt-5.5"),
+    lastTestStatus: text("last_test_status").notNull().default("untested"),
+    lastTestMessage: text("last_test_message"),
+    lastTestedAt: timestamp("last_tested_at", { withTimezone: true }),
+    /**
+     * Denial-of-wallet guard (migration 0064): AI tokens the organisation may
+     * use per calendar month (UTC), across every feature. Null = no cap.
+     */
+    monthlyTokenCap: bigint("monthly_token_cap", { mode: "number" }),
+    /** Automatic CV scorings per requisition per day (UTC); the rest wait. Null = no cap. */
+    dailyScoresPerRequisition: integer("daily_scores_per_requisition"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("ai_settings_org_key").on(t.orgId)],
+);
+
+/**
+ * Shared request-limiter counters (migration 0066, UNLOGGED): one row per
+ * caller key per one-minute window. Written by src/server/rate-limit.ts only.
+ */
+export const rateLimitHits = pgTable(
+  "rate_limit_hits",
+  {
+    key: text("key").notNull(),
+    windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+    hits: integer("hits").notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.key, t.windowStart] }),
+    index("rate_limit_hits_window_idx").on(t.windowStart),
+  ],
+);
+
+/** Red-team probe runs against the organisation's saved model (migration 0065). */
+export type RedteamProbeResult = {
+  probe: string;
+  complied: boolean;
+  flagged: boolean;
+  error?: string;
+};
+
+export const aiRedteamChecks = pgTable(
+  "ai_redteam_checks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    passed: boolean("passed").notNull(),
+    results: jsonb("results")
+      .$type<RedteamProbeResult[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    runBy: uuid("run_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ai_redteam_checks_org_created_idx").on(t.orgId, t.createdAt)],
+);
+
+export const aiProviderCredentials = pgTable(
+  "ai_provider_credentials",
+  {
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    apiKey: text("api_key").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("ai_provider_credentials_org_provider_key").on(t.orgId, t.provider)],
+);
+
+export type AiUsageStatus = "ok" | "error";
+
+/** One row per provider request — the R&D ledger behind the platform console. */
+export const aiUsageEvents = pgTable(
+  "ai_usage_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    feature: text("feature").notNull(),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    status: text("status").$type<AiUsageStatus>().notNull(),
+    promptTokens: integer("prompt_tokens").notNull().default(0),
+    completionTokens: integer("completion_tokens").notNull().default(0),
+    totalTokens: integer("total_tokens").notNull().default(0),
+    attempt: integer("attempt").notNull().default(1),
+    durationMs: integer("duration_ms"),
+    grounded: boolean("grounded"),
+    errorMessage: text("error_message"),
+    /** The agent run that caused this request (model turn or AI call inside a tool). */
+    agentRunId: uuid("agent_run_id"),
+    /** The role / candidate this request was made for (cost per candidate). */
+    requisitionId: uuid("requisition_id"),
+    applicationId: uuid("application_id"),
+    candidateId: uuid("candidate_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("ai_usage_events_org_created_idx").on(t.orgId, t.createdAt),
+    index("ai_usage_events_feature_created_idx").on(t.feature, t.createdAt),
+    index("ai_usage_events_model_idx").on(t.model),
+    index("ai_usage_events_created_idx").on(t.createdAt),
+    index("ai_usage_events_application_idx")
+      .on(t.applicationId)
+      .where(sql`${t.applicationId} is not null`),
+    index("ai_usage_events_requisition_idx")
+      .on(t.requisitionId)
+      .where(sql`${t.requisitionId} is not null`),
+  ],
+);
+
+export type EmailOutboxKind =
+  | "ack"
+  | "stage_update"
+  | "interview_invite"
+  | "offer_released"
+  | "assessment_invite"
+  | "member_reminder"
+  | "document_request"
+  | "role_invite"
+  | "interviewer_brief"
+  | "interview_slots"
+  | "compensation_form"
+  | "offer_negotiation"
+  | "screening_call_booked"
+  | "panel_summary"
+  | "panel_time_check"
+  | "panel_reminder";
+/** `held`: waiting on interview confirmations (migration 0085) — released to `queued`. */
+export type EmailOutboxStatus = "queued" | "held" | "sent" | "failed" | "suppressed";
+export type EmailOutboxAttachment = {
+  filename: string;
+  contentBase64: string;
+  contentType: string;
+};
+
+export const emailOutbox = pgTable(
+  "email_outbox",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id").references(() => applications.id, {
+      onDelete: "cascade",
+    }),
+    kind: text("kind").$type<EmailOutboxKind>().notNull(),
+    templateName: text("template_name").notNull(),
+    toEmail: text("to_email").notNull(),
+    replyTo: text("reply_to"),
+    templateData: jsonb("template_data")
+      .$type<Record<string, string | undefined>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    attachments: jsonb("attachments")
+      .$type<EmailOutboxAttachment[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    idempotencyKey: text("idempotency_key").notNull(),
+    status: text("status").$type<EmailOutboxStatus>().notNull().default("queued"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("email_outbox_idempotency_key").on(t.idempotencyKey),
+    index("email_outbox_queue_idx").on(t.status, t.availableAt),
+    index("email_outbox_application_kind_status_idx").on(t.applicationId, t.kind, t.status),
+    index("email_outbox_org_kind_created_idx").on(t.orgId, t.kind, t.createdAt),
+  ],
+);
+
+export const emailSettings = pgTable(
+  "email_settings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    singleton: boolean("singleton").notNull().default(true),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(true),
+    ackEnabled: boolean("ack_enabled").notNull().default(true),
+    stageEnabled: boolean("stage_enabled").notNull().default(true),
+    interviewEnabled: boolean("interview_enabled").notNull().default(true),
+    offerEnabled: boolean("offer_enabled").notNull().default(true),
+    replyTo: text("reply_to"),
+    timezone: text("timezone").notNull().default("Asia/Kolkata"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("email_settings_org_key").on(t.orgId)],
+);
+
+export const copilotMessages = pgTable("copilot_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull(),
+  role: text("role").notNull(),
+  content: text("content").notNull(),
+  /**
+   * Work the copilot proposes handing to the agents (migration 0070): the goal
+   * the agent Copilot starts with once the person clicks to confirm. Null for
+   * plain answers.
+   */
+  handoff: jsonb("handoff").$type<{ goal: string; summary: string }>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * The organisation's demand outlook (migration 0070): internal requisition
+ * trends per ontology role, the market signal and the ranked roles likely to
+ * grow (src/lib/demand-outlook.ts). One row per organisation, refreshed weekly
+ * or on request by leadership; the copilot and the Talent pool card read it.
+ */
+export const demandOutlooks = pgTable("demand_outlooks", {
+  orgId: uuid("org_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  // Temporary (Phase 2): demand-outlook types are owned by the analytics/desk
+  // package (map §10), not db/json-types — this $type reference points back at
+  // the app until that package lands and the reference is repointed.
+  payload: jsonb("payload")
+    .$type<import("../../../../apps/web/src/lib/demand-outlook").DemandOutlook>()
+    .notNull(),
+  generatedBy: uuid("generated_by").references(() => users.id, { onDelete: "set null" }),
+  generatedAt: timestamp("generated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const captureEvents = pgTable(
+  "capture_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    sourceUrl: text("source_url"),
+    title: text("title"),
+    status: text("status").notNull().default("stored"),
+    detail: text("detail"),
+    candidateId: uuid("candidate_id").references(() => candidates.id, { onDelete: "set null" }),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("capture_events_org_created_idx").on(t.orgId, t.createdAt)],
+);
+
+export const inboxMessages = pgTable(
+  "inbox_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    toAddress: text("to_address"),
+    fromEmail: text("from_email"),
+    fromName: text("from_name"),
+    subject: text("subject"),
+    body: text("body"),
+    attachmentName: text("attachment_name"),
+    attachmentBytes: integer("attachment_bytes"),
+    status: text("status").notNull().default("received"),
+    detail: text("detail"),
+    candidateId: uuid("candidate_id"),
+    requisitionId: uuid("requisition_id"),
+    providerMessageId: text("provider_message_id"),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("inbox_messages_provider_key")
+      .on(t.orgId, t.providerMessageId)
+      .where(sql`${t.providerMessageId} is not null`),
+    index("inbox_messages_org_idx").on(t.orgId, t.receivedAt),
+  ],
+);
+
+export const orgLinkedinConnections = pgTable("org_linkedin_connections", {
+  orgId: uuid("org_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  memberSub: text("member_sub").notNull(),
+  memberName: text("member_name"),
+  memberEmail: text("member_email"),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  scope: text("scope"),
+  connectedBy: uuid("connected_by"),
+  connectedAt: timestamp("connected_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* ----------------------------------------------------- talent ontology (0032) */
+
+export const skillNodes = pgTable(
+  "skill_nodes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    category: text("category").notNull().default("general"),
+    aliases: text("aliases").array().notNull().default([]),
+    parentSlug: text("parent_slug"),
+    supply: integer("supply").notNull().default(0),
+    demand: integer("demand").notNull().default(0),
+    validated: integer("validated").notNull().default(0),
+    evidenceCount: integer("evidence_count").notNull().default(0),
+    status: text("status").notNull().default("active"),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("skill_nodes_org_slug_key").on(t.orgId, t.slug)],
+);
+
+export const skillEdges = pgTable(
+  "skill_edges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    fromSlug: text("from_slug").notNull(),
+    toSlug: text("to_slug").notNull(),
+    kind: text("kind").notNull().default("cooccurs"),
+    weight: numeric("weight").notNull().default("0"),
+    evidenceCount: integer("evidence_count").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("skill_edges_org_key").on(t.orgId, t.fromSlug, t.toSlug, t.kind)],
+);
+
+export const skillEvidence = pgTable(
+  "skill_evidence",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    candidateId: uuid("candidate_id").references(() => candidates.id, { onDelete: "cascade" }),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "cascade",
+    }),
+    source: text("source").notNull(),
+    strength: numeric("strength").notNull().default("1"),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("skill_evidence_org_slug_idx").on(t.orgId, t.slug)],
+);
+
+export const ontologySnapshots = pgTable("ontology_snapshots", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id")
+    .notNull()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  nodeCount: integer("node_count").notNull().default(0),
+  edgeCount: integer("edge_count").notNull().default(0),
+  added: text("added").array().notNull().default([]),
+  grown: text("grown").array().notNull().default([]),
+  dormant: text("dormant").array().notNull().default([]),
+  retired: text("retired").array().notNull().default([]),
+  stats: jsonb("stats").notNull().default({}),
+  model: text("model"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* --------------------------------------------- product catalogue commercials (0031) */
+
+export const productCatalogueCommercials = pgTable("product_catalogue_commercials", {
+  moduleId: text("module_id").primaryKey(),
+  tier: text("tier"),
+  listPrice: numeric("list_price"),
+  currency: text("currency").notNull().default("USD"),
+  unit: text("unit"),
+  notes: text("notes"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: uuid("updated_by"),
+});
+
+/* --------------------------------- ownership & collaboration (0030), catalogue shares */
+
+export const candidateOwnershipEvents = pgTable("candidate_ownership_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").references(() => organizations.id),
+  candidateId: uuid("candidate_id")
+    .notNull()
+    .references(() => candidates.id, { onDelete: "cascade" }),
+  fromOwner: uuid("from_owner"),
+  toOwner: uuid("to_owner"),
+  actor: uuid("actor"),
+  reason: text("reason"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const candidateReferrals = pgTable("candidate_referrals", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").references(() => organizations.id),
+  candidateId: uuid("candidate_id")
+    .notNull()
+    .references(() => candidates.id, { onDelete: "cascade" }),
+  requisitionId: uuid("requisition_id").references(() => requisitions.id, { onDelete: "set null" }),
+  fromUser: uuid("from_user").notNull(),
+  toUser: uuid("to_user").notNull(),
+  note: text("note"),
+  status: text("status").notNull().default("pending"),
+  responseNote: text("response_note"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  respondedAt: timestamp("responded_at", { withTimezone: true }),
+});
+
+export const talentRequests = pgTable("talent_requests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id")
+    .notNull()
+    .references(() => organizations.id),
+  requisitionId: uuid("requisition_id").references(() => requisitions.id, { onDelete: "set null" }),
+  requesterId: uuid("requester_id").notNull(),
+  title: text("title").notNull(),
+  skills: text("skills").array().notNull().default([]),
+  note: text("note"),
+  status: text("status").notNull().default("open"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  closedAt: timestamp("closed_at", { withTimezone: true }),
+});
+
+export const talentRequestSuggestions = pgTable(
+  "talent_request_suggestions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    requestId: uuid("request_id")
+      .notNull()
+      .references(() => talentRequests.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    suggestedBy: uuid("suggested_by").notNull(),
+    note: text("note"),
+    status: text("status").notNull().default("suggested"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("talent_request_suggestions_req_cand_key").on(t.requestId, t.candidateId)],
+);
+
+export const candidateNotes = pgTable("candidate_notes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+  candidateId: uuid("candidate_id")
+    .notNull()
+    .references(() => candidates.id, { onDelete: "cascade" }),
+  authorId: uuid("author_id").notNull(),
+  authorName: text("author_name"),
+  body: text("body").notNull(),
+  mentions: uuid("mentions").array().notNull().default([]),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const orgPoolShares = pgTable(
+  "org_pool_shares",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerOrg: uuid("owner_org")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    partnerOrg: uuid("partner_org")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("pending"),
+    scope: text("scope"),
+    requestedBy: uuid("requested_by"),
+    respondedBy: uuid("responded_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("org_pool_shares_owner_partner_key").on(t.ownerOrg, t.partnerOrg)],
+);
+
+/* --------------------------------------------------- content templates */
+
+/**
+ * Org-defined templates controlling how AI-generated LinkedIn posts and JDs
+ * are written, plus branded job-card image themes. `config` holds the
+ * per-kind structured fields (tone, headings, hashtags, accent color, …);
+ * `instructions` is the org's free-text overlay supporting {{placeholders}}.
+ */
+export const contentTemplates = pgTable(
+  "content_templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    name: text("name").notNull(),
+    isDefault: boolean("is_default").notNull().default(false),
+    config: jsonb("config")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    instructions: text("instructions"),
+    /** job_card only — stored object key under `${orgId}/branding/`. */
+    logoPath: text("logo_path"),
+    logoContentType: text("logo_content_type"),
+    /** job_card — full-bleed background artwork; job text renders on top. */
+    backgroundPath: text("background_path"),
+    backgroundContentType: text("background_content_type"),
+    /** Original company file the template was imported from, when it was. */
+    sourcePath: text("source_path"),
+    sourceName: text("source_name"),
+    sourceContentType: text("source_content_type"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "content_templates_kind_check",
+      sql`${t.kind} in ('linkedin_post','jd','job_card','offer_letter')`,
+    ),
+    uniqueIndex("content_templates_org_kind_name_key").on(t.orgId, t.kind, t.name),
+    uniqueIndex("content_templates_org_kind_default_key")
+      .on(t.orgId, t.kind)
+      .where(sql`${t.isDefault}`),
+  ],
+);
+
+/**
+ * Phone-screening kits: AI-built question sets for one candidate/role pairing.
+ * Questions and engine metadata are AI-generated JSON; `orgId` scopes every
+ * read/write (enforced again in screening.functions.ts — no RLS exists).
+ */
+export const screeningKits = pgTable(
+  "screening_kits",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    applicationId: uuid("application_id").references(() => applications.id, {
+      onDelete: "set null",
+    }),
+    questions: jsonb("questions")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    focusSummary: text("focus_summary"),
+    engine: jsonb("engine")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdBy: uuid("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("screening_kits_candidate_idx").on(t.candidateId, t.createdAt),
+    index("screening_kits_org_idx").on(t.orgId),
+  ],
+);
+
+/** How much of a phone screening a grade rests on. */
+export type ScreeningCoverage = {
+  /** Screening questions the call meant to ask. */
+  planned: number;
+  /** Of those, how many were asked on the call (older runs: not recorded). */
+  asked?: number;
+  /** Of those, how many the candidate answered (the grade uses only these). */
+  answered: number;
+  /** The planned and the asked questions' ids — so the ones not reached can be named. */
+  plannedIds?: string[];
+  askedIds?: string[];
+  /** answered / planned: high ≥ 75 %, medium ≥ 50 %, else low. */
+  confidence: "high" | "medium" | "low";
+};
+
+/** One graded screening attempt against a kit (typed answers, notes or audio). */
+export const screeningRuns = pgTable(
+  "screening_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    kitId: uuid("kit_id")
+      .notNull()
+      .references(() => screeningKits.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    applicationId: uuid("application_id").references(() => applications.id, {
+      onDelete: "set null",
+    }),
+    inputKind: text("input_kind").notNull().default("typed"),
+    answers: jsonb("answers")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    transcript: text("transcript"),
+    /** Vault object key under `${orgId}/${candidateId}/`. */
+    audioPath: text("audio_path"),
+    audioEngine: text("audio_engine"),
+    screeningScore: integer("screening_score").notNull().default(0),
+    matchScore: integer("match_score"),
+    combinedScore: integer("combined_score"),
+    verdicts: jsonb("verdicts")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    redFlags: text("red_flags")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    rationale: text("rationale"),
+    recommendation: text("recommendation"),
+    recommendationReason: text("recommendation_reason"),
+    /** Phone screening: what the grade rests on (graded only on the questions covered). */
+    coverage: jsonb("coverage").$type<ScreeningCoverage | null>(),
+    engine: jsonb("engine")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdBy: uuid("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("screening_runs_kit_idx").on(t.kitId, t.createdAt),
+    index("screening_runs_candidate_idx").on(t.candidateId, t.createdAt),
+    index("screening_runs_org_created_idx").on(t.orgId, t.createdAt),
+  ],
+);
+
+export type ScreeningPrepStatus = "pending" | "running" | "ready" | "failed";
+
+/**
+ * Background queue that prepares screening kits when a candidate is
+ * shortlisted, so the questions are ready before the recruiter arrives.
+ * One job per application (unique index); re-enqueue is an upsert that resets
+ * a failed attempt. Kits themselves stay in screening_kits — deliberately no
+ * unique index there, because manual "Rebuild questions" keeps multiple kits
+ * per pairing; dedupe happens in code.
+ */
+export const screeningPrepJobs = pgTable(
+  "screening_prep_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    requisitionId: uuid("requisition_id")
+      .notNull()
+      .references(() => requisitions.id, { onDelete: "cascade" }),
+    status: text("status").$type<ScreeningPrepStatus>().notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("screening_prep_jobs_application_key").on(t.applicationId),
+    index("screening_prep_jobs_queue_idx").on(t.status, t.updatedAt),
+    index("screening_prep_jobs_org_idx").on(t.orgId, t.status),
+  ],
+);
+
+export const hrIncentiveSchemes = pgTable("hr_incentive_schemes", {
+  orgId: uuid("org_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  currency: text("currency").notNull().default("INR"),
+  targetClosuresPerMonth: integer("target_closures_per_month").notNull().default(3),
+  payoutPerClosure: numeric("payout_per_closure").notNull().default("10000"),
+  qualityBands: jsonb("quality_bands")
+    .notNull()
+    .default(
+      sql`'[{"min_score":85,"multiplier":1.2},{"min_score":70,"multiplier":1},{"min_score":0,"multiplier":0.8}]'::jsonb`,
+    ),
+  monthlyCap: numeric("monthly_cap"),
+  notes: text("notes"),
+  updatedBy: uuid("updated_by"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * In-house compensation knowledge. Every figure a recruiter accepts or edits
+ * on the market benchmark panel lands here, so future research is anchored on
+ * what this organisation actually pays rather than on the open web alone.
+ */
+export const compKnowledge = pgTable(
+  "comp_knowledge",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    /** slug(title) — the grouping key for "what do we pay for this role". */
+    roleKey: text("role_key").notNull(),
+    title: text("title").notNull(),
+    location: text("location"),
+    /** Career ladder key, or "requisition" for a whole-req budget decision. */
+    levelKey: text("level_key").notNull(),
+    currency: text("currency").notNull().default("INR"),
+    low: numeric("low"),
+    median: numeric("median").notNull(),
+    high: numeric("high"),
+    experienceMin: integer("experience_min"),
+    experienceMax: integer("experience_max"),
+    /** "user_override" when typed by hand, "market_applied" when accepted as-is. */
+    source: text("source").notNull().default("user_override"),
+    note: text("note"),
+    createdBy: uuid("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("comp_knowledge_org_role_idx").on(t.orgId, t.roleKey, t.createdAt),
+    index("comp_knowledge_org_created_idx").on(t.orgId, t.createdAt),
+  ],
+);
+
+/**
+ * Pre-onboarding document collection and validation.
+ *
+ * Before an approved offer may be released, the candidate's documents — photo
+ * ID, experience letters, payslips proving the last drawn CTC, education
+ * certificates — are collected (uploaded by TA or received on the careers
+ * inbox), read by the extraction agent into `extracted`, and then validated by
+ * HR/TA against the original file. The stored file, the extracted reading and
+ * the reviewer's decision live on the same row so the audit is transparent.
+ */
+export const onboardingDocuments = pgTable(
+  "onboarding_documents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    offerId: uuid("offer_id").references(() => offers.id, { onDelete: "set null" }),
+    /** Catalogue key — see DOC_TYPES in src/lib/onboarding.server.ts. */
+    docType: text("doc_type").notNull(),
+    fileName: text("file_name").notNull(),
+    /** Private object-storage key, always under `<org_id>/…`. */
+    filePath: text("file_path"),
+    fileBytes: integer("file_bytes"),
+    contentType: text("content_type"),
+    /** "upload" (TA/HR) or "careers_inbox" (received by mail). */
+    source: text("source").notNull().default("upload"),
+    inboxMessageId: uuid("inbox_message_id"),
+    /** Text the agent read out of the file, kept for reviewer transparency. */
+    extractedText: text("extracted_text"),
+    extracted: jsonb("extracted"),
+    /** pending | extracted | failed */
+    extractionStatus: text("extraction_status").notNull().default("pending"),
+    extractionNote: text("extraction_note"),
+    model: text("model"),
+    /** pending | verified | rejected */
+    status: text("status").notNull().default("pending"),
+    reviewNote: text("review_note"),
+    reviewedBy: uuid("reviewed_by"),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    uploadedBy: uuid("uploaded_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("onboarding_documents_org_app_idx").on(t.orgId, t.applicationId, t.createdAt),
+    index("onboarding_documents_org_status_idx").on(t.orgId, t.status),
+  ],
+);
+
+/* -------------------------------------------------------------- HRMS sync */
+
+/**
+ * Normalised employee-master rows synced *from* the organisation's HRMS
+ * (Keka, greytHR, …) over the connections in source_integrations
+ * (category "hrms"). The HRMS stays the system of record — this table is a
+ * read-only cache, so rows are upserted and tombstoned (employment_status),
+ * never deleted by the sync.
+ */
+export const hrmsEmployees = pgTable(
+  "hrms_employees",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    integrationId: uuid("integration_id")
+      .notNull()
+      .references(() => sourceIntegrations.id, { onDelete: "cascade" }),
+    externalId: text("external_id").notNull(),
+    fullName: text("full_name").notNull(),
+    email: text("email"),
+    employeeCode: text("employee_code"),
+    department: text("department"),
+    jobTitle: text("job_title"),
+    location: text("location"),
+    managerExternalId: text("manager_external_id"),
+    /** Vendor value passed through; "terminated"/"resigned" tombstones a leaver. */
+    employmentStatus: text("employment_status").notNull().default("active"),
+    joinedOn: text("joined_on"),
+    /** Last vendor payload, kept for field-mapping debugging — never rendered. */
+    raw: jsonb("raw")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("hrms_employees_integration_external_key").on(t.integrationId, t.externalId),
+    index("hrms_employees_org_department_idx").on(t.orgId, t.department),
+  ],
+);
+
+/** One row per connection + entity: watermark, health and run statistics. */
+export const hrmsSyncState = pgTable(
+  "hrms_sync_state",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    integrationId: uuid("integration_id")
+      .notNull()
+      .references(() => sourceIntegrations.id, { onDelete: "cascade" }),
+    /** "employees" | "departments" */
+    entity: text("entity").notNull().default("employees"),
+    /** Opaque vendor cursor (page / last-modified watermark) between runs. */
+    cursor: jsonb("cursor")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    lastFullSyncAt: timestamp("last_full_sync_at", { withTimezone: true }),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    /** idle | ok | failed */
+    lastRunStatus: text("last_run_status").notNull().default("idle"),
+    lastError: text("last_error"),
+    stats: jsonb("stats")
+      .$type<Record<string, number>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("hrms_sync_state_integration_entity_key").on(t.integrationId, t.entity)],
+);
+
+/**
+ * Per-connection field mapping profile: HRMS field path → ATSIQ employee
+ * field, plus a passthrough bag for vendor-specific fields the defaults do
+ * not cover. `{}` means "adapter defaults" — mappings are overrides.
+ */
+export const hrmsFieldMappings = pgTable(
+  "hrms_field_mappings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    integrationId: uuid("integration_id")
+      .notNull()
+      .references(() => sourceIntegrations.id, { onDelete: "cascade" }),
+    mappings: jsonb("mappings")
+      .$type<Record<string, string>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("hrms_field_mappings_integration_key").on(t.integrationId)],
+);
+
+/* ------------------------------------------------- job board connections */
+
+/**
+ * Syndication state for one requisition on one channel: a partner board
+ * (LinkedIn / Indeed / Naukri, by API or posted by hand), a job feed
+ * (Jooble / Adzuna / Jora), Google for Jobs, or a portal a person posts on
+ * (provider = a channel id from src/lib/job-channels.ts). `external_id` is the
+ * vendor's posting id — the key the inbound webhook uses to route an
+ * applicant back to this requisition.
+ */
+export const requisitionBoardPostings = pgTable(
+  "requisition_board_postings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    requisitionId: uuid("requisition_id")
+      .notNull()
+      .references(() => requisitions.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    /** pending | published | failed | closed | withdrawn */
+    status: text("status").notNull().default("pending"),
+    externalId: text("external_id"),
+    externalUrl: text("external_url"),
+    /** Last posted body — non-secret by construction. */
+    payload: jsonb("payload")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    publishedBy: uuid("published_by"),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("board_postings_req_provider_key").on(t.requisitionId, t.provider),
+    index("board_postings_org_status_idx").on(t.orgId, t.status),
+    index("board_postings_provider_external_idx")
+      .on(t.provider, t.externalId)
+      .where(sql`${t.externalId} is not null`),
+  ],
+);
+
+/**
+ * How an organisation advertises beyond the partner boards (migration 0044):
+ * Google for Jobs listing and the token behind its public job feeds. The
+ * token is a feed address, stored encrypted with a SHA-256 lookup hash.
+ */
+export const orgJobDistribution = pgTable(
+  "org_job_distribution",
+  {
+    orgId: uuid("org_id")
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    googleJobsEnabled: boolean("google_jobs_enabled").notNull().default(false),
+    feedToken: text("feed_token"),
+    feedTokenHash: text("feed_token_hash"),
+    feedRotatedAt: timestamp("feed_rotated_at", { withTimezone: true }),
+    updatedBy: uuid("updated_by"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("org_job_distribution_feed_token_hash_key")
+      .on(t.feedTokenHash)
+      .where(sql`${t.feedTokenHash} is not null`),
+  ],
+);
+
+/** Google Indexing API notifications, sent within the platform's daily quota. */
+export const jobIndexNotifications = pgTable(
+  "job_index_notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    url: text("url").notNull(),
+    kind: text("kind").$type<"URL_UPDATED" | "URL_DELETED">().notNull(),
+    /** pending | sent | failed | expired */
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("job_index_notifications_status_idx").on(t.status, t.createdAt),
+    index("job_index_notifications_org_idx").on(t.orgId, t.createdAt),
+  ],
+);
+
+/**
+ * Raw inbound board webhook events. The `dedupe_key` ("<provider>:<org>:
+ * <event id>") is the idempotency boundary — a redelivery can never file an
+ * applicant twice. Rows are forensics too: terminal rows are purged after
+ * 30 days by board-sync.
+ */
+export const boardWebhookEvents = pgTable(
+  "board_webhook_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    dedupeKey: text("dedupe_key").notNull(),
+    /** NULL when the org could not be resolved from the delivery token. */
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "set null" }),
+    provider: text("provider").notNull(),
+    externalEventId: text("external_event_id").notNull(),
+    /** Allowlisted headers only (content-type, user-agent, signature). */
+    headers: jsonb("headers")
+      .$type<Record<string, string>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    payload: jsonb("payload")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    /** pending | processed | duplicate | failed */
+    status: text("status").notNull().default("pending"),
+    requisitionId: uuid("requisition_id"),
+    candidateId: uuid("candidate_id"),
+    applicationId: uuid("application_id"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("board_webhook_events_dedupe_key").on(t.dedupeKey),
+    index("board_webhook_events_status_idx").on(t.status, t.receivedAt),
+    index("board_webhook_events_org_idx").on(t.orgId, t.receivedAt),
+  ],
+);
+
+/** Poll watermark and run health per board connection (cron bookkeeping). */
+export const boardSyncState = pgTable(
+  "board_sync_state",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    integrationId: uuid("integration_id")
+      .notNull()
+      .references(() => sourceIntegrations.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    /** idle | ok | failed */
+    lastRunStatus: text("last_run_status").notNull().default("idle"),
+    lastError: text("last_error"),
+    stats: jsonb("stats")
+      .$type<Record<string, number>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("board_sync_state_integration_key").on(t.integrationId)],
+);
+
+/* ------------------------------------------------------------ agents (0024) */
+/* docs/agentic-plan.md §7. Statuses are app-level text, like email_outbox. */
+
+/** The agents built in code (src/server/agents/definitions.ts). */
+export type StockAgentType =
+  | "copilot"
+  | "requisition"
+  | "jd"
+  | "publishing"
+  | "intake"
+  | "screening"
+  | "interview"
+  | "evaluation"
+  | "offer"
+  | "onboarding"
+  | "followup"
+  | "sourcing"
+  | "distribution"
+  | "screening_call"
+  | "scheduling_call"
+  | "negotiation_call"
+  | "org_context"
+  | "expert_interview"
+  | "panel_l1"
+  | "panel_l2"
+  | "panel_l3"
+  | "voice_guard"
+  | "labour_policy";
+/**
+ * Every agent type: the stock agents, plus Agent studio agents the platform
+ * super admin publishes (`studio:<slug>`, migration 0082), which run only in
+ * the organisations granted them.
+ */
+export type AgentType = StockAgentType | `studio:${string}`;
+export type AgentAutonomy = "suggest" | "act_and_notify" | "autonomous";
+export type AgentRunStatus =
+  "queued" | "running" | "awaiting_human" | "done" | "failed" | "cancelled";
+export type AgentTaskKind = "gate" | "approval" | "clarification";
+export type AgentTaskStatus =
+  "open" | "approved" | "rejected" | "answered" | "expired" | "cancelled";
+export type AgentEventStatus = "pending" | "processing" | "done" | "failed";
+export type AgentRunMode = "live" | "replay";
+
+/**
+ * Per org × agent type: the autonomy dial, template whitelist and budget.
+ * Agents are opt-in — no row (or enabled = false) means the agent is off. The
+ * row with agent_type '*' is the org-wide switch: enabled = false pauses all.
+ */
+export const agentPolicies = pgTable(
+  "agent_policies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    agentType: text("agent_type").$type<AgentType | "*">().notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    autonomy: text("autonomy").$type<AgentAutonomy>().notNull().default("suggest"),
+    /** Content-template ids an agent may send without per-message approval. */
+    whitelistedTemplates: jsonb("whitelisted_templates")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    monthlyTokenBudget: integer("monthly_token_budget"),
+    /** Run limits per leg (AI turns / tokens between human decisions); null = the agent's default. */
+    maxStepsPerLeg: integer("max_steps_per_leg"),
+    maxTokensPerLeg: integer("max_tokens_per_leg"),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("agent_policies_org_agent_key").on(t.orgId, t.agentType)],
+);
+
+/** Domain-event outbox written by lifecycle choke points; drained by the orchestrator. */
+export const agentEvents = pgTable(
+  "agent_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    subjectType: text("subject_type"),
+    subjectId: uuid("subject_id"),
+    actorUserId: uuid("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    /**
+     * The agent run that published this event (null when a person or the
+     * system did). With agent_runs.trigger_event_id this makes hand-off chains
+     * traceable end to end: run → event → run → event …
+     */
+    sourceRunId: uuid("source_run_id").references((): AnyPgColumn => agentRuns.id, {
+      onDelete: "set null",
+    }),
+    payload: jsonb("payload")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    status: text("status").$type<AgentEventStatus>().notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("agent_events_queue_idx").on(t.status, t.createdAt),
+    index("agent_events_org_idx").on(t.orgId, t.createdAt),
+    index("agent_events_source_run_idx").on(t.sourceRunId),
+  ],
+);
+
+/**
+ * Studio agent lifecycle (migration 0082): a working copy is draft → tested →
+ * approved → published. Editing a published agent starts a new draft while the
+ * last published version keeps running (`publishedVersion`).
+ */
+export type AgentBlueprintStatus = "draft" | "tested" | "approved" | "published" | "archived";
+
+/** A studio agent's test: sample data per tool instead of the real tools. */
+export type StudioTestScenario = {
+  name: string;
+  goal: string;
+  /** Real tool name → the JSON the stand-in returns (the sample data). */
+  fixtures: Record<string, unknown>;
+  /** Tools that must be called, in this relative order (real names). */
+  expectCalls?: string[];
+  /** The agent must ask a person (request_approval) before finishing. */
+  expectApproval?: boolean;
+};
+
+export type StudioTestResult = {
+  version: number;
+  passed: boolean;
+  at: string;
+  orgId: string;
+  runs: {
+    scenario: string;
+    runId: string | null;
+    passed: boolean;
+    failures: string[];
+    calls: string[];
+    status: string;
+    steps: number;
+    tokens: number;
+    result: string | null;
+  }[];
+};
+
+/** A blueprint's renamed tool: what the model and the package see for a real tool. */
+export type BlueprintToolOverride = { name: string; description: string };
+
+/**
+ * Agent studio (platform super admin only, migration 0080): a stock agent
+ * adapted to another domain for use in other applications. Owned by the
+ * platform, not by any organisation. The injection and operating rules, the
+ * human tools and the gate-verb ban are always added and never editable;
+ * tools stay the stock agent's own (renamed, re-described, same inputs).
+ * Hosted runs execute in `workspaceOrgId` with that organisation's own AI key.
+ */
+export const agentBlueprints = pgTable(
+  "agent_blueprints",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentType: text("agent_type").$type<AgentType>().notNull(),
+    /** The stock manifest it was adapted from. */
+    baseVersion: text("base_version").notNull(),
+    baseHash: text("base_hash").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    responsibility: text("responsibility").notNull(),
+    instructions: text("instructions").notNull(),
+    mustNever: jsonb("must_never")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Real (stock) tool names the blueprint keeps. */
+    tools: jsonb("tools")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    toolOverrides: jsonb("tool_overrides")
+      .$type<Record<string, BlueprintToolOverride>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    maxSteps: integer("max_steps"),
+    status: text("status").$type<AgentBlueprintStatus>().notNull().default("draft"),
+    /** Bumped on every save so runs record exactly what they executed. */
+    version: integer("version").notNull().default(1),
+    /** Organisation hosted runs execute in (its data and AI key); null = package only. */
+    workspaceOrgId: uuid("workspace_org_id").references(() => organizations.id, {
+      onDelete: "set null",
+    }),
+    /** adapted from a stock agent, or new (built from the tool catalogue). Migration 0082. */
+    origin: text("origin").$type<"adapted" | "new">().notNull().default("adapted"),
+    /** Runtime agent type, `studio:<slug>`; set on first save, never changes. */
+    typeSlug: text("type_slug"),
+    riskTier: text("risk_tier").$type<"low" | "medium" | "high">().notNull().default("medium"),
+    ownerRole: text("owner_role").notNull().default("hr_head"),
+    gates: jsonb("gates")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'["general"]'::jsonb`),
+    scope: jsonb("scope")
+      .$type<{ reads: string[]; writes: string[]; external: string[] }>()
+      .notNull()
+      .default(sql`'{"reads":[],"writes":[],"external":[]}'::jsonb`),
+    testScenarios: jsonb("test_scenarios")
+      .$type<StudioTestScenario[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    lastTest: jsonb("last_test").$type<StudioTestResult>(),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    /** The version that runs (null = never published). */
+    publishedVersion: integer("published_version"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("agent_blueprints_status_idx").on(t.status, t.updatedAt),
+    uniqueIndex("agent_blueprints_type_slug_key").on(t.typeSlug),
+  ],
+);
+
+/**
+ * The immutable manifest of each published studio agent version: what runs
+ * execute (migration 0082). Written once on publish; never updated.
+ */
+export const studioAgentVersions = pgTable(
+  "studio_agent_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    blueprintId: uuid("blueprint_id")
+      .notNull()
+      .references(() => agentBlueprints.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    typeSlug: text("type_slug").notNull(),
+    manifest: jsonb("manifest").$type<Record<string, unknown>>().notNull(),
+    hash: text("hash").notNull(),
+    test: jsonb("test").$type<StudioTestResult>().notNull(),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull(),
+    publishedBy: uuid("published_by").references(() => users.id, { onDelete: "set null" }),
+    publishedAt: timestamp("published_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("studio_agent_versions_key").on(t.blueprintId, t.version)],
+);
+
+/** Organisations a studio agent is granted to by the super admin (migration 0082). */
+export const studioAgentGrants = pgTable(
+  "studio_agent_grants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    blueprintId: uuid("blueprint_id")
+      .notNull()
+      .references(() => agentBlueprints.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    grantedBy: uuid("granted_by").references(() => users.id, { onDelete: "set null" }),
+    grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("studio_agent_grants_live_key")
+      .on(t.blueprintId, t.orgId)
+      .where(sql`${t.revokedAt} is null`),
+    index("studio_agent_grants_org_idx").on(t.orgId),
+  ],
+);
+
+/**
+ * Hosted-API keys for a published blueprint. Only the SHA-256 of the key is
+ * stored; the key is shown once. Runs act as `principalUserId` in `orgId`
+ * (the blueprint's workspace organisation when the key was created).
+ */
+export const agentBlueprintKeys = pgTable(
+  "agent_blueprint_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    blueprintId: uuid("blueprint_id")
+      .notNull()
+      .references(() => agentBlueprints.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    label: text("label").notNull().default(""),
+    keyPrefix: text("key_prefix").notNull(),
+    keyHash: text("key_hash").notNull(),
+    principalUserId: uuid("principal_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("agent_blueprint_keys_hash_key").on(t.keyHash),
+    index("agent_blueprint_keys_blueprint_idx").on(t.blueprintId),
+  ],
+);
+
+/* -------------------------------------------- agent workflows (0083) */
+/* docs/agent-workflows.md: platform-built flows of agents, granted per org. */
+
+export type WorkflowNodeKind = "trigger" | "agent" | "condition" | "wait" | "report" | "end";
+
+export type WorkflowNode = {
+  id: string;
+  kind: WorkflowNodeKind;
+  position: { x: number; y: number };
+  data: {
+    label?: string;
+    /** trigger: the domain event that starts the flow, or "manual" (a hiring need). wait: the event awaited. */
+    event?: string;
+    /** wait: hours before it gives up (default 72). */
+    timeoutHours?: number;
+    /** agent: stock agent type or `studio:<slug>`, and its goal (may use {{fields}}). */
+    agentType?: string;
+    goal?: string;
+    /** condition: field, operator and value. */
+    field?: string;
+    op?: "eq" | "neq" | "contains" | "gt" | "gte" | "lt" | "lte" | "exists";
+    value?: string;
+  };
+};
+
+/** A connection; a condition's carries `yes` or `no`. */
+export type WorkflowEdge = { id: string; source: string; target: string; branch?: "yes" | "no" };
+
+export type WorkflowGraph = { nodes: WorkflowNode[]; edges: WorkflowEdge[] };
+
+/** A dry-run test: a sample event, and what each agent ends with. */
+export type WorkflowTestScenario = {
+  name: string;
+  payload: Record<string, unknown>;
+  subjectType: string;
+  /** Agent node id → how that agent's run ends. */
+  outcomes: Record<string, { status: "done" | "failed"; result: string }>;
+  /** The node the flow must end on (optional). */
+  expectEnd?: string;
+};
+
+export type WorkflowTestResult = {
+  version: number;
+  passed: boolean;
+  at: string;
+  runs: { scenario: string; passed: boolean; path: string[]; failures: string[] }[];
+};
+
+export type AgentWorkflowStatus = "draft" | "tested" | "approved" | "published" | "archived";
+
+export const agentWorkflows = pgTable(
+  "agent_workflows",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    graph: jsonb("graph")
+      .$type<WorkflowGraph>()
+      .notNull()
+      .default(sql`'{"nodes":[],"edges":[]}'::jsonb`),
+    testScenarios: jsonb("test_scenarios")
+      .$type<WorkflowTestScenario[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    lastTest: jsonb("last_test").$type<WorkflowTestResult>(),
+    status: text("status").$type<AgentWorkflowStatus>().notNull().default("draft"),
+    version: integer("version").notNull().default(1),
+    publishedVersion: integer("published_version"),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("agent_workflows_status_idx").on(t.status, t.updatedAt)],
+);
+
+/** Immutable published versions: what workflow runs execute. */
+export const agentWorkflowVersions = pgTable(
+  "agent_workflow_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => agentWorkflows.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    /** The trigger event, for matching without reading the graph. */
+    triggerEvent: text("trigger_event").notNull(),
+    graph: jsonb("graph").$type<WorkflowGraph>().notNull(),
+    hash: text("hash").notNull(),
+    test: jsonb("test").$type<WorkflowTestResult>().notNull(),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull(),
+    publishedBy: uuid("published_by").references(() => users.id, { onDelete: "set null" }),
+    publishedAt: timestamp("published_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("agent_workflow_versions_key").on(t.workflowId, t.version)],
+);
+
+export const agentWorkflowGrants = pgTable(
+  "agent_workflow_grants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => agentWorkflows.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    grantedBy: uuid("granted_by").references(() => users.id, { onDelete: "set null" }),
+    grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("agent_workflow_grants_live_key")
+      .on(t.workflowId, t.orgId)
+      .where(sql`${t.revokedAt} is null`),
+    index("agent_workflow_grants_org_idx").on(t.orgId),
+  ],
+);
+
+export type WorkflowRunStatus = "running" | "waiting" | "done" | "failed" | "cancelled";
+
+/** One triggered workflow in one organisation: where it is and how it got there. */
+export const workflowRuns = pgTable(
+  "workflow_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => agentWorkflows.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    triggerEventId: uuid("trigger_event_id").references(() => agentEvents.id, {
+      onDelete: "set null",
+    }),
+    status: text("status").$type<WorkflowRunStatus>().notNull().default("running"),
+    currentNode: text("current_node"),
+    /** The agent run the flow waits for. */
+    waitingRunId: uuid("waiting_run_id").references((): AnyPgColumn => agentRuns.id, {
+      onDelete: "set null",
+    }),
+    /** A wait step: the event it waits for on the flow's role, until when (migration 0084). */
+    waitingEvent: text("waiting_event"),
+    waitingUntil: timestamp("waiting_until", { withTimezone: true }),
+    /** Who started a manual (hiring-need) run. */
+    startedBy: uuid("started_by").references(() => users.id, { onDelete: "set null" }),
+    context: jsonb("context")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    history: jsonb("history")
+      .$type<{ node: string; at: string; note: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("workflow_runs_org_idx").on(t.orgId, t.status),
+    index("workflow_runs_waiting_idx").on(t.waitingRunId),
+    uniqueIndex("workflow_runs_event_key").on(t.workflowId, t.triggerEventId),
+  ],
+);
+
+/* ------------------------------------------- workflow app API keys (0087) */
+/* docs/agent-workflows.md § Workflow app and API: an organisation's own key
+   to start and follow one granted workflow from its other systems. Only the
+   hash is stored; runs act as the person who issued the key. */
+export const workflowApiKeys = pgTable(
+  "workflow_api_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workflowId: uuid("workflow_id")
+      .notNull()
+      .references(() => agentWorkflows.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    label: text("label").notNull().default(""),
+    keyPrefix: text("key_prefix").notNull(),
+    keyHash: text("key_hash").notNull(),
+    principalUserId: uuid("principal_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("workflow_api_keys_hash_key").on(t.keyHash),
+    index("workflow_api_keys_org_idx").on(t.orgId, t.workflowId),
+  ],
+);
+
+/** Immutable snapshot of each agent manifest version, keyed by content hash. */
+export const agentDefinitions = pgTable(
+  "agent_definitions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentType: text("agent_type").$type<AgentType>().notNull(),
+    version: text("version").notNull(),
+    hash: text("hash").notNull(),
+    manifest: jsonb("manifest").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("agent_definitions_type_hash_key").on(t.agentType, t.hash)],
+);
+
+/**
+ * One agent run. `transcript` is the provider-neutral conversation
+ * (AgentMessage[]) and doubles as the checkpoint; `pending` holds tool calls
+ * parked behind a human decision. Every run acts on behalf of a human
+ * principal — it can never do more than that person could.
+ */
+export const agentRuns = pgTable(
+  "agent_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    agentType: text("agent_type").$type<AgentType>().notNull(),
+    status: text("status").$type<AgentRunStatus>().notNull().default("queued"),
+    principalUserId: uuid("principal_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    subjectType: text("subject_type"),
+    subjectId: uuid("subject_id"),
+    triggerEventId: uuid("trigger_event_id").references(() => agentEvents.id, {
+      onDelete: "set null",
+    }),
+    /** The manifest version this run executed under (agent_definitions). */
+    definitionId: uuid("definition_id").references(() => agentDefinitions.id, {
+      onDelete: "set null",
+    }),
+    definitionVersion: text("definition_version"),
+    definitionHash: text("definition_hash"),
+    goal: text("goal").notNull(),
+    transcript: jsonb("transcript")
+      .$type<unknown[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    pending: jsonb("pending").$type<unknown>(),
+    result: text("result"),
+    stepCount: integer("step_count").notNull().default(0),
+    tokensUsed: integer("tokens_used").notNull().default(0),
+    maxSteps: integer("max_steps").notNull().default(20),
+    maxTokens: integer("max_tokens").notNull().default(200000),
+    /** Where the current leg began (a human decision starts a new one; migration 0042). */
+    legStepStart: integer("leg_step_start").notNull().default(0),
+    legTokenStart: integer("leg_token_start").notNull().default(0),
+    traceId: uuid("trace_id").notNull().defaultRandom(),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** live | replay — a replay is a dry run of `replayOf`: write, external and human steps are simulated. */
+    mode: text("mode").$type<AgentRunMode>().notNull().default("live"),
+    replayOf: uuid("replay_of").references((): AnyPgColumn => agentRuns.id, {
+      onDelete: "set null",
+    }),
+    /** When this run's trace was exported to the org's OpenTelemetry endpoint. */
+    otelExportedAt: timestamp("otel_exported_at", { withTimezone: true }),
+    /** The hiring-desk thread this run works for; its results are posted there. */
+    conversationId: uuid("conversation_id").references((): AnyPgColumn => hiringConversations.id, {
+      onDelete: "set null",
+    }),
+    /**
+     * The approved organisation-profile version this run read, stamped when the
+     * runtime injected the org context block (migration 0055). Consumers only —
+     * the Organisation context agent's own runs stay null.
+     */
+    orgProfileVersionId: uuid("org_profile_version_id").references(
+      (): AnyPgColumn => orgProfileVersions.id,
+      { onDelete: "set null" },
+    ),
+    /**
+     * The Agent studio blueprint a hosted-API run executes under (migration
+     * 0080); null for in-app runs, which always use the stock agent.
+     */
+    blueprintId: uuid("blueprint_id").references((): AnyPgColumn => agentBlueprints.id, {
+      onDelete: "set null",
+    }),
+    blueprintVersion: integer("blueprint_version"),
+  },
+  (t) => [
+    index("agent_runs_queue_idx").on(t.status, t.updatedAt),
+    index("agent_runs_org_status_idx").on(t.orgId, t.status),
+    index("agent_runs_subject_idx").on(t.orgId, t.subjectType, t.subjectId),
+    // One active live run per organisation, agent and requisition (migration
+    // 0058): concurrent starts cannot stack duplicate runs on one role.
+    uniqueIndex("agent_runs_active_requisition_key")
+      .on(t.orgId, t.agentType, t.subjectId)
+      .where(
+        sql`${t.subjectType} = 'requisition' and ${t.status} in ('queued', 'running', 'awaiting_human') and ${t.mode} = 'live'`,
+      ),
+  ],
+);
+
+/** Append-only step log of a run: model turns, tool calls, decisions. Also the trace spans. */
+export const agentSteps = pgTable(
+  "agent_steps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    /** model | tool | decision | error */
+    kind: text("kind").notNull(),
+    toolName: text("tool_name"),
+    toolCallId: text("tool_call_id"),
+    /** ok | error | blocked | awaiting | simulated (dry-run replay) */
+    status: text("status").notNull(),
+    /** Redacted summaries only — never full CV, document or mail text. */
+    input: jsonb("input").$type<unknown>(),
+    output: jsonb("output").$type<unknown>(),
+    promptTokens: integer("prompt_tokens").notNull().default(0),
+    completionTokens: integer("completion_tokens").notNull().default(0),
+    durationMs: integer("duration_ms").notNull().default(0),
+    spanId: uuid("span_id").notNull().defaultRandom(),
+    /** act_and_notify: 'pending' until the principal marks the action seen, then 'seen'. */
+    notifyState: text("notify_state").$type<"pending" | "seen">(),
+    /** Third-party text in this tool result looked like an instruction to the model. */
+    injectionSuspected: boolean("injection_suspected").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("agent_steps_run_seq_key").on(t.runId, t.seq)],
+);
+
+/** Human-in-the-loop items: gates, action approvals and clarifying questions. */
+export const agentTasks = pgTable(
+  "agent_tasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<AgentTaskKind>().notNull(),
+    status: text("status").$type<AgentTaskStatus>().notNull().default("open"),
+    title: text("title").notNull(),
+    body: text("body").notNull().default(""),
+    /** The tool call waiting on this decision: { toolCallId, name, args }. */
+    proposedAction: jsonb("proposed_action").$type<unknown>(),
+    assigneeRole: text("assignee_role").$type<(typeof appRoleEnum.enumValues)[number]>(),
+    assigneeUserId: uuid("assignee_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** The human's answer: edited args, free-text reply, rejection reason. */
+    response: jsonb("response").$type<unknown>(),
+    decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("agent_tasks_org_status_idx").on(t.orgId, t.status),
+    index("agent_tasks_run_idx").on(t.runId),
+  ],
+);
+
+/** Daily rollup per org × agent for dashboards and alerts (docs/agentic-plan.md §9). */
+export const agentMetricsDaily = pgTable(
+  "agent_metrics_daily",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    agentType: text("agent_type").$type<AgentType>().notNull(),
+    day: date("day").notNull(),
+    runsStarted: integer("runs_started").notNull().default(0),
+    runsDone: integer("runs_done").notNull().default(0),
+    runsFailed: integer("runs_failed").notNull().default(0),
+    steps: integer("steps").notNull().default(0),
+    toolErrors: integer("tool_errors").notNull().default(0),
+    promptTokens: integer("prompt_tokens").notNull().default(0),
+    completionTokens: integer("completion_tokens").notNull().default(0),
+    tasksOpened: integer("tasks_opened").notNull().default(0),
+    tasksApproved: integer("tasks_approved").notNull().default(0),
+    tasksRejected: integer("tasks_rejected").notNull().default(0),
+    tasksEdited: integer("tasks_edited").notNull().default(0),
+    hitlWaitMsTotal: integer("hitl_wait_ms_total").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("agent_metrics_daily_key").on(t.orgId, t.agentType, t.day)],
+);
+
+/* --------------------------------------------------- agent health (0027) */
+
+export type AgentIssueSeverity = "warning" | "serious" | "critical";
+export type AgentIssueStatus = "open" | "acknowledged" | "resolved";
+
+/** A problem the health engine detected for one org × agent × rule, while it lasts. */
+export const agentIssues = pgTable(
+  "agent_issues",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** Agent type, or "*" for organisation-wide (orchestrator) issues. */
+    agentType: text("agent_type").notNull(),
+    element: text("element").notNull(),
+    rule: text("rule").notNull(),
+    severity: text("severity").$type<AgentIssueSeverity>().notNull(),
+    status: text("status").$type<AgentIssueStatus>().notNull().default("open"),
+    title: text("title").notNull(),
+    detail: jsonb("detail")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    occurrences: integer("occurrences").notNull().default(1),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    acknowledgedBy: uuid("acknowledged_by").references(() => users.id, { onDelete: "set null" }),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    /** Alert e-mail / webhook sent for this issue (serious and critical only). */
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("agent_issues_active_key")
+      .on(t.orgId, t.agentType, t.rule)
+      .where(sql`status <> 'resolved'`),
+    index("agent_issues_org_status_idx").on(t.orgId, t.status),
+  ],
+);
+
+/** Scheduler liveness: the last tick and health evaluation (single row, id "agents"). */
+export const agentRuntimeHeartbeat = pgTable("agent_runtime_heartbeat", {
+  id: text("id").primaryKey(),
+  lastTickAt: timestamp("last_tick_at", { withTimezone: true }),
+  lastHealthAt: timestamp("last_health_at", { withTimezone: true }),
+  lastCounts: jsonb("last_counts")
+    .$type<Record<string, unknown>>()
+    .notNull()
+    .default(sql`'{}'::jsonb`),
+});
+
+/* ------------------------------------------- agent telemetry & alerts (0029) */
+
+/**
+ * Per-org trace export (OTLP/HTTP JSON to the org's own collector) and alert
+ * channels for agent health issues. Header values and the webhook signing
+ * secret are encrypted at rest (encryptSecret).
+ */
+export const agentTelemetrySettings = pgTable("agent_telemetry_settings", {
+  orgId: uuid("org_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  otlpEnabled: boolean("otlp_enabled").notNull().default(false),
+  otlpEndpoint: text("otlp_endpoint"),
+  otlpHeadersEnc: text("otlp_headers_enc"),
+  alertEmailEnabled: boolean("alert_email_enabled").notNull().default(true),
+  alertWebhookUrl: text("alert_webhook_url"),
+  alertWebhookSecretEnc: text("alert_webhook_secret_enc"),
+  lastExportAt: timestamp("last_export_at", { withTimezone: true }),
+  /** Last export attempt (successful or not), for back-off after failures. */
+  lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+  lastExportError: text("last_export_error"),
+  updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* ------------------------------------------------------ hiring desk (0030) */
+
+export type HiringConversationStatus = "gathering" | "confirming" | "active" | "closed";
+export type HiringMessageRole = "user" | "desk" | "agent";
+/**
+ * What the thread is for: `hiring` is a hiring-desk thread (the default, and
+ * every row that existed before migration 0055); `org_profile` is an
+ * organisation-desk thread with the Organisation context agent. Any new query
+ * that lists threads must filter on `kind` — the two kinds never mix.
+ */
+export type HiringConversationKind = "hiring" | "org_profile";
+
+/** One chat thread per hiring need (docs/agentic-plan.md §13.2); org-desk threads share the table (0055). */
+export const hiringConversations = pgTable(
+  "hiring_conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull().default("New hiring need"),
+    /** hiring (default) | org_profile — the org desk thread kind never mixes with hiring threads. */
+    kind: text("kind").$type<HiringConversationKind>().notNull().default("hiring"),
+    status: text("status").$type<HiringConversationStatus>().notNull().default("gathering"),
+    /** The hiring details gathered so far (role, location, experience, …). */
+    slots: jsonb("slots")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    /** An approved JD of this earlier requisition is reused (the person's choice). */
+    reuseJdFrom: uuid("reuse_jd_from").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Deleted (hidden) — restorable by an owner for 30 days, then purged (migration 0040). */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: uuid("deleted_by").references(() => users.id, { onDelete: "set null" }),
+    deleteReason: text("delete_reason"),
+    /**
+     * Links the threads of one fan-out (parallel hiring needs, migration
+     * 0056): all threads of a split share this id, so any of them can show
+     * the tracks chip — the others' statuses and what needs the person.
+     */
+    splitGroupId: uuid("split_group_id"),
+  },
+  (t) => [
+    index("hiring_conversations_org_idx").on(t.orgId, t.updatedAt),
+    index("hiring_conversations_org_kind_idx").on(t.orgId, t.kind, t.updatedAt),
+    index("hiring_conversations_split_group_idx").on(t.splitGroupId),
+  ],
+);
+
+/** Messages of a hiring-desk thread; `card` carries structured results. */
+export const hiringMessages = pgTable(
+  "hiring_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => hiringConversations.id, { onDelete: "cascade" }),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    role: text("role").$type<HiringMessageRole>().notNull(),
+    agentType: text("agent_type"),
+    body: text("body").notNull().default(""),
+    card: jsonb("card").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("hiring_messages_conv_idx").on(t.conversationId, t.createdAt)],
+);
+
+/* ------------------------------------------------- agent cost rates (0031) */
+
+/**
+ * The organisation's own AI token prices (it brings its own key, so the price
+ * is its model's and plan's). Used only for cost estimates on Agent
+ * observability; with no row, the app shows tokens and never guesses a price.
+ */
+export const agentCostRates = pgTable("agent_cost_rates", {
+  orgId: uuid("org_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  currency: text("currency").notNull().default("USD"),
+  inputPerMillion: numeric("input_per_million", { precision: 12, scale: 4 }).notNull(),
+  outputPerMillion: numeric("output_per_million", { precision: 12, scale: 4 }).notNull(),
+  updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* ------------------------------------------------- training data (0036) */
+
+/**
+ * Training data for a future HR model (docs/agentic-plan.md §14). Off per
+ * organisation until an owner agrees: a customer's candidate data is used to
+ * train a model only with that customer's consent (DPDP Act 2023 / GDPR).
+ */
+export const trainingSettings = pgTable(
+  "training_settings",
+  {
+    orgId: uuid("org_id")
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(false),
+    consentedBy: uuid("consented_by").references(() => users.id, { onDelete: "set null" }),
+    consentedAt: timestamp("consented_at", { withTimezone: true }),
+    retentionDays: integer("retention_days").notNull().default(730),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check("training_settings_retention_days_check", sql`${t.retentionDays} between 30 and 3650`),
+  ],
+);
+
+export type TrainingCallKind = "json" | "research" | "agent_step" | "voice" | "audio";
+
+/** One model call: what it was given and what it returned. */
+export const trainingInferences = pgTable(
+  "training_inferences",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    callKind: text("call_kind").$type<TrainingCallKind>().notNull(),
+    feature: text("feature").notNull(),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    request: jsonb("request").notNull(),
+    response: jsonb("response"),
+    status: text("status").notNull(),
+    errorMessage: text("error_message"),
+    stopReason: text("stop_reason"),
+    grounded: boolean("grounded"),
+    promptTokens: integer("prompt_tokens").notNull().default(0),
+    completionTokens: integer("completion_tokens").notNull().default(0),
+    latencyMs: integer("latency_ms"),
+    requestHash: text("request_hash").notNull(),
+    agentRunId: uuid("agent_run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    applicationId: uuid("application_id").references(() => applications.id, {
+      onDelete: "set null",
+    }),
+    candidateId: uuid("candidate_id").references(() => candidates.id, { onDelete: "cascade" }),
+    usageEventIds: uuid("usage_event_ids")
+      .array()
+      .notNull()
+      .default(sql`'{}'::uuid[]`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("training_inferences_org_created_idx").on(t.orgId, t.createdAt),
+    index("training_inferences_run_idx")
+      .on(t.agentRunId, t.createdAt)
+      .where(sql`${t.agentRunId} is not null`),
+    index("training_inferences_feature_idx").on(t.feature, t.createdAt),
+    index("training_inferences_application_idx")
+      .on(t.applicationId)
+      .where(sql`${t.applicationId} is not null`),
+    index("training_inferences_candidate_idx")
+      .on(t.candidateId)
+      .where(sql`${t.candidateId} is not null`),
+    index("training_inferences_hash_idx").on(t.requestHash),
+  ],
+);
+
+export type TrainingActorKind = "human" | "candidate" | "system" | "eval";
+
+/** A human or real-world judgement on AI work (preference and reward data). */
+export const trainingFeedback = pgTable(
+  "training_feedback",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    source: text("source").notNull(),
+    label: text("label").notNull(),
+    rating: integer("rating"),
+    reason: text("reason"),
+    original: jsonb("original"),
+    corrected: jsonb("corrected"),
+    inferenceId: uuid("inference_id").references(() => trainingInferences.id, {
+      onDelete: "cascade",
+    }),
+    agentRunId: uuid("agent_run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+    agentTaskId: uuid("agent_task_id").references(() => agentTasks.id, { onDelete: "set null" }),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    applicationId: uuid("application_id").references(() => applications.id, {
+      onDelete: "set null",
+    }),
+    candidateId: uuid("candidate_id").references(() => candidates.id, { onDelete: "cascade" }),
+    actorUserId: uuid("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    actorKind: text("actor_kind").$type<TrainingActorKind>().notNull().default("human"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("training_feedback_org_created_idx").on(t.orgId, t.createdAt),
+    index("training_feedback_inference_idx")
+      .on(t.inferenceId)
+      .where(sql`${t.inferenceId} is not null`),
+    index("training_feedback_run_idx")
+      .on(t.agentRunId)
+      .where(sql`${t.agentRunId} is not null`),
+    index("training_feedback_application_idx")
+      .on(t.applicationId)
+      .where(sql`${t.applicationId} is not null`),
+    index("training_feedback_source_idx").on(t.source, t.label),
+  ],
+);
+
+/** An eval scenario's verdict: benchmark and regression data. */
+export const trainingEvalResults = pgTable(
+  "training_eval_results",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    scenario: text("scenario").notNull(),
+    agentType: text("agent_type").notNull(),
+    agentVersion: text("agent_version"),
+    definitionHash: text("definition_hash"),
+    mode: text("mode").notNull(),
+    provider: text("provider"),
+    model: text("model"),
+    passed: boolean("passed").notNull(),
+    checks: jsonb("checks").notNull(),
+    transcript: jsonb("transcript"),
+    tokens: integer("tokens").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("training_eval_results_scenario_idx").on(t.scenario, t.createdAt)],
+);
+
+/* ----------------------------------- assessment timeline, agent pop-ups (0037) */
+
+/** Per organisation; defaults apply when there is no row. */
+export const assessmentSettings = pgTable(
+  "assessment_settings",
+  {
+    orgId: uuid("org_id")
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    dueWorkingDays: integer("due_working_days").notNull().default(3),
+    firstReminderDays: integer("first_reminder_days").notNull().default(2),
+    maxReminders: integer("max_reminders").notNull().default(2),
+    overdueAfterDays: integer("overdue_after_days").notNull().default(2),
+    closeAfterDays: integer("close_after_days").notNull().default(7),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check("assessment_settings_due_working_days_check", sql`${t.dueWorkingDays} between 1 and 15`),
+    check(
+      "assessment_settings_first_reminder_days_check",
+      sql`${t.firstReminderDays} between 1 and 14`,
+    ),
+    check("assessment_settings_max_reminders_check", sql`${t.maxReminders} between 0 and 3`),
+    check(
+      "assessment_settings_overdue_after_days_check",
+      sql`${t.overdueAfterDays} between 0 and 14`,
+    ),
+    check("assessment_settings_close_after_days_check", sql`${t.closeAfterDays} between 2 and 30`),
+  ],
+);
+
+/** Per person: an agent pop-up seen, snoozed or dismissed. */
+export const notificationStates = pgTable(
+  "notification_states",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    notificationId: text("notification_id").notNull(),
+    orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+    seenAt: timestamp("seen_at", { withTimezone: true }),
+    snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.notificationId] })],
+);
+
+/* ------------------------------------------------ compensation details (0038) */
+
+/** A private form link asking the candidate for compensation and availability. */
+export const compensationRequests = pgTable(
+  "compensation_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    token: text("token").notNull(),
+    status: text("status").notNull().default("sent"),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    closesAt: timestamp("closes_at", { withTimezone: true }),
+    remindersSent: integer("reminders_sent").notNull().default(0),
+    lastRemindedAt: timestamp("last_reminded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("compensation_requests_token_key").on(t.token),
+    index("compensation_requests_open_idx")
+      .on(t.orgId, t.status, t.dueAt)
+      .where(sql`${t.status} = 'sent'`),
+    index("compensation_requests_application_idx").on(t.applicationId),
+  ],
+);
+
+export type CompensationSource = "candidate_form" | "screening_call" | "recruiter";
+
+/** What an offer is built on; the latest row per application is in force. HR roles only. */
+export const compensationDetails = pgTable(
+  "compensation_details",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    currency: text("currency").notNull().default("INR"),
+    currentFixed: numeric("current_fixed", { precision: 14, scale: 2 }),
+    currentVariable: numeric("current_variable", { precision: 14, scale: 2 }),
+    expectedCtc: numeric("expected_ctc", { precision: 14, scale: 2 }),
+    noticePeriodDays: integer("notice_period_days"),
+    earliestJoining: date("earliest_joining"),
+    competingOffers: boolean("competing_offers"),
+    competingNote: text("competing_note"),
+    currentLocation: text("current_location"),
+    openToRelocate: boolean("open_to_relocate"),
+    note: text("note"),
+    source: text("source").$type<CompensationSource>().notNull(),
+    enteredBy: uuid("entered_by").references(() => users.id, { onDelete: "set null" }),
+    requestId: uuid("request_id").references(() => compensationRequests.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("compensation_details_application_idx").on(t.applicationId, t.createdAt),
+    check(
+      "compensation_details_notice_period_days_check",
+      sql`${t.noticePeriodDays} between 0 and 365`,
+    ),
+  ],
+);
+
+export type NegotiationStatus =
+  | "open"
+  | "message_sent"
+  | "countered"
+  | "call_requested"
+  | "agreed"
+  | "no_agreement"
+  | "expired"
+  | "cancelled";
+
+/**
+ * What an AI pay call may explain, approved by the person who arranges it
+ * (migration 0058). Amounts are the proposal's split (fixed + variable = the
+ * proposal) and an optional ESOP value; the words carry no amounts.
+ */
+export type NegotiationCallBrief = {
+  fixedCtc?: number | null | undefined;
+  variableCtc?: number | null | undefined;
+  /** ESOPs in words ("ESOPs vesting over four years"), and their value if shared. */
+  esop?: string | null | undefined;
+  esopValue?: number | null | undefined;
+  /** How the pay review works, in words. */
+  review?: string | null | undefined;
+  /** Benefits in words (insurance, leave, learning budget…). */
+  benefits?: string | null | undefined;
+  /** Why join: up to three selling points for this candidate ("why should I choose you?"). */
+  whyJoin?: string[] | undefined;
+  /** Who the role reports to, by job title only ("the Chief Technology Officer") — never a name. */
+  reportsTo?: string | null | undefined;
+  /** How the figure was set, in words (level, internal parity, market benchmark). */
+  rationale?: string | null | undefined;
+  /** Why the team wants this candidate: up to three short points from the person. */
+  whyYou?: string[] | undefined;
+};
+
+/** What an AI negotiation call heard (migration 0058). A person confirms it. */
+export type NegotiationCallOutcome = {
+  callId: string;
+  /** A clear yes to the figure just read back. */
+  agreed: boolean;
+  /** Which approved figure: the proposal or the one improved figure. */
+  which: "proposal" | "improved" | null;
+  agreedCtc: number | null;
+  /** What the candidate said, as heard. */
+  theirWords: string;
+  at: string;
+  /** A different split or terms they asked for at the same total, in their words. */
+  structureAsk?: string | null | undefined;
+  /** The assistant's notes for the team: how they felt, what matters to them, their concerns. */
+  notes?: NegotiationCallNotes | null | undefined;
+};
+
+export type NegotiationCallNotes = {
+  feeling: "positive" | "mixed" | "negative";
+  priorities: string;
+  concerns: string;
+  summary: string;
+};
+
+/** What can make an offer work besides base pay. */
+export type NegotiationLevers = {
+  joiningBonus?: number | null;
+  /** A pay review after this many months, written into the letter. */
+  reviewMonths?: number | null;
+  /** Free text: fixed / variable split, ESOPs, title or scope. */
+  other?: string | null;
+};
+
+/** Agreeing the figure with a candidate before the offer (migration 0039). HR roles only. */
+export const offerNegotiations = pgTable(
+  "offer_negotiations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    status: text("status").$type<NegotiationStatus>().notNull().default("open"),
+    expectedCtc: numeric("expected_ctc", { precision: 14, scale: 2 }),
+    ceiling: numeric("ceiling", { precision: 14, scale: 2 }).notNull(),
+    ceilingApprovedBy: text("ceiling_approved_by").$type<"hr_head" | "president_cbo">().notNull(),
+    proposedCtc: numeric("proposed_ctc", { precision: 14, scale: 2 }).notNull(),
+    levers: jsonb("levers").$type<NegotiationLevers>().notNull().default({}),
+    talkTrack: text("talk_track").notNull().default(""),
+    /** The one improved figure an AI negotiation call may offer (≤ ceiling); null = hold (0058). */
+    callStepCtc: numeric("call_step_ctc", { precision: 14, scale: 2 }),
+    /** What an AI negotiation call heard; pre-fills the confirm form, never sets the status. */
+    callOutcome: jsonb("call_outcome").$type<NegotiationCallOutcome | null>(),
+    /** What the person arranging an AI pay call approved it to explain (0058). */
+    callBrief: jsonb("call_brief").$type<NegotiationCallBrief | null>(),
+    message: text("message"),
+    token: text("token").unique(),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    closesAt: timestamp("closes_at", { withTimezone: true }),
+    /** The candidate's answer: { decision: accept | propose | call, amount?, note?, at }. */
+    answer: jsonb("answer").$type<{
+      decision: "accept" | "propose" | "call";
+      amount?: number | null;
+      note?: string | null;
+      at: string;
+    } | null>(),
+    /** What was agreed (or not): { agreedCtc?, joiningBonus?, joiningDate?, note?, source, by? }. */
+    outcome: jsonb("outcome").$type<{
+      agreedCtc?: number | null;
+      joiningBonus?: number | null;
+      joiningDate?: string | null;
+      note?: string | null;
+      source: "candidate_link" | "call";
+      by?: string | null;
+    } | null>(),
+    runId: uuid("run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("offer_negotiations_app_idx").on(t.applicationId, t.createdAt),
+    check(
+      "offer_negotiations_call_step_check",
+      sql`${t.callStepCtc} is null or (${t.callStepCtc} > ${t.proposedCtc} and ${t.callStepCtc} <= ${t.ceiling})`,
+    ),
+  ],
+);
+
+/* --------------------------------------------------- silent panel agents */
+// docs/silent-panel-agent-plan.md — migration 0060.
+
+/** Per organisation: whether the silent panel agent reads interview calls, and for which rounds. */
+export const panelAgentSettings = pgTable(
+  "panel_agent_settings",
+  {
+    orgId: uuid("org_id")
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(false),
+    levels: integer("levels")
+      .array()
+      .notNull()
+      .default(sql`'{1,2,3}'`),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "panel_agent_settings_levels_check",
+      sql`${t.levels} <@ array[1, 2, 3] and cardinality(${t.levels}) between 1 and 3`,
+    ),
+  ],
+);
+
+/** A round's call transcript, as the meeting provider wrote it (candidate data). */
+export const interviewTranscripts = pgTable(
+  "interview_transcripts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    interviewId: uuid("interview_id")
+      .notNull()
+      .references(() => interviews.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    provider: text("provider").$type<"zoom" | "google_meet" | "teams">().notNull(),
+    segments: jsonb("segments")
+      .$type<import("./json-types/vtt").TranscriptSegment[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    segmentCount: integer("segment_count").notNull().default(0),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("interview_transcripts_interview_key").on(t.interviewId),
+    index("interview_transcripts_org_idx").on(t.orgId),
+    index("interview_transcripts_application_idx").on(t.applicationId),
+    check(
+      "interview_transcripts_provider_check",
+      sql`${t.provider} in ('zoom', 'google_meet', 'teams')`,
+    ),
+  ],
+);
+
+/**
+ * The round's panel agent's own view of the call (migration 0061) — hidden
+ * until the panel has scored. Candidate data: deleted with the application.
+ */
+export const panelAssessments = pgTable(
+  "panel_assessments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    interviewId: uuid("interview_id")
+      .notNull()
+      .references(() => interviews.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id")
+      .notNull()
+      .references(() => applications.id, { onDelete: "cascade" }),
+    level: integer("level").notNull(),
+    agentRunId: uuid("agent_run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+    rating: integer("rating"),
+    verdict: text("verdict").$type<"select" | "hold" | "reject">(),
+    candidate: jsonb("candidate")
+      .$type<import("./json-types/panel-assessment").CandidateView>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    panel: jsonb("panel")
+      .$type<import("./json-types/panel-assessment").PanelView>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    injectionSuspected: boolean("injection_suspected").notNull().default(false),
+    assessedAt: timestamp("assessed_at", { withTimezone: true }),
+    summarySentAt: timestamp("summary_sent_at", { withTimezone: true }),
+    /** Compared with the panel once all have scored (migration 0062). */
+    outcome: text("outcome").$type<"agree" | "partial" | "disagree">(),
+    panelRating: numeric("panel_rating", { precision: 3, scale: 2 }),
+    panelVerdict: text("panel_verdict").$type<"select" | "hold" | "reject">(),
+    /** The candidate's move was held for the HR head. */
+    held: boolean("held").notNull().default(false),
+    reconciledAt: timestamp("reconciled_at", { withTimezone: true }),
+    reviewDecision: text("review_decision").$type<
+      "go_with_panel" | "confirmed" | "held" | "rejected"
+    >(),
+    reviewNote: text("review_note"),
+    reviewedBy: uuid("reviewed_by").references(() => users.id, { onDelete: "set null" }),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("panel_assessments_interview_key").on(t.interviewId),
+    index("panel_assessments_review_open_idx")
+      .on(t.orgId, t.reconciledAt)
+      .where(sql`${t.outcome} in ('partial', 'disagree') and ${t.reviewDecision} is null`),
+    check(
+      "panel_assessments_outcome_check",
+      sql`${t.outcome} is null or ${t.outcome} in ('agree', 'partial', 'disagree')`,
+    ),
+    check(
+      "panel_assessments_panel_verdict_check",
+      sql`${t.panelVerdict} is null or ${t.panelVerdict} in ('select', 'hold', 'reject')`,
+    ),
+    check(
+      "panel_assessments_review_decision_check",
+      sql`${t.reviewDecision} is null or ${t.reviewDecision} in ('go_with_panel', 'confirmed', 'held', 'rejected')`,
+    ),
+    index("panel_assessments_org_idx").on(t.orgId),
+    index("panel_assessments_application_idx").on(t.applicationId),
+    check("panel_assessments_level_check", sql`${t.level} between 1 and 3`),
+    check(
+      "panel_assessments_rating_check",
+      sql`${t.rating} is null or ${t.rating} between 1 and 5`,
+    ),
+    check(
+      "panel_assessments_verdict_check",
+      sql`${t.verdict} is null or ${t.verdict} in ('select', 'hold', 'reject')`,
+    ),
+  ],
+);
+
+/* ------------------------------------------------------- phone screening */
+// docs/voice-screening-agent.md — migration 0046.
+
+/** Per organisation: whether candidates are screened by phone, and how. */
+export const phoneScreeningSettings = pgTable(
+  "phone_screening_settings",
+  {
+    orgId: uuid("org_id")
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(false),
+    /** The name the AI assistant introduces itself with. */
+    assistantName: text("assistant_name").notNull().default("Saranya"),
+    /** Calling window, minutes after midnight in the organisation's time zone. */
+    windowStartMinute: integer("window_start_minute").notNull().default(600),
+    windowEndMinute: integer("window_end_minute").notNull().default(1140),
+    /** ISO weekdays it calls on (1 = Monday … 7 = Sunday). */
+    callDays: integer("call_days")
+      .array()
+      .notNull()
+      .default(sql`'{1,2,3,4,5,6}'`),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    /** The screening call's planned length (0072: 3 by default; the app uses 2–5). */
+    maxMinutes: integer("max_minutes").notNull().default(3),
+    /** Times a candidate may move the call to another time; then alternatives are offered. */
+    maxReschedules: integer("max_reschedules").notNull().default(2),
+    /** Scheduling calls (a follow-up to an unanswered interview-time e-mail) switched on. */
+    schedulingEnabled: boolean("scheduling_enabled").notNull().default(false),
+    /** Hours an e-mailed interview-time offer waits unanswered before a scheduling call. */
+    /** Retired: voice goes first now (no e-mail wait). Kept for old rows; not read. */
+    schedulingWaitHours: integer("scheduling_wait_hours").notNull().default(24),
+    /** Pay negotiation calls (docs/negotiator-voice-agent.md) switched on (0058). */
+    negotiationEnabled: boolean("negotiation_enabled").notNull().default(false),
+    /** The assistant's voice (one of the voice service's prebuilt voices). */
+    voice: text("voice").notNull().default("Kore"),
+    /** What the assistant tells candidates happens next (≤ 300 characters). */
+    nextStepsText: text("next_steps_text"),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "phone_screening_settings_assistant_name_check",
+      sql`char_length(${t.assistantName}) between 2 and 40`,
+    ),
+    check(
+      "phone_screening_settings_window_start_minute_check",
+      sql`${t.windowStartMinute} between 0 and 1439`,
+    ),
+    check(
+      "phone_screening_settings_window_end_minute_check",
+      sql`${t.windowEndMinute} between 1 and 1440`,
+    ),
+    check(
+      "phone_screening_settings_window_check",
+      sql`${t.windowEndMinute} > ${t.windowStartMinute}`,
+    ),
+    check("phone_screening_settings_max_attempts_check", sql`${t.maxAttempts} between 1 and 5`),
+    check("phone_screening_settings_max_minutes_check", sql`${t.maxMinutes} between 2 and 30`),
+    check(
+      "phone_screening_settings_scheduling_wait_check",
+      sql`${t.schedulingWaitHours} between 2 and 96`,
+    ),
+    check(
+      "phone_screening_settings_max_reschedules_check",
+      sql`${t.maxReschedules} between 0 and 5`,
+    ),
+    check(
+      "phone_screening_settings_next_steps_check",
+      sql`${t.nextStepsText} is null or char_length(${t.nextStepsText}) <= 300`,
+    ),
+  ],
+);
+
+export const SCREENING_CALL_STATUSES = [
+  "requested",
+  "approved",
+  "dialling",
+  "in_progress",
+  "completed",
+  "callback",
+  "no_answer",
+  "failed",
+  "consent_declined",
+  "cancelled",
+  "fell_back",
+] as const;
+export type ScreeningCallStatus = (typeof SCREENING_CALL_STATUSES)[number];
+
+/** One line of a call transcript. */
+export type ScreeningCallTurn = {
+  who: "caller" | "ai";
+  text: string;
+  at: string;
+  interrupted?: boolean;
+};
+
+/** Practical details the candidate gave on the call (pay is kept elsewhere, HR-only). */
+export type ScreeningCallDetails = {
+  currentTitle?: string;
+  currentCompany?: string;
+  totalExperienceYears?: number;
+  currentLocation?: string;
+  openToRelocate?: boolean;
+  noticePeriodDays?: number;
+  earliestJoining?: string;
+  /** Anything else the candidate said the hiring team should know, in their words. */
+  note?: string;
+  /**
+   * Where each required detail stands at the end of the call — never the figures
+   * (pay is kept on the HR-only record): recorded, declined (their words noted),
+   * not_working (current pay only) or missing.
+   */
+  required?: Record<
+    "joining_date" | "current_pay" | "expected_pay",
+    "recorded" | "declined" | "not_working" | "not_allowed" | "missing"
+  >;
+};
+
+/** What the candidate said for one kit question, as the call agent recorded it. */
+export type VoiceCallPurpose = "screening" | "scheduling" | "negotiation";
+
+export type ScreeningCallAnswer = {
+  question_id: string;
+  summary: string;
+  at: string;
+  /** The candidate chose not to answer (asked, never graded). */
+  declined?: boolean;
+  /** They only agreed with something the assistant said: graded as such, never counted as answered. */
+  prompted?: boolean;
+};
+
+/**
+ * One phone screening of one application by the Screening call agent. The
+ * number is never copied here (read from the candidate when dialling); the
+ * transcript is kept only once the candidate consented.
+ */
+export const screeningCalls = pgTable(
+  "screening_calls",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "cascade" }),
+    applicationId: uuid("application_id").references(() => applications.id, {
+      onDelete: "set null",
+    }),
+    requisitionId: uuid("requisition_id").references(() => requisitions.id, {
+      onDelete: "set null",
+    }),
+    kitId: uuid("kit_id").references(() => screeningKits.id, { onDelete: "set null" }),
+    /** The Screening agent run that asked for the call. */
+    requestedRunId: uuid("requested_run_id").references(() => agentRuns.id, {
+      onDelete: "set null",
+    }),
+    /** The call's own run (Screening call agent). */
+    agentRunId: uuid("agent_run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+    requestedBy: uuid("requested_by").references(() => users.id, { onDelete: "set null" }),
+    status: text("status").$type<ScreeningCallStatus>().notNull().default("requested"),
+    attempt: integer("attempt").notNull().default(0),
+    /** The candidate agreed this time on an earlier call (an expected call, not a cold one). */
+    bookedByCandidate: boolean("booked_by_candidate").notNull().default(false),
+    /** Times the candidate moved this call to another time. */
+    reschedules: integer("reschedules").notNull().default(0),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    callbackAt: timestamp("callback_at", { withTimezone: true }),
+    phoneLast4: text("phone_last4"),
+    consentAt: timestamp("consent_at", { withTimezone: true }),
+    /** What the candidate said when agreeing or declining, as the assistant heard it. */
+    consentWords: text("consent_words"),
+    language: text("language"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    endReason: text("end_reason"),
+    durationS: integer("duration_s"),
+    transcript: jsonb("transcript")
+      .$type<ScreeningCallTurn[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    answers: jsonb("answers")
+      .$type<ScreeningCallAnswer[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Current role, experience, location, availability as said on the call — never pay. */
+    details: jsonb("details")
+      .$type<ScreeningCallDetails>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    screeningRunId: uuid("screening_run_id").references(() => screeningRuns.id, {
+      onDelete: "set null",
+    }),
+    /** screening = the AI screening call; scheduling = a call to pick an interview time. */
+    purpose: text("purpose").$type<VoiceCallPurpose>().notNull().default("screening"),
+    /** Scheduling: the e-mailed interview-time offer this call follows up. */
+    slotOfferId: uuid("slot_offer_id").references(() => interviewSlotOffers.id, {
+      onDelete: "set null",
+    }),
+    /** Scheduling: up to three extra start times (ISO) checked free when the call was asked for. */
+    alternates: jsonb("alternates")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Negotiation: the pay discussion this call follows up (0058). */
+    negotiationId: uuid("negotiation_id").references(() => offerNegotiations.id, {
+      onDelete: "set null",
+    }),
+    /** Turn-taking and audio stats of the answered call (0071) — reviewed by the Voice Guard. */
+    callStats: jsonb("call_stats").$type<CallStats>(),
+    /** The instructions and facts the answered call ran with (0071) — the Voice Guard's reference. */
+    brief: text("brief"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "screening_calls_status_check",
+      sql`${t.status} in ('requested', 'approved', 'dialling', 'in_progress', 'completed', 'callback', 'no_answer', 'failed', 'consent_declined', 'cancelled', 'fell_back')`,
+    ),
+    index("screening_calls_due_idx").on(t.orgId, t.status, t.dueAt),
+    index("screening_calls_application_idx").on(t.applicationId, t.createdAt),
+    index("screening_calls_candidate_idx").on(t.candidateId),
+    index("screening_calls_slot_offer_idx").on(t.slotOfferId),
+    check(
+      "screening_calls_purpose_check",
+      sql`${t.purpose} in ('screening', 'scheduling', 'negotiation')`,
+    ),
+    check(
+      "screening_calls_alternates_check",
+      sql`jsonb_typeof(${t.alternates}) = 'array' and jsonb_array_length(${t.alternates}) <= 3`,
+    ),
+    check(
+      "screening_calls_scheduling_offer_check",
+      sql`${t.purpose} <> 'scheduling' or ${t.slotOfferId} is not null`,
+    ),
+    index("screening_calls_negotiation_idx").on(t.negotiationId),
+    check(
+      "screening_calls_negotiation_check",
+      sql`${t.purpose} <> 'negotiation' or ${t.negotiationId} is not null`,
+    ),
+  ],
+);
+
+/* ------------------------------------------------------- voice guard (0071) */
+
+/** How a call went, measured on the line (src/server/voice/call-stats.ts). */
+export type CallStats = {
+  v: 1;
+  /** The language the voice session ran in (e.g. en-IN). */
+  languageCode: string;
+  /** ms from the line being answered to the candidate's first speech / the assistant's first audio. */
+  firstCallerMs: number | null;
+  firstAiMs: number | null;
+  /** The assistant spoke before the candidate said hello. */
+  aiSpokeFirst: boolean;
+  /** Candidate speech segments (VAD). */
+  callerSegments: number;
+  /** The assistant's utterances (audio after a pause). */
+  aiUtterances: number;
+  /** The assistant started speaking while the candidate was still talking. */
+  talkOver: number;
+  /** The candidate spoke over the assistant and it stopped. */
+  bargeIns: number;
+  /** ms from the end of the candidate's speech to the assistant's reply. */
+  replyMs: { count: number; p50: number | null; p90: number | null; max: number | null };
+  /** Replies slower than 3 s. */
+  slowReplies: number;
+  /** How smoothly the assistant's audio went out (the SIP line). */
+  audio: { frames: number; gaps: number; lateTicks: number; maxLateMs: number } | null;
+  /**
+   * Times the turn manager had to cue a silent assistant (src/server/voice/turns.ts):
+   * after a tool result, after a statement, after the candidate stopped, or to record
+   * something it said it noted. Absent on calls before it.
+   */
+  cues?: {
+    after_tool: number;
+    mid_turn: number;
+    reply: number;
+    unrecorded_note: number;
+    /** The candidate talked past the limit and it was told to move on (from screening 1.6.0). */
+    long_answer?: number;
+    /** Told to close as the planned length ran out (from screening 1.8.0). */
+    close?: number;
+  };
+};
+
+export type CallReviewStatus = "due" | "reviewing" | "done" | "failed";
+export type CallReviewVerdict = "pass" | "attention" | "breach";
+export type CallReviewSeverity = "critical" | "high" | "low";
+/** What the Voice Guard checks on every call (src/server/voice/guard/checks.ts). */
+export type CallReviewCheckId =
+  | "disclosure"
+  | "required_details"
+  | "answer_clues"
+  | "fell_for_questions"
+  | "beyond_scope"
+  | "repetition"
+  | "read_back"
+  | "commitments"
+  | "agreements"
+  | "record_accuracy"
+  | "charter"
+  | "call_steps"
+  | "turn_taking"
+  | "transcription";
+export type CallReviewCheck = {
+  check: CallReviewCheckId;
+  verdict: "pass" | "breach" | "not_applicable";
+  note?: string;
+};
+export type CallReviewFinding = {
+  check: CallReviewCheckId;
+  severity: CallReviewSeverity;
+  /** One plain sentence: what went wrong. */
+  summary: string;
+  /** The turns it rests on (index into the call's transcript) and the words, quoted. */
+  evidence: { turn: number | null; quote: string }[];
+  /** code: measured or checked by the system; review: the Voice Guard's reading. */
+  source: "code" | "review";
+};
+
+/**
+ * One review per answered AI phone call (0071): the Voice Guard's verdicts
+ * and findings, for a person. Observe-and-report only — it changes nothing on
+ * the call, the candidate or the hiring decision.
+ */
+export const callReviews = pgTable(
+  "call_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    callId: uuid("call_id")
+      .notNull()
+      .references(() => screeningCalls.id, { onDelete: "cascade" }),
+    purpose: text("purpose").$type<VoiceCallPurpose>().notNull(),
+    status: text("status").$type<CallReviewStatus>().notNull().default("due"),
+    /** full: transcript kept (consented); timing_only: only the call's stats. */
+    scope: text("scope").$type<"full" | "timing_only">().notNull().default("full"),
+    agentRunId: uuid("agent_run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+    verdict: text("verdict").$type<CallReviewVerdict>(),
+    qualityScore: integer("quality_score"),
+    summary: text("summary"),
+    checks: jsonb("checks")
+      .$type<CallReviewCheck[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    findings: jsonb("findings")
+      .$type<CallReviewFinding[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    breaches: integer("breaches").notNull().default(0),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    acknowledgedBy: uuid("acknowledged_by").references(() => users.id, { onDelete: "set null" }),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+    /** The person's reading of the review: the findings hold, or they do not. */
+    ackOutcome: text("ack_outcome").$type<"confirmed" | "disputed">(),
+    ackNote: text("ack_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("call_reviews_call_key").on(t.callId),
+    index("call_reviews_org_status_idx").on(t.orgId, t.status, t.updatedAt),
+    index("call_reviews_org_created_idx").on(t.orgId, t.createdAt),
+    check("call_reviews_status_check", sql`${t.status} in ('due', 'reviewing', 'done', 'failed')`),
+    check("call_reviews_scope_check", sql`${t.scope} in ('full', 'timing_only')`),
+    check(
+      "call_reviews_verdict_check",
+      sql`${t.verdict} is null or ${t.verdict} in ('pass', 'attention', 'breach')`,
+    ),
+    check(
+      "call_reviews_quality_check",
+      sql`${t.qualityScore} is null or ${t.qualityScore} between 1 and 5`,
+    ),
+    check(
+      "call_reviews_ack_check",
+      sql`${t.ackOutcome} is null or ${t.ackOutcome} in ('confirmed', 'disputed')`,
+    ),
+    check("call_reviews_checks_array", sql`jsonb_typeof(${t.checks}) = 'array'`),
+    check("call_reviews_findings_array", sql`jsonb_typeof(${t.findings}) = 'array'`),
+  ],
+);
+
+/**
+ * The voice worker's heartbeat (one row per worker process). The web app treats
+ * a recent beat as "a phone line is available", so only the worker holds the
+ * PBX credentials.
+ */
+export const voiceWorkerHeartbeat = pgTable("voice_worker_heartbeat", {
+  workerId: text("worker_id").primaryKey(),
+  lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
+  maxConcurrent: integer("max_concurrent").notNull().default(1),
+  callsInProgress: integer("calls_in_progress").notNull().default(0),
+});
+
+/* --------------------------------------------- service SLOs (0053) */
+
+/**
+ * Per-minute request SLI counts, one row per app instance and route group
+ * (src/server/http-metrics.ts → src/server/slo.server.ts). Low-cardinality by
+ * design: no paths, ids, orgs or users. Kept 35 days.
+ */
+export const serviceRequestMinutes = pgTable(
+  "service_request_minutes",
+  {
+    minute: timestamp("minute", { withTimezone: true }).notNull(),
+    instanceId: text("instance_id").notNull(),
+    /** server_fn | page | api_public | api_auth */
+    routeGroup: text("route_group").notNull(),
+    requests: integer("requests").notNull().default(0),
+    /** Answered with a 5xx status. */
+    errors: integer("errors").notNull().default(0),
+    /** Slower than LATENCY_THRESHOLD_MS (src/server/slo.ts). */
+    slow: integer("slow").notNull().default(0),
+    /** Non-cumulative counts per DURATION_BUCKETS bound, last entry +Inf. */
+    latency: integer("latency")
+      .array()
+      .notNull()
+      .default(sql`'{}'::integer[]`),
+  },
+  (t) => [
+    primaryKey({ columns: [t.minute, t.instanceId, t.routeGroup] }),
+    index("service_request_minutes_minute_idx").on(t.minute),
+  ],
+);
+
+/** Burn-rate alerts on the platform SLOs (src/server/slo.ts); one open row per SLO. */
+export const sloAlerts = pgTable(
+  "slo_alerts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    slo: text("slo").notNull(),
+    /** serious | critical */
+    severity: text("severity").notNull(),
+    /** open | resolved */
+    status: text("status").notNull().default("open"),
+    burnRate: doublePrecision("burn_rate").notNull(),
+    windowMinutes: integer("window_minutes").notNull(),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    /** When this severity was last pushed to the alert channels. */
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("slo_alerts_open_uq")
+      .on(t.slo)
+      .where(sql`status = 'open'`),
+    index("slo_alerts_opened_idx").on(t.openedAt),
+  ],
+);
+
+/**
+ * The organisation profile (docs/org-context-agent-plan.md): numbered
+ * versions written by a person (later the Organisation context agent) and
+ * approved by the HR head or the owner. Approved versions never change.
+ * Items never hold pay figures or staff names (refused in code).
+ */
+export type OrgProfileItemRow = {
+  id: string;
+  text: string;
+  /** candidate: may be said to or written for candidates; internal: agents' internal work only. */
+  visibility: "candidate" | "internal";
+  /** Where it came from: a person typed it (O0), the website or a document (later). */
+  source: {
+    kind: "person" | "website" | "document" | "conversation";
+    ref?: string;
+    quote?: string;
+  };
+};
+export type OrgProfileVersionStatus =
+  "draft" | "pending" | "changes_requested" | "approved" | "declined" | "superseded";
+
+export const orgProfileVersions = pgTable(
+  "org_profile_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    status: text("status").$type<OrgProfileVersionStatus>().notNull().default("draft"),
+    /** { [sectionKey]: OrgProfileItemRow[] } */
+    sections: jsonb("sections")
+      .$type<Record<string, OrgProfileItemRow[]>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    injectionFlagged: boolean("injection_flagged").notNull().default(false),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    agentRunId: uuid("agent_run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    submittedBy: uuid("submitted_by").references(() => users.id, { onDelete: "set null" }),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+  },
+  (t) => [
+    check(
+      "org_profile_versions_status_check",
+      sql`${t.status} in ('draft', 'pending', 'changes_requested', 'approved', 'declined', 'superseded')`,
+    ),
+    uniqueIndex("org_profile_versions_org_version_key").on(t.orgId, t.version),
+    uniqueIndex("org_profile_versions_one_open_key")
+      .on(t.orgId)
+      .where(sql`${t.status} in ('draft', 'pending', 'changes_requested')`),
+  ],
+);
+
+/** One row per organisation: the approved version agents read, and the hard gate. */
+export const orgProfiles = pgTable("org_profiles", {
+  orgId: uuid("org_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  currentVersionId: uuid("current_version_id").references(() => orgProfileVersions.id, {
+    onDelete: "set null",
+  }),
+  /** No requisition is raised until a version is approved. */
+  requireProfile: boolean("require_profile").notNull().default(false),
+  /**
+   * The organisation's own website (migration 0055): https, and matching the
+   * registered e-mail domain unless an owner confirmed it (audited). Only this
+   * host is ever fetched.
+   */
+  websiteUrl: text("website_url"),
+  websiteConfirmedBy: uuid("website_confirmed_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  websiteConfirmedAt: timestamp("website_confirmed_at", { withTimezone: true }),
+  /** Outcome of the last website read (ok | unchanged | failed) and when it ran. */
+  lastRereadAt: timestamp("last_reread_at", { withTimezone: true }),
+  lastRereadStatus: text("last_reread_status"),
+  rereadFailures: integer("reread_failures").notNull().default(0),
+  /** Dispatch guard for the monthly re-read sweep. */
+  nextRereadAt: timestamp("next_reread_at", { withTimezone: true }),
+  updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* ------------------------------------------------ org context sources (0055) */
+
+export type OrgContextSourceKind = "website_page" | "document";
+
+/**
+ * One row per website page or uploaded document the Organisation context
+ * agent read (docs/org-context-agent-plan.md §3). `text` holds the extracted
+ * (or OCR-recognised) text every profile item must quote; items are dropped
+ * in code when their quote is not in it. A page that trips the injection
+ * tripwire contributes nothing until a person accepts it.
+ */
+export const orgContextSources = pgTable(
+  "org_context_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** website_page | document */
+    kind: text("kind").$type<OrgContextSourceKind>().notNull(),
+    /** Website pages: the final URL after redirects (same host as the saved website). */
+    url: text("url"),
+    fileKey: text("file_key"),
+    fileName: text("file_name"),
+    mime: text("mime"),
+    bytes: integer("bytes"),
+    /** How many pages were recognised through the gateway (0 = plain text extraction). */
+    ocrPages: integer("ocr_pages").notNull().default(0),
+    /** SHA-256 of the fetched page bytes or uploaded file; unchanged hash → no re-extraction. */
+    sha256: text("sha256").notNull(),
+    text: text("text").notNull().default(""),
+    injectionFlagged: boolean("injection_flagged").notNull().default(false),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Soft delete: items sourced from this row render "(source removed)" until the next approval. */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: uuid("deleted_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => [
+    check("org_context_sources_kind_check", sql`${t.kind} in ('website_page', 'document')`),
+    // A re-read upserts the page instead of adding a duplicate row.
+    uniqueIndex("org_context_sources_page_key")
+      .on(t.orgId, t.url)
+      .where(sql`${t.kind} = 'website_page' and ${t.deletedAt} is null`),
+    index("org_context_sources_org_idx").on(t.orgId, t.kind, t.createdAt),
+  ],
+);
+
+/* ------------------------------------------------------------ pay terms */
+// docs/pay-terms-plan.md — migration 0073. Conventions only: no pay figures
+// live in a zone; figures live in pay_figures with their currency and basis.
+
+/** One place with one way of paying (organisation-defined, versioned via the org agent). */
+export const payZones = pgTable(
+  "pay_zones",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    countries: text("countries").array().notNull(),
+    cities: text("cities")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    currency: text("currency").notNull(),
+    payBasis: text("pay_basis").notNull().default("annual"),
+    paymentsPerYear: integer("payments_per_year").notNull().default(12),
+    includes: text("includes")
+      .array()
+      .notNull()
+      .default(sql`'{base}'::text[]`),
+    hoursPerWeek: numeric("hours_per_week", { precision: 5, scale: 2 }).notNull().default("40"),
+    workingDaysPerYear: integer("working_days_per_year").notNull().default(250),
+    kinds: text("kinds")
+      .array()
+      .notNull()
+      .default(sql`'{permanent}'::text[]`),
+    contractTypes: text("contract_types")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    entity: text("entity"),
+    geoFactor: numeric("geo_factor", { precision: 6, scale: 3 }),
+    /** Pooling region this zone belongs to (EMEA, South Europe…). */
+    regionId: uuid("region_id").references(() => poolingRegions.id, { onDelete: "set null" }),
+    updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("pay_zones_org_name_key").on(t.orgId, t.name),
+    check("pay_zones_currency_check", sql`${t.currency} ~ '^[A-Z]{3}$'`),
+    check("pay_zones_basis_check", sql`${t.payBasis} in ('annual','monthly','daily','hourly')`),
+    check("pay_zones_payments_check", sql`${t.paymentsPerYear} between 12 and 16`),
+  ],
+);
+
+/** Named groups of pay zones a role's candidate pool is drawn from. */
+export const poolingRegions = pgTable(
+  "pooling_regions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** same_zone | same_region | entity_countries | global_remote */
+    defaultRule: text("default_rule").notNull().default("same_region"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("pooling_regions_org_name_key").on(t.orgId, t.name),
+    check(
+      "pooling_regions_rule_check",
+      sql`${t.defaultRule} in ('same_zone','same_region','entity_countries','global_remote')`,
+    ),
+  ],
+);
+
+/** Dated exchange rates the organisation uses (1 from = rate to). */
+export const exchangeRates = pgTable(
+  "exchange_rates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    fromCurrency: text("from_currency").notNull(),
+    toCurrency: text("to_currency").notNull(),
+    rate: numeric("rate", { precision: 20, scale: 10 }).notNull(),
+    source: text("source").notNull(),
+    rateAt: timestamp("rate_at", { withTimezone: true }).notNull(),
+    enteredBy: uuid("entered_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("exchange_rates_org_pair_idx").on(t.orgId, t.fromCurrency, t.toCurrency, t.rateAt),
+    check("exchange_rates_rate_check", sql`${t.rate} > 0`),
+    check(
+      "exchange_rates_codes_check",
+      sql`${t.fromCurrency} ~ '^[A-Z]{3}$' and ${t.toCurrency} ~ '^[A-Z]{3}$'`,
+    ),
+  ],
+);
+
+/**
+ * Every pay figure as said, with its currency and basis, and the derived pay
+ * and reporting values with the rate they used. HR-only, like
+ * compensation_details. Originals are never edited; a re-derivation is a new row.
+ */
+export const payFigures = pgTable(
+  "pay_figures",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** requisition | application | offer */
+    ownerType: text("owner_type").notNull(),
+    ownerId: uuid("owner_id").notNull(),
+    /** band_min | band_max | current_fixed | current_variable | expected | offer */
+    figure: text("figure").notNull(),
+    amount: numeric("amount", { precision: 16, scale: 2 }).notNull(),
+    currency: text("currency").notNull(),
+    payBasis: text("pay_basis").notNull(),
+    gross: boolean("gross"),
+    paymentsPerYear: integer("payments_per_year"),
+    includes: text("includes").array(),
+    saidAs: text("said_as"),
+    currencyAssumed: boolean("currency_assumed").notNull().default(false),
+    /** cv | form | screening_call | negotiation_call | ta | requisition | offer */
+    source: text("source").notNull(),
+    payAmount: numeric("pay_amount", { precision: 16, scale: 2 }),
+    payCurrency: text("pay_currency"),
+    reportingAmount: numeric("reporting_amount", { precision: 16, scale: 2 }),
+    reportingCurrency: text("reporting_currency"),
+    rate: jsonb("rate").$type<{ rate: number; source: string; at: string } | null>(),
+    /** Why it could not be derived (net_figure, stale_rate…), when it could not. */
+    refusal: text("refusal"),
+    candidateId: uuid("candidate_id").references(() => candidates.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("pay_figures_owner_idx").on(t.orgId, t.ownerType, t.ownerId, t.figure, t.createdAt),
+    check("pay_figures_currency_check", sql`${t.currency} ~ '^[A-Z]{3}$'`),
+    check("pay_figures_basis_check", sql`${t.payBasis} in ('annual','monthly','daily','hourly')`),
+    check("pay_figures_owner_check", sql`${t.ownerType} in ('requisition','application','offer')`),
+    check("pay_figures_amount_check", sql`${t.amount} >= 0`),
+  ],
+);
+
+/**
+ * Pay conventions the organisation agent proposed (0074): applied to pay_zones,
+ * pooling_regions and the organisation's defaults only when the HR head approves.
+ */
+export const payConventionDrafts = pgTable(
+  "pay_convention_drafts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("pending"),
+    // Temporary (Phase 2): pay conventions move to the offers package (map
+    // §10), not db/json-types — this $type reference points back at the app
+    // until that package lands and the reference is repointed.
+    conventions: jsonb("conventions")
+      .$type<import("../../../../apps/web/src/lib/pay-settings").PayConventions>()
+      .notNull(),
+    summary: text("summary").notNull().default(""),
+    agentRunId: uuid("agent_run_id"),
+    proposedBy: uuid("proposed_by").references(() => users.id, { onDelete: "set null" }),
+    decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("pay_convention_drafts_org_idx").on(t.orgId, t.status, t.createdAt),
+    check(
+      "pay_convention_drafts_status_check",
+      sql`${t.status} in ('pending','approved','sent_back','declined','superseded')`,
+    ),
+  ],
+);
+
+/* ------------------------------------------------------- labour policy */
+// docs/labour-policy-agent-plan.md — migration 0076.
+
+export const POLICY_AREAS = [
+  "notice",
+  "probation",
+  "minimum_wage",
+  "hours",
+  "contracts",
+  "pay_transparency",
+  "questions",
+  "data",
+  "ai_and_recording",
+  "mandatory_pay",
+  "leave",
+  "other",
+] as const;
+export type PolicyArea = (typeof POLICY_AREAS)[number];
+
+/** Official sources the Labour law & policy agent may read — nothing else is ever fetched. */
+export const policySources = pgTable(
+  "policy_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    zoneId: uuid("zone_id").references(() => payZones.id, { onDelete: "cascade" }),
+    /** ISO alpha-2, or null for global / regional sources. */
+    country: text("country"),
+    level: text("level").notNull().default("country"),
+    label: text("label").notNull(),
+    url: text("url").notNull(),
+    host: text("host").notNull(),
+    active: boolean("active").notNull().default(true),
+    seeded: boolean("seeded").notNull().default(false),
+    addedBy: uuid("added_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("policy_sources_org_url_key").on(t.orgId, t.url),
+    check(
+      "policy_sources_level_check",
+      sql`${t.level} in ('global','regional','country','state','domain','organisation')`,
+    ),
+    check("policy_sources_url_check", sql`${t.url} ~ '^https://'`),
+  ],
+);
+
+/** Each read of a source: unchanged reads cost no AI call. */
+export const policyReads = pgTable(
+  "policy_reads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    sourceId: uuid("source_id")
+      .notNull()
+      .references(() => policySources.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    hash: text("hash"),
+    text: text("text"),
+    error: text("error"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+    agentRunId: uuid("agent_run_id"),
+    /** A document (PDF) listed on the source that was read; null for the source page itself (0078). */
+    documentUrl: text("document_url"),
+  },
+  (t) => [
+    index("policy_reads_source_idx").on(t.orgId, t.sourceId, t.fetchedAt),
+    index("policy_reads_document_idx").on(t.orgId, t.sourceId, t.documentUrl, t.fetchedAt),
+    check(
+      "policy_reads_status_check",
+      sql`${t.status} in ('changed','unchanged','first','failed')`,
+    ),
+  ],
+);
+
+/** A change found on a source, with its exact quote; the HR head approves it into the rules. */
+export const policyFindings = pgTable(
+  "policy_findings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    sourceId: uuid("source_id").references(() => policySources.id, { onDelete: "set null" }),
+    zoneId: uuid("zone_id").references(() => payZones.id, { onDelete: "set null" }),
+    url: text("url").notNull(),
+    quote: text("quote").notNull(),
+    area: text("area").$type<PolicyArea>().notNull(),
+    summary: text("summary").notNull(),
+    /** What the organisation's rules should now say (applies once approved). */
+    rule: text("rule").notNull(),
+    /** What it changes in hiring: open roles, kits, calls, offers. */
+    impact: text("impact").notNull().default(""),
+    effectiveDate: date("effective_date"),
+    status: text("status").notNull().default("new"),
+    agentRunId: uuid("agent_run_id"),
+    /** The briefing this provision belongs to, decided with it (0079). */
+    briefingId: uuid("briefing_id").references(() => policyBriefings.id, { onDelete: "set null" }),
+    decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("policy_findings_org_idx").on(t.orgId, t.status, t.createdAt),
+    uniqueIndex("policy_findings_source_quote_key").on(t.orgId, t.sourceId, sql`md5(${t.quote})`),
+    check(
+      "policy_findings_status_check",
+      sql`${t.status} in ('new','proposed','approved','rejected','dismissed','superseded')`,
+    ),
+    check(
+      "policy_findings_area_check",
+      sql`${t.area} in ('notice','probation','minimum_wage','hours','contracts','pay_transparency','questions','data','ai_and_recording','mandatory_pay','leave','other')`,
+    ),
+  ],
+);
+
+export type BriefingTimelineItem = {
+  date: string;
+  development: string;
+  url: string;
+  title: string;
+};
+export type BriefingProvision = {
+  ref: string;
+  summary: string;
+  quote: string;
+  url: string;
+  area: string;
+  rule: string;
+  impact: string;
+  findingId: string;
+};
+
+/** Per law: a verified timeline, the key provisions (each a finding) and what it means for HR (0079). */
+export const policyBriefings = pgTable(
+  "policy_briefings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    topic: text("topic").notNull(),
+    hrImpact: text("hr_impact").notNull().default(""),
+    timeline: jsonb("timeline")
+      .$type<BriefingTimelineItem[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    provisions: jsonb("provisions")
+      .$type<BriefingProvision[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    status: text("status").notNull().default("pending"),
+    agentRunId: uuid("agent_run_id"),
+    decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("policy_briefings_org_idx").on(t.orgId, t.status, t.createdAt),
+    check(
+      "policy_briefings_status_check",
+      sql`${t.status} in ('pending','approved','rejected','superseded')`,
+    ),
+  ],
+);

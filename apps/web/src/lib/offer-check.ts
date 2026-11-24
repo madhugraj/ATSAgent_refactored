@@ -1,34 +1,10 @@
-/**
- * The offer check's shape and verdict (docs/labour-policy-agent-plan.md, L3).
- * Pure; shared by server and client.
- */
-import { z } from "zod";
+// SHIM: remove in Phase 8 — the offer check's JSON shape moved to
+// @ats/db/server (packages/db/src/server/json-types/offer-check.ts);
+// overallVerdict stays until the offers package lands (map §4 L3).
+export { OFFER_CHECK_VERDICTS, OfferCheckItem } from "@ats/db/server";
+export type { OfferCheckVerdict, OfferCheck } from "@ats/db/server";
 
-export const OFFER_CHECK_VERDICTS = ["pass", "fix_needed", "needs_counsel"] as const;
-export type OfferCheckVerdict = (typeof OFFER_CHECK_VERDICTS)[number];
-
-export const OfferCheckItem = z.object({
-  /** What was checked, in plain words ("Probation length", "Pay floor"). */
-  check: z.string().min(2).max(120),
-  verdict: z.enum(OFFER_CHECK_VERDICTS),
-  /** Why, in plain words. */
-  detail: z.string().min(2).max(800),
-  /** The approved rule it rests on, when it rests on one. */
-  ruleId: z.string().uuid().nullable().default(null),
-  /** For a fix: wording the letter could use instead. */
-  suggestion: z.string().max(800).nullable().default(null),
-});
-export type OfferCheckItem = z.infer<typeof OfferCheckItem>;
-
-export type OfferCheck = {
-  at: string;
-  verdict: OfferCheckVerdict;
-  items: OfferCheckItem[];
-  /** The rules and letter it was run against: a change makes the check stale. */
-  key: string;
-  zone: string | null;
-  rules: { id: string; area: string; rule: string; url: string; quote: string }[];
-};
+import type { OfferCheckItem, OfferCheckVerdict } from "@ats/db/server";
 
 /** The worst verdict wins: a fix outranks counsel, counsel outranks a pass (pure). */
 export function overallVerdict(items: Pick<OfferCheckItem, "verdict">[]): OfferCheckVerdict {

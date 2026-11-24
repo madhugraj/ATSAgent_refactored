@@ -120,7 +120,7 @@ if [ "$MODE" = "migrate" ]; then
   step "Running drizzle/pg-migrations against the prod database"
   DBURL=$(kubectl -n "$NS" get secret atsiq-env -o jsonpath='{.data.DATABASE_URL}' | base64 -d)
   kubectl -n "$NS" exec -i atsiq-deploy-build -- env DATABASE_URL="$DBURL" sh -c \
-    'cd /build && node scripts/migrate-pg.mjs' \
+    'cd /build && node packages/db/scripts/migrate-pg.mjs' \
     || fail "migration run failed."
   echo "  migrations applied (idempotent — already-applied files skipped)."
 fi

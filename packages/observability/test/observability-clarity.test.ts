@@ -6,13 +6,13 @@
  *  - only failures count towards the tool-error health rule;
  *  - "Try again" does not start a second run while the same agent is still
  *    working on that piece of work.
- * Run: DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test scripts/observability-clarity.test.ts
+ * Run: DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test packages/observability/test/observability-clarity.test.ts
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 
-import type { AgentStepResult, AgentToolCall } from "../apps/web/src/lib/ai-gateway.server";
+import type { AgentStepResult, AgentToolCall } from "../../../apps/web/src/lib/ai-gateway.server";
 
 const script: AgentStepResult[] = [];
 const usage = { promptTokens: 10, completionTokens: 5, totalTokens: 15 };
@@ -31,8 +31,8 @@ const call = (...calls: AgentToolCall[]): AgentStepResult => ({
   usage,
 });
 let aiAgentStepCalls = 0;
-const realGateway = await import("../apps/web/src/lib/ai-gateway.server");
-mock.module("../apps/web/src/lib/ai-gateway.server", () => ({
+const realGateway = await import("../../../apps/web/src/lib/ai-gateway.server");
+mock.module("../../../apps/web/src/lib/ai-gateway.server", () => ({
   ...realGateway,
   aiAgentStep: async () => {
     aiAgentStepCalls += 1;
@@ -45,7 +45,7 @@ afterAll(() => {
   expect(aiAgentStepCalls).toBeGreaterThan(0);
 });
 
-const { db } = await import("../apps/web/src/server/db");
+const { db } = await import("../../../apps/web/src/server/db");
 const {
   agentIssues,
   agentPolicies,
@@ -56,19 +56,19 @@ const {
   organizations,
   requisitions,
   users,
-} = await import("../apps/web/drizzle/schema");
+} = await import("../../../apps/web/drizzle/schema");
 const { registerAgent, registerTool, resetRegistry } =
-  await import("../apps/web/src/server/agents/registry");
-const runtime = await import("../apps/web/src/server/agents/runtime.server");
-const { evaluateAgentHealth } = await import("../apps/web/src/server/agents/health.server");
-const desk = await import("../apps/web/src/server/desk/desk.server");
+  await import("../../../apps/web/src/server/agents/registry");
+const runtime = await import("../../../apps/web/src/server/agents/runtime.server");
+const { evaluateAgentHealth } = await import("../../../apps/web/src/server/agents/health.server");
+const desk = await import("../../../apps/web/src/server/desk/desk.server");
 
 const stamp = Date.now();
 let orgId: string;
 let userId: string;
 
 beforeAll(async () => {
-  const url = process.env.DATABASE_URL ?? "";
+  const url = process.env["DATABASE_URL"] ?? "";
   if (!["127.0.0.1", "localhost", "::1"].includes(new URL(url).hostname))
     throw new Error("Refusing non-local database");
   userId = (

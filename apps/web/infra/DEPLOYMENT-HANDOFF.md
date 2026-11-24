@@ -4,17 +4,17 @@
 
 **Goal:** deploy ATSIQ (the ATS web app) to Google Cloud Run under **https://atsiq.yavar.ai**, backed by Cloud SQL PostgreSQL. The application is fully portable — a plain Node server + ordinary PostgreSQL + S3-compatible storage + SMTP. It has **no runtime dependency on Lovable or Supabase** (verified: the production build boots with only `DATABASE_URL` and `SESSION_SECRET` set).
 
-|                                                          |                                                                                                                                                                                                                                                              |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Source repo                                              | https://github.com/madhu-yavar/yavar-ats — branch `main` (deploy latest commit)                                                                                                                                                                              |
-| App type                                                 | TanStack Start (React 19 SSR on Nitro) → plain **Node server** (`.output/server/index.mjs`)                                                                                                                                                                  |
-| Container                                                | `Dockerfile` at repo root — multi-stage, final image `node:22-slim`, listens on **port 3000**, `HOST=0.0.0.0`                                                                                                                                                |
-| Database                                                 | Ordinary **PostgreSQL 14+** (drizzle ORM). Schema source of truth: `drizzle/pg-migrations/` applied by `scripts/migrate-pg.mjs` (idempotent). **Do NOT use `drizzle-kit migrate`** — the runner is the only supported migration path.                        |
-| Auth                                                     | First-party: scrypt password hashes in the `users` table, httpOnly `atsiq_session` cookie, DB-backed `sessions` table. No external identity provider.                                                                                                        |
-| Object storage (CV vault, template sources, brand logos) | Any S3-compatible store. Recommended: **GCS bucket with HMAC keys**.                                                                                                                                                                                         |
-| Email                                                    | Any SMTP relay (`SMTP_URL`). Used for: registration confirmation, invitations, password reset, org approval notices, and the queued candidate emails (acknowledgment, stage update, interview invitation, offer) drained by the `process-email-outbox` cron. |
-| Health probe                                             | **`GET /`** (HTTP 200). There is no `/health` endpoint.                                                                                                                                                                                                      |
-| Environment variables                                    | **Copy-ready template: `infra/env.production.example`** — the annotated production `.env`. Only `DATABASE_URL` + `SESSION_SECRET` are required to boot; `SMTP_URL` is required for email delivery.                                                           |
+|                                                          |                                                                                                                                                                                                                                                               |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source repo                                              | https://github.com/madhu-yavar/yavar-ats — branch `main` (deploy latest commit)                                                                                                                                                                               |
+| App type                                                 | TanStack Start (React 19 SSR on Nitro) → plain **Node server** (`.output/server/index.mjs`)                                                                                                                                                                   |
+| Container                                                | `Dockerfile` at repo root — multi-stage, final image `node:22-slim`, listens on **port 3000**, `HOST=0.0.0.0`                                                                                                                                                 |
+| Database                                                 | Ordinary **PostgreSQL 14+** (drizzle ORM). Schema source of truth: `packages/db/drizzle/pg-migrations/` applied by `packages/db/scripts/migrate-pg.mjs` (idempotent). **Do NOT use `drizzle-kit migrate`** — the runner is the only supported migration path. |
+| Auth                                                     | First-party: scrypt password hashes in the `users` table, httpOnly `atsiq_session` cookie, DB-backed `sessions` table. No external identity provider.                                                                                                         |
+| Object storage (CV vault, template sources, brand logos) | Any S3-compatible store. Recommended: **GCS bucket with HMAC keys**.                                                                                                                                                                                          |
+| Email                                                    | Any SMTP relay (`SMTP_URL`). Used for: registration confirmation, invitations, password reset, org approval notices, and the queued candidate emails (acknowledgment, stage update, interview invitation, offer) drained by the `process-email-outbox` cron.  |
+| Health probe                                             | **`GET /`** (HTTP 200). There is no `/health` endpoint.                                                                                                                                                                                                       |
+| Environment variables                                    | **Copy-ready template: `infra/env.production.example`** — the annotated production `.env`. Only `DATABASE_URL` + `SESSION_SECRET` are required to boot; `SMTP_URL` is required for email delivery.                                                            |
 
 ---
 
@@ -100,7 +100,7 @@ env var. Ensure SPF/DKIM exist for whichever domain sends mail.
 git clone https://github.com/madhu-yavar/yavar-ats && cd yavar-ats
 bun install --frozen-lockfile   # or: npm i -g bun first
 DATABASE_URL="postgres://atsiq:<pw>@/atsiq?host=/cloudsql/PROJECT:REGION:atsiq" \
-  bun scripts/migrate-pg.mjs
+  bun packages/db/scripts/migrate-pg.mjs
 ```
 
 Safe to re-run; it records applied files in a `pg_migrations` table.
@@ -139,7 +139,7 @@ Add to the GitHub repo (Settings → Secrets and variables → Actions):
 | Variable | `GCP_REPOSITORY` | `atsiq`                                                                                                                               |
 | Variable | `DEPLOY_ENABLED` | `true`                                                                                                                                |
 
-Every push to `main` then: migrates the database (`scripts/migrate-pg.mjs`), builds the Dockerfile, pushes to Artifact Registry, deploys the Cloud Run service with the secrets from §2.
+Every push to `main` then: migrates the database (`packages/db/scripts/migrate-pg.mjs`), builds the Dockerfile, pushes to Artifact Registry, deploys the Cloud Run service with the secrets from §2.
 
 ### Option B — manual deploy
 
@@ -233,7 +233,7 @@ see the SLOs on **Platform → Service health**. Support can find any request fr
 ## 8. Notes & gotchas
 
 - **Do not run `drizzle-kit migrate` against this database.** The schema path is
-  `drizzle/pg-migrations/` + `scripts/migrate-pg.mjs` only. Future schema
+  `packages/db/drizzle/pg-migrations/` + `packages/db/scripts/migrate-pg.mjs` only. Future schema
   changes arrive as new numbered `.sql` files in that folder — just re-run the
   script.
 - **Rebuild the Capture companion before each deploy**: `public/atsiq-capture.zip`

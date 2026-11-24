@@ -47,10 +47,10 @@ Container: port **3000**, `HOST=0.0.0.0`. No `/health` endpoint exists — use `
 
 **Optional — browser for website reads** (Organisation context agent): the reader renders client-built websites when Chrome or a Playwright Chromium is present in the image (`playwright` is already a dependency; add `bunx playwright install chromium --with-deps` to the image build, or bake Chrome). Without a browser the feature still works — client-rendered sites just yield only their meta lines, and static sites read fully.
 
-**Migrations** (run once per release, before deploy). The schema source of truth is `drizzle/pg-migrations/` applied by `scripts/migrate-pg.mjs` (idempotent — safe to re-run; records applied files in `pg_migrations`). **Do NOT use `bunx drizzle-kit migrate`** — the runner is the only supported migration path:
+**Migrations** (run once per release, before deploy). The schema source of truth is `packages/db/drizzle/pg-migrations/` applied by `packages/db/scripts/migrate-pg.mjs` (idempotent — safe to re-run; records applied files in `pg_migrations`). **Do NOT use `bunx drizzle-kit migrate`** — the runner is the only supported migration path:
 
 ```bash
-DATABASE_URL="postgresql://USER:PASS@PRIVATE_IP:5432/atsiq" node scripts/migrate-pg.mjs
+DATABASE_URL="postgresql://USER:PASS@PRIVATE_IP:5432/atsiq" node packages/db/scripts/migrate-pg.mjs
 ```
 
 Recent additions to note per release: `0015_ai_usage_events.sql` (AI usage ledger backing the platform console) and `0016_scrub_model_ids.sql` (one-time vendor-name scrub of stage-event reasons). The ledger grows with AI traffic; if size ever matters, prune `ai_usage_events` older than your retention window — aggregates read it live.

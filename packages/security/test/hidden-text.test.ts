@@ -1,16 +1,17 @@
 /**
- * Hidden-text stripping (src/lib/document-hidden-text.ts, docs/guardrails.md P1-1),
- * through the real server extractor on PDFs built here with jsPDF. Pure — no
- * database. Run: bun test scripts/hidden-text.test.ts
+ * Hidden-text stripping (@ats/security/shared, moved from
+ * src/lib/document-hidden-text.ts, docs/guardrails.md P1-1), through the real
+ * server extractor on PDFs built here with jsPDF. Pure — no database.
+ * Run: bun test packages/security/test/hidden-text.test.ts
  */
 import { describe, expect, test } from "bun:test";
 import { strToU8, zipSync, zlibSync } from "fflate";
 import { jsPDF } from "jspdf";
 
-const { attachmentText } = await import("../apps/web/src/lib/cv-text.server");
+const { attachmentText } = await import("../../../apps/web/src/lib/cv-text.server");
 const { HIDDEN_TEXT_MARKER, stripHiddenDocxRuns, withHiddenMarker } =
-  await import("../apps/web/src/lib/document-hidden-text");
-const { looksLikeInjection } = await import("../apps/web/src/server/agents/injection");
+  await import("@ats/security/shared");
+const { looksLikeInjection } = await import("../../../apps/web/src/server/agents/injection");
 
 const pdfBytes = (draw: (d: jsPDF) => void) => {
   const d = new jsPDF({ unit: "pt", format: "a4" });

@@ -40,12 +40,12 @@ One container image, run as three workloads, plus scheduled HTTP calls:
      └──────────────────────┘                        └───────────────┘
 ```
 
-| Workload                | Command (same image)                                 | Port | Notes                                                                                                                               |
-| ----------------------- | ---------------------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| **scouts-app**          | `node .output/server/index.mjs` (default)            | 3000 | Web app, APIs, webhooks. Stateless; scale horizontally.                                                                             |
-| **scouts-parser**       | `node .output/parser-worker/index.mjs`               | 8080 | Parses CVs and documents in a sandbox: **no network egress**, no DB, only `PARSER_TOKEN`.                                           |
-| **scouts-voice-worker** | `node .output/voice-worker/index.mjs`                | —    | Places the AI screening, scheduling and pay calls over SIP. Long-lived; finishes calls before stopping. Optional (phone screening). |
-| **migrate** (Job)       | `bun scripts/migrate-pg.mjs` (`migrate` build stage) | —    | Runs once per release, before the rollout.                                                                                          |
+| Workload                | Command (same image)                                             | Port | Notes                                                                                                                               |
+| ----------------------- | ---------------------------------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| **scouts-app**          | `node .output/server/index.mjs` (default)                        | 3000 | Web app, APIs, webhooks. Stateless; scale horizontally.                                                                             |
+| **scouts-parser**       | `node .output/parser-worker/index.mjs`                           | 8080 | Parses CVs and documents in a sandbox: **no network egress**, no DB, only `PARSER_TOKEN`.                                           |
+| **scouts-voice-worker** | `node .output/voice-worker/index.mjs`                            | —    | Places the AI screening, scheduling and pay calls over SIP. Long-lived; finishes calls before stopping. Optional (phone screening). |
+| **migrate** (Job)       | `bun packages/db/scripts/migrate-pg.mjs` (`migrate` build stage) | —    | Runs once per release, before the rollout.                                                                                          |
 
 **Why GKE (not Cloud Run):** the voice worker is a long-running process that
 holds SIP/RTP sessions over UDP for minutes at a time; Cloud Run is
@@ -112,7 +112,7 @@ Quick local run against a throw-away Postgres (optional):
 
 ```bash
 docker run --rm -d --name pg -e POSTGRES_PASSWORD=pg -p 5432:5432 postgres:15
-DATABASE_URL=postgres://postgres:pg@localhost:5432/postgres bun scripts/migrate-pg.mjs
+DATABASE_URL=postgres://postgres:pg@localhost:5432/postgres bun packages/db/scripts/migrate-pg.mjs
 docker run --rm -p 3000:3000 \
   -e DATABASE_URL=postgres://postgres:pg@host.docker.internal:5432/postgres \
   -e SESSION_SECRET=$(openssl rand -hex 32) \
@@ -211,7 +211,7 @@ echo "DATABASE_URL=postgres://scouts:${DB_PASS}@${SQL_IP}:5432/scouts"
 ```
 
 Start with 2 vCPU / 7.5 GB, regional (HA). The schema is plain PostgreSQL; there
-is no ORM-managed migration — only `scripts/migrate-pg.mjs` (§6).
+is no ORM-managed migration — only `packages/db/scripts/migrate-pg.mjs` (§6).
 
 ### 3.6 Object storage (S3-compatible GCS)
 
@@ -603,7 +603,7 @@ claimed atomically). Agent throughput: `AGENT_CONCURRENCY`.
 - Parser: NetworkPolicy deny-all egress stays applied; no secrets but `PARSER_TOKEN`.
 - No platform AI keys; organisations bring their own (encrypted at rest).
 - `SECRET_ENCRYPTION_KEY`: sealed offline backup; rotating it means re-encrypting stored credentials.
-- Never run `drizzle-kit migrate`; only `scripts/migrate-pg.mjs`.
+- Never run `drizzle-kit migrate`; only `packages/db/scripts/migrate-pg.mjs`.
 - Never commit `.env` files or `SECURITY_AUDIT_REPORT*.md` while the repository is public.
 
 **Rough monthly cost (asia-south1, light production)**

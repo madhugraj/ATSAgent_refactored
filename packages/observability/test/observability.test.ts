@@ -7,14 +7,16 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { and, eq, gte, inArray } from "drizzle-orm";
 
-const { db } = await import("../apps/web/src/server/db");
+import type { SliMinute } from "@ats/observability/server";
+
+const { db } = await import("../../../apps/web/src/server/db");
 const { agentRuns, auditLog, organizations, serviceRequestMinutes, sloAlerts, users } =
-  await import("../apps/web/drizzle/schema");
-const rc = await import("../apps/web/src/server/request-context");
-const hm = await import("../apps/web/src/server/http-metrics");
-const slo = await import("../apps/web/src/server/slo");
-const sloServer = await import("../apps/web/src/server/slo.server");
-const { log } = await import("../apps/web/src/server/log");
+  await import("../../../apps/web/drizzle/schema");
+const rc = await import("@ats/observability/server");
+const hm = await import("@ats/observability/server");
+const slo = await import("@ats/observability/server");
+const sloServer = await import("@ats/observability/server");
+const { log } = await import("@ats/observability/server");
 
 /**
  * Stand-in for the TanStack Start handler: `/boom` fails like a real SSR
@@ -281,7 +283,7 @@ let orgId: string;
 let userId: string;
 
 beforeAll(async () => {
-  const url = process.env.DATABASE_URL ?? "";
+  const url = process.env["DATABASE_URL"] ?? "";
   if (!["127.0.0.1", "localhost", "::1"].includes(new URL(url).hostname))
     throw new Error("Refusing non-local database");
   const stamp = Date.now();
@@ -307,7 +309,7 @@ afterAll(async () => {
   if (userId) await db.delete(users).where(eq(users.id, userId));
 });
 
-function minute(offsetMin: number, requests: number, errors: number, slow = 0): hm.SliMinute {
+function minute(offsetMin: number, requests: number, errors: number, slow = 0): SliMinute {
   const latency = [...hm.DURATION_BUCKETS.map(() => 0), 0];
   latency[1] = requests - slow;
   latency[6] = slow;
@@ -400,8 +402,8 @@ describe("persisted SLIs and burn alerts", () => {
   });
 
   test("an agent run started inside a request joins the request's trace", async () => {
-    await import("../apps/web/src/server/agents/index");
-    const { startRun } = await import("../apps/web/src/server/agents/runtime.server");
+    await import("../../../apps/web/src/server/agents/index");
+    const { startRun } = await import("../../../apps/web/src/server/agents/runtime.server");
     const ctx = rc.contextFromHeaders(new Headers());
     const { runId } = await rc.withRequestContext(ctx, () =>
       startRun({ orgId, agentType: "sourcing", principalUserId: userId, goal: "obs test" }),
@@ -416,7 +418,7 @@ describe("persisted SLIs and burn alerts", () => {
 
 describe("server entry", () => {
   test("/metrics is off without a token, 401 with a wrong one, OpenMetrics with the right one", async () => {
-    const server = (await import("../apps/web/src/server")).default;
+    const server = (await import("../../../apps/web/src/server")).default;
     const call = (headers: Record<string, string> = {}) =>
       server.fetch(new Request("http://localhost/metrics", { headers }), {}, {});
 
@@ -455,7 +457,7 @@ describe("server entry", () => {
   });
 
   test("a client that hangs up is a 499 info line, not an SSR error or a bad SLI event", async () => {
-    const server = (await import("../apps/web/src/server")).default;
+    const server = (await import("../../../apps/web/src/server")).default;
     const hmNow = Date.now();
     hm.resetHttpMetrics();
     const call = (path: string) =>
