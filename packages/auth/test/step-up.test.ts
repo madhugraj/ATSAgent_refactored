@@ -1,19 +1,18 @@
 /**
- * Step-up re-authentication (src/server/step-up.ts, docs/guardrails.md P2-4)
- * against the disposable database: a session without a recent password is
- * refused; the right password unlocks it for 10 minutes for THAT session
- * only; wrong passwords are audited and lock after five.
- * Run: DATABASE_URL=... SESSION_SECRET=... bun test scripts/step-up.test.ts
+ * Step-up re-authentication (packages/auth/src/server/step-up.ts,
+ * docs/guardrails.md P2-4) against the disposable database: a session without
+ * a recent password is refused; the right password unlocks it for 10 minutes
+ * for THAT session only; wrong passwords are audited and lock after five.
+ * Run: DATABASE_URL=... SESSION_SECRET=... bun test packages/auth/test/
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
 
-const { db } = await import("../apps/web/src/server/db");
-const { auditLog, organizations, sessions, users } = await import("../apps/web/drizzle/schema");
-const { createSession, SESSION_COOKIE } = await import("../apps/web/src/server/identity");
-const { hashPassword } = await import("../apps/web/src/server/password");
+const { db, auditLog, organizations, sessions, users } = await import("@ats/db/server");
+const { createSession, SESSION_COOKIE } = await import("@ats/auth/server");
+const { hashPassword } = await import("@ats/auth/server");
 const { assertStepUp, confirmStepUp, stepUpFresh, STEP_UP_MAX_FAILURES, STEP_UP_WINDOW_MS } =
-  await import("../apps/web/src/server/step-up");
+  await import("@ats/auth/server");
 
 const stamp = Date.now();
 const PASSWORD = `StepUp#${stamp}`;
