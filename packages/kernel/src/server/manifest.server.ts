@@ -7,7 +7,7 @@
  */
 import { createHash } from "node:crypto";
 
-import { INJECTION_RULES, toolParameters } from "@/lib/ai-gateway.server";
+import { INJECTION_RULES, toolParameters } from "@ats/ai/server";
 import { agentDefinitions, db } from "@ats/db/server";
 import { HITL_TOOLS } from "./hitl";
 import { getTool, skillsOf, type AgentDefinition } from "./registry";

@@ -18,7 +18,19 @@ const BROWSER_3D_STUB = fileURLToPath(new URL("./src/stubs/browser-3d-stub.ts", 
 export default defineConfig(({ command }) => ({
   css: { transformer: "lightningcss" },
   resolve: {
-    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+    // Array form: exact-prefix entries. "@/..." covers the app; "@db/schema"
+    // must be explicit because the tsconfig paths alias does not reach files
+    // outside apps/web in the dev module-runner — without it, every route 500s
+    // once workspace packages import the schema directly (phase-4 review find).
+    alias: [
+      // "@/..." covers the app. Interim bridge for exactly two dynamic imports
+      // in packages whose target modules have not moved yet (redteam's
+      // screening.server → @ats/matching Phase 6; alerts' agents.catalog →
+      // @ats/agents Phase 7): the dev module-runner cannot resolve the
+      // tsconfig paths alias for files outside apps/web, which is how the
+      // post-Phase-2 dev server 500'd every route. Phase 6/7 removes this.
+      { find: "@/", replacement: fileURLToPath(new URL("./src/", import.meta.url)) },
+    ],
     dedupe: [
       "react",
       "react-dom",

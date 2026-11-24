@@ -118,5 +118,28 @@ jobs:
       # The prod image copies only .output — no node_modules — so the worker
       # bundles must boot on their own (phase-2 review B1). Copy them into
       # bare directories, start with dummy env, and require the health line.
+      # The prod image and the dev module-runner resolve imports differently;
+      # the dev server must boot and serve without module-resolution errors
+      # (phase-4 find: workspace @db imports 500'd every route in dev only).
+      - name: Web dev boot smoke
+        run: |
+          cd apps/web
+          # PORT pinned + generous wait: the cold dependency optimizer on a
+          # fresh CI runner can take well over a minute before the port binds.
+          (PORT=3000 DATABASE_URL="$DATABASE_URL" SESSION_SECRET="$SESSION_SECRET" \
+            bun run dev > /tmp/vite-dev-ci.log 2>&1 &)
+          code=000
+          for i in $(seq 1 90); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          echo "GET / -> $code"
+          [ "$code" = "200" ] || { echo "dev server did not serve /"; tail -40 /tmp/vite-dev-ci.log; exit 1; }
+          if grep -qE "Cannot find module|ERR_MODULE_NOT_FOUND|ERR_PACKAGE_IMPORT_NOT_DEFINED" /tmp/vite-dev-ci.log; then
+            echo "module-resolution errors in dev:"; grep -E "Cannot find module|ERR_MODULE" /tmp/vite-dev-ci.log; exit 1
+          fi
+          pkill -f "vite dev" || true
+
       - name: Worker boot smoke (no node_modules)
         run: bash scripts/worker-boot-smoke.sh
