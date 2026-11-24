@@ -10,7 +10,7 @@
  *    organisations);
  *  - erasing a candidate erases their rows; retention and "delete" work;
  *  - exports are pseudonymised and refused without consent.
- * Run: DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test scripts/training-data.test.ts
+ * Run: DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test packages/ai/test/training-data.test.ts
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync } from "node:fs";
@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { and, eq } from "drizzle-orm";
 
-const { db } = await import("../apps/web/src/server/db");
+const { db } = await import("@ats/db/server");
 const {
   agentRuns,
   agentTasks,
@@ -35,11 +35,11 @@ const {
   trainingSettings,
   userRoles,
   users,
-} = await import("../apps/web/drizzle/schema");
-const capture = await import("../apps/web/src/server/training/capture.server");
-const training = await import("../apps/web/src/lib/training.functions");
-const { recordAiUsage } = await import("../apps/web/src/server/ai-usage");
-const { agentRunScope, withAiSubject } = await import("../apps/web/src/server/agents/context");
+} = await import("@ats/db/server");
+const capture = await import("../src/server/training/capture.server");
+const training = await import("../../../apps/web/src/lib/training.functions");
+const { recordAiUsage } = await import("../src/server/ai-usage");
+const { agentRunScope, withAiSubject } = await import("../src/server/context");
 
 const stamp = Date.now();
 let orgId: string;
@@ -52,7 +52,7 @@ const ownerEmail = `owner-${stamp}@test.local`;
 const asOwner = () => ({ orgId, userId: owner, memberEmail: ownerEmail });
 
 beforeAll(async () => {
-  const url = process.env.DATABASE_URL ?? "";
+  const url = process.env["DATABASE_URL"] ?? "";
   if (!["127.0.0.1", "localhost", "::1"].includes(new URL(url).hostname))
     throw new Error("Refusing non-local database");
   owner = (await db.insert(users).values({ email: ownerEmail }).returning({ id: users.id }))[0]!.id;
@@ -288,7 +288,7 @@ describe("judgements", () => {
         proposedAction: { toolCallId: "t1", name: "save_weights", args: { skills: 40 } },
       } as never)
       .returning({ id: agentTasks.id });
-    const { resolveTask } = await import("../apps/web/src/server/agents/runtime.server");
+    const { resolveTask } = await import("../../../apps/web/src/server/agents/runtime.server");
     await resolveTask({
       orgId,
       userId: owner,
@@ -339,13 +339,14 @@ describe("judgements", () => {
         extracted: { gross: 600000 },
       } as never)
       .returning({ id: onboardingDocuments.id });
-    const { reviewOnboardingDocCore } = await import("../apps/web/src/lib/onboarding.functions");
+    const { reviewOnboardingDocCore } =
+      await import("../../../apps/web/src/lib/onboarding.functions");
     await reviewOnboardingDocCore(asOwner(), {
       id: doc!.id,
       decision: "rejected",
       note: "Gross is 6,50,000 on the slip",
     });
-    const { moveStageCore } = await import("../apps/web/src/lib/pipeline.server");
+    const { moveStageCore } = await import("../../../apps/web/src/lib/pipeline.server");
     await moveStageCore(asOwner() as never, {
       applicationId: appId,
       toStage: "rejected",
@@ -404,7 +405,7 @@ describe("erasure and retention", () => {
   test("erasing a candidate erases their calls and judgements", async () => {
     await consent(true);
     await withAiSubject({ applicationId: appId }, () => fakeCall({ score: 9 }));
-    const { captureFeedback } = await import("../apps/web/src/server/training/capture.server");
+    const { captureFeedback } = await import("../src/server/training/capture.server");
     await captureFeedback({
       orgId,
       source: "outcome",
@@ -443,7 +444,7 @@ describe("erasure and retention", () => {
 
 describe("export", () => {
   test("pseudonymises known people stably and masks other contact details", async () => {
-    const { buildPseudonymiser } = await import("../apps/web/src/server/training/pseudonymise");
+    const { buildPseudonymiser } = await import("../src/server/training/pseudonymise");
     const scrub = buildPseudonymiser(orgId, [
       {
         name: "Priya Raghavan",
@@ -470,7 +471,7 @@ describe("export", () => {
     const run = (o: string) =>
       Bun.spawnSync(["bun", "scripts/training-export.ts", "--org", orgId, "--out", o], {
         env: process.env,
-        cwd: path.resolve(import.meta.dir, ".."),
+        cwd: path.resolve(import.meta.dir, "../../.."),
       });
     expect(run(out).exitCode).toBe(2);
     await consent(true);

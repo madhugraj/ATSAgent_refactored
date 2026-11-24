@@ -1,23 +1,66 @@
 /**
- * Unit tests for aiAgentStep (src/lib/ai-gateway.server.ts): request shape and
- * response parsing for each provider's tool-calling dialect. `fetch` is
- * stubbed — no network — and the db / AI-ledger modules are mocked, so the
- * suite needs no database (an explicit `config` skips key lookup).
+ * Unit tests for aiAgentStep (the @ats/ai gateway, moved from
+ * src/lib/ai-gateway.server.ts): request shape and response parsing for each
+ * provider's tool-calling dialect. `fetch` is stubbed — no network — and the
+ * db / AI-ledger modules are mocked, so the suite needs no database (an
+ * explicit `config` skips key lookup).
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 
-import type { AgentMessage, AgentToolSpec, AiConfig } from "../apps/web/src/lib/ai-gateway.server";
+import type { AgentMessage, AgentToolSpec, AiConfig } from "@ats/ai/server";
+
+// The gateway is imported by its file path (not the package entry) so this
+// suite does not pull the whole package into bun's module registry before the
+// DB-backed suites below register their own mocks.
+// bun's mock.module is process-global and permanent, and this folder's three
+// suites share one bun process, so the mocks here are written to be harmless
+// to them: the db mock only stands when the real module cannot load (no
+// DATABASE_URL — then the DB-backed suites fail on their own imports anyway),
+// and the ledger mock wraps the real recordAiUsage so its rows still reach the
+// database this suite's stubbed calls touch (cleaned up below).
+const realDb = await import("@ats/db/server").catch(() => null);
+const realUsage = await import("../src/server/ai-usage").catch(() => null);
 
 const ledger: { feature: string; status: string; totalTokens?: number | null }[] = [];
-mock.module("../apps/web/src/server/db", () => ({ db: { __dbMockMarker: true } }));
-mock.module("../apps/web/src/server/ai-usage", () => ({
-  recordAiUsage: async (row: { feature: string; status: string; totalTokens?: number | null }) => {
-    ledger.push(row);
-  },
-}));
+if (!realDb) mock.module("@ats/db/server", () => ({ db: { __dbMockMarker: true } }));
+mock.module("../src/server/ai-usage", () => {
+  if (!realUsage)
+    return {
+      recordAiUsage: async (row: {
+        feature: string;
+        status: string;
+        totalTokens?: number | null;
+      }) => {
+        ledger.push(row);
+      },
+    };
+  const realRecord = realUsage.recordAiUsage;
+  return {
+    ...realUsage,
+    recordAiUsage: async (row: Parameters<typeof realRecord>[0]) => {
+      ledger.push(row);
+      await realRecord(row);
+    },
+  };
+});
 const { aiAgentStep, INVALID_TOOL_ARGS, toolParameters } =
-  await import("../apps/web/src/lib/ai-gateway.server");
+  await import("../src/server/ai-gateway.server");
+
+afterAll(async () => {
+  // The pass-through ledger rows this suite's stubbed calls wrote (org-less).
+  if (realDb)
+    await realDb.db
+      .delete(realDb.aiUsageEvents)
+      .where(
+        and(
+          isNull(realDb.aiUsageEvents.orgId),
+          eq(realDb.aiUsageEvents.feature, "agent_requisition"),
+          eq(realDb.aiUsageEvents.model, "test-model"),
+        ),
+      );
+});
 
 beforeEach(() => {
   ledger.length = 0;
@@ -104,8 +147,11 @@ describe("mocks are live", () => {
   // A stale mock path would silently leave the real (db-backed) modules in
   // place, so assert the gateway still sees the mocked ones.
   test("the db mock is what ai-gateway resolves", async () => {
-    const { db } = await import("../apps/web/src/server/db");
-    expect(db).toHaveProperty("__dbMockMarker", true);
+    const { db } = await import("@ats/db/server");
+    // With a DATABASE_URL the mock passes the real client through (see the
+    // note at the top); without one the marker mock stands alone.
+    if (realDb) expect(db).toBe(realDb.db);
+    else expect(db).toHaveProperty("__dbMockMarker", true);
   });
 
   test("the ai-usage mock records every ledger row the gateway writes", async () => {
@@ -385,7 +431,7 @@ describe("google dialect", () => {
 
 describe("today's date", () => {
   test("every system prompt starts with today's date", async () => {
-    const { withToday } = await import("../apps/web/src/lib/ai-gateway.server");
+    const { withToday } = await import("../src/server/ai-gateway.server");
     expect(withToday("Score this CV.", new Date("2026-10-12T08:00:00Z"))).toBe(
       "Today is Monday, 12 October 2026 (2026-10-12, UTC). Dates up to today are in the past; judge tenure, recency and gaps against today.\n\nScore this CV.",
     );
