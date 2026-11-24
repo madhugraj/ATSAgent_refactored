@@ -80,6 +80,28 @@ Phase 0 notes found during the merge:
      them; declare at the dependency-hygiene pass or when the linker changes.
   8. `parserEnv` picks nothing today (PARSER_* are not in the combined schema) — a later config slice gives
      it its own fields rather than inventing definitions here.
+- **Phase 2 review conditions (2026-11-24):**
+  - **B1 (blocker) — and an important discovery:** the worker-boot crash is real but **not a Phase 2
+    regression**: `main`'s freshly-built voice bundle fails identically from a node_modules-less directory
+    (same `#tanstack-start-server-fn-resolver` static import — verified by building and booting the source
+    at `25d6e6f`). Prod runs `node .output/voice-worker/index.mjs` from an image with only `.output`, so
+    this is a latent prod bug on main (or prod runs a stale image). Fixed properly regardless:
+    `build-voice-worker.mjs` keeps the Phase-1 externals (Start is bundled, as on main) and now **aliases
+    `@tanstack/react-start/server-only` to an empty module** (build plugin) and **emits a
+    `tanstack-hash-stubs.mjs` + `package.json` "imports" map** next to the bundle resolving the dead-code
+    hash specifier. `build-parser-worker.mjs` gets the same alias (its externals stay). Verified by
+    booting both bundles from bare directories: voice reaches `voice_worker.started`, parser prints
+    `parser worker listening`, zero module-resolution errors.
+  - **CI worker boot smoke** added after the build step: copies both bundles into node_modules-less dirs,
+    boots with dummy env, requires the health lines and no resolution errors.
+  - **A2:** depcruise ratchet lowered to `WARN_MAX = 171` (verified count at HEAD).
+  - **A3 (done early):** `undici ^8.12.3` declared in @ats/security, `zod ^4.6.7` in @ats/config.
+  - **A1:** Phase 8 checklist in the plan now demands one `.output` layout and an image-boot proof for
+    web + both workers.
+  - Deviation 5's grep exception recorded in the team brief's checklist.
+  - Handoff test counts corrected: the authoritative full-suite figure is **93 files / 1,386 tests**
+    (86 scripts files + 7 package files), per the review's re-run; my earlier "85 / 1,337" counted only
+    the scripts loop and missed one file in the awk tally.
 - **Correction during PR CI (2026-11-23):** the first Gate 2 run verified `build:web` only; the PR's CI
   turbo build failed on the worker bundles — the new package server entries (the server-only marker; the
   observability chain reaching error-capture) pull @tanstack/start-server-core internals and playwright
@@ -140,6 +162,28 @@ Phase 0 notes found during the merge:
   `INSERT..RETURNING` resolves before the implicit commit is visible on another pooled connection; the two
   governance-chains tests now poll for visibility). `governance.server.ts` itself untouched (verified
   pristine vs `dcb6a4b`).
+- **Phase 2 review conditions (2026-11-24):**
+  - **B1 (blocker) — and an important discovery:** the worker-boot crash is real but **not a Phase 2
+    regression**: `main`'s freshly-built voice bundle fails identically from a node_modules-less directory
+    (same `#tanstack-start-server-fn-resolver` static import — verified by building and booting the source
+    at `25d6e6f`). Prod runs `node .output/voice-worker/index.mjs` from an image with only `.output`, so
+    this is a latent prod bug on main (or prod runs a stale image). Fixed properly regardless:
+    `build-voice-worker.mjs` keeps the Phase-1 externals (Start is bundled, as on main) and now **aliases
+    `@tanstack/react-start/server-only` to an empty module** (build plugin) and **emits a
+    `tanstack-hash-stubs.mjs` + `package.json` "imports" map** next to the bundle resolving the dead-code
+    hash specifier. `build-parser-worker.mjs` gets the same alias (its externals stay). Verified by
+    booting both bundles from bare directories: voice reaches `voice_worker.started`, parser prints
+    `parser worker listening`, zero module-resolution errors.
+  - **CI worker boot smoke** added after the build step: copies both bundles into node_modules-less dirs,
+    boots with dummy env, requires the health lines and no resolution errors.
+  - **A2:** depcruise ratchet lowered to `WARN_MAX = 171` (verified count at HEAD).
+  - **A3 (done early):** `undici ^8.12.3` declared in @ats/security, `zod ^4.6.7` in @ats/config.
+  - **A1:** Phase 8 checklist in the plan now demands one `.output` layout and an image-boot proof for
+    web + both workers.
+  - Deviation 5's grep exception recorded in the team brief's checklist.
+  - Handoff test counts corrected: the authoritative full-suite figure is **93 files / 1,386 tests**
+    (86 scripts files + 7 package files), per the review's re-run; my earlier "85 / 1,337" counted only
+    the scripts loop and missed one file in the awk tally.
 - **Correction during PR CI (2026-11-23):** the first Gate 2 run verified `build:web` only; the PR's CI
   turbo build failed on the worker bundles — the new package server entries (the server-only marker; the
   observability chain reaching error-capture) pull @tanstack/start-server-core internals and playwright
@@ -209,6 +253,28 @@ Phase 0 notes found during the merge:
     burst `session`/`me` → 429 on the normal budget, `confirm` GET on the tighter budget).
 - **Test count before → after:** `bun run test` ran 36 hand-listed files → runs all 89; 1,367 tests pass
   (26 of them new pipeline coverage; ~30 new mock-liveness/rate-limit assertions).
+- **Phase 2 review conditions (2026-11-24):**
+  - **B1 (blocker) — and an important discovery:** the worker-boot crash is real but **not a Phase 2
+    regression**: `main`'s freshly-built voice bundle fails identically from a node_modules-less directory
+    (same `#tanstack-start-server-fn-resolver` static import — verified by building and booting the source
+    at `25d6e6f`). Prod runs `node .output/voice-worker/index.mjs` from an image with only `.output`, so
+    this is a latent prod bug on main (or prod runs a stale image). Fixed properly regardless:
+    `build-voice-worker.mjs` keeps the Phase-1 externals (Start is bundled, as on main) and now **aliases
+    `@tanstack/react-start/server-only` to an empty module** (build plugin) and **emits a
+    `tanstack-hash-stubs.mjs` + `package.json` "imports" map** next to the bundle resolving the dead-code
+    hash specifier. `build-parser-worker.mjs` gets the same alias (its externals stay). Verified by
+    booting both bundles from bare directories: voice reaches `voice_worker.started`, parser prints
+    `parser worker listening`, zero module-resolution errors.
+  - **CI worker boot smoke** added after the build step: copies both bundles into node_modules-less dirs,
+    boots with dummy env, requires the health lines and no resolution errors.
+  - **A2:** depcruise ratchet lowered to `WARN_MAX = 171` (verified count at HEAD).
+  - **A3 (done early):** `undici ^8.12.3` declared in @ats/security, `zod ^4.6.7` in @ats/config.
+  - **A1:** Phase 8 checklist in the plan now demands one `.output` layout and an image-boot proof for
+    web + both workers.
+  - Deviation 5's grep exception recorded in the team brief's checklist.
+  - Handoff test counts corrected: the authoritative full-suite figure is **93 files / 1,386 tests**
+    (86 scripts files + 7 package files), per the review's re-run; my earlier "85 / 1,337" counted only
+    the scripts loop and missed one file in the awk tally.
 - **Correction during PR CI (2026-11-23):** the first Gate 2 run verified `build:web` only; the PR's CI
   turbo build failed on the worker bundles — the new package server entries (the server-only marker; the
   observability chain reaching error-capture) pull @tanstack/start-server-core internals and playwright

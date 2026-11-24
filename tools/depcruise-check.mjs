@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const WARN_MAX = 173; // Phase 1 baseline (692 modules). Lower per phase.
+export const WARN_MAX = 171; // Phase 2 count (review A2; was 173 at Phase 1). Lower per phase.
 
 // depcruise runs from apps/web (its tsconfig lives there); this script may
 // be invoked from the repo root (CI) or apps/web.

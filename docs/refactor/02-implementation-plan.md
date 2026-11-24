@@ -205,6 +205,10 @@ Plus registry refusal test (approve/hire/… tools are rejected) and health-rule
 - `apps/voice-worker`: own entry, bundle and Dockerfile. **Build fails on any `@tanstack/*` import.**
 - `apps/parser-worker`: own entry, bundle and Dockerfile.
 - Build: per-app outputs. Update `Dockerfile`(s), `.github/workflows/deploy.yml`, `scripts/deploy.sh` and GKE/Cloud Run manifests.
+  - **One `.output` layout** (phase-2 review A1): since Phase 2 the web Nitro build lands in
+    `apps/web/.output` while the worker bundles write to the repo-root `.output`; an image built today would
+    copy only the workers. Phase 8 must land a single, explicit output layout and prove **the image boots
+    web + both workers** (the worker boot smoke in CI covers the bundles, not the image).
 
 **Gate 8:**
 
