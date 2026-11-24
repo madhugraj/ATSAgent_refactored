@@ -115,35 +115,99 @@ shape, or alter a column production never got.
      silently.
 5. Record the decision table in this file (or a `reconcile-decisions.md` beside it) **before** §7 runs.
    Expected effort is small: the 191 MB DB has a handful of drifted objects.
+6. **First concrete finding (2026-11-24, from the restore proof):** production has an `app_logs` table
+   (~425k rows, still being written by the running image) that exists **nowhere in the repo** — likely the
+   old pre-fork observability path (`0023_observability`), superseded by the repo's metrics/SLI approach
+   (PR #31). Candidate decision: keep it (historical logs) and let the repo's migrations ignore it, or
+   export-then-drop via a reviewed `reconcile-*.sql`. Decide in step 4 above with the rest.
 
 ## 5. Backup steps for atsiq-db
 
 There is **no backup settings and no backups today** (confirmed live). Nothing in §7 runs until steps A and
 B have succeeded once and a restore has been tested.
 
-**A. pg_dump, stored off-cluster (the primary, portable backup):**
+**Status 2026-11-24: A and B are done and verified once** (the exact commands below were executed today,
+read-only against production), with one caveat: the **off-cluster GCS upload is blocked** — the operator
+account (`madhu.r@yavar.ai`) has no `storage.buckets.create`/`buckets.list` in any project, and no bucket
+name is recorded anywhere in the repo. The dump currently sits on the operator's machine until the product
+owner either creates a bucket or grants the storage role. Until then the backup-of-record is the B
+snapshot (in-cluster, zone-bound).
+
+**A. pg_dump, stored off-cluster (the primary, portable backup) — exact commands, executed 2026-11-24:**
 
 ```bash
-kubectl -n atsiq exec <atsiq-db-pod> -- pg_dump -U postgres -Fc atsiq \
-  > "atsiq-pre-migrate-$(date +%Y%m%d-%H%M).dump"    # lands on the operator's machine
-ls -lh atsiq-pre-migrate-*.dump && gcloud storage cp atsiq-pre-migrate-*.dump gs://<bucket>/atsiq-backups/
+# 1. dump (read-only): streams pg_dump -Fc from the CNPG postgres container
+D=/tmp/atsiq-backup-20261124 && mkdir -p $D
+kubectl -n atsiq exec atsiq-db-1 -c postgres -- \
+  pg_dump -U postgres -Fc --no-owner --no-privileges atsiq \
+  > $D/atsiq-20261124.dump          # 13 MB compressed (DB 191 MB), exit 0
+
+# 2. upload off-cluster  ← BLOCKED on IAM today (see status note above)
+gcloud storage buckets create gs://atsiq-db-backups --project=yavar-studio \
+  --location=asia-south1 --uniform-bucket-level-access --public-access-prevention
+gcloud storage cp $D/atsiq-20261124.dump gs://atsiq-db-backups/atsiq-20261124.dump
 ```
 
-Verify: `pg_restore --list` on the dump, and the §6 rehearsal (which doubles as the restore test).
+**B. Disk snapshot of the data PVC — done 2026-11-24 (`readyToUse=true`, restoreSize 10Gi):**
 
-**B. Disk snapshot of the data PVC (fast, in-place):** CSI VolumeSnapshot of `pvc-ccf4fc30-…`:
+The stock `pd-snapshot-class` **fails** in this project: the PD CSI driver defaults to the multi-region
+`ASIA` location, which the org policy `constraints/gcp.resourceLocations` rejects (412). A region-pinned
+class is required — created once, cluster-scoped, then snapshots from it:
 
-```yaml
+```bash
+# 1. one-time: a snapshot class pinned to the allowed location
+kubectl apply -f - <<'EOF'
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata: { name: pd-snapshot-class-asia-south1 }
+driver: pd.csi.storage.gke.io
+deletionPolicy: Retain
+parameters: { storage-locations: asia-south1 }
+EOF
+
+# 2. per backup: snapshot the PVC (read-only w.r.t. the database; the PVC name
+#    is the volume behind pod atsiq-db-1: pvc-ccf4fc30-2aea-4f89-8cdb-529e6049ea70)
+kubectl -n atsiq apply -f - <<'EOF'
 apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshot
-metadata: { name: atsiq-db-pre-migrate, namespace: atsiq }
+metadata: { name: atsiq-db-pre-migrate-20261124, namespace: atsiq, labels: { purpose: pre-migrate-backup } }
 spec:
-  { volumeSnapshotClassName: standard-rwo, source: { persistentVolumeClaimName: pvc-ccf4fc30-… } }
+  volumeSnapshotClassName: pd-snapshot-class-asia-south1
+  source: { persistentVolumeClaimName: atsiq-db-1 }
+EOF
+kubectl -n atsiq wait --for=jsonpath='{.status.readyToUse}'=true \
+  volumesnapshot/atsiq-db-pre-migrate-20261124 --timeout=300s
 ```
 
-[VERIFY LIVE: the VolumeSnapshotClass name for the `standard-rwo` PD in this cluster.] Keep the snapshot
-until the catch-up release has been stable for a week. A snapshot alone is not the backup of record — it is
-tied to the cluster and zone; the off-cluster dump in A is what survives the cluster.
+Keep the snapshot until the catch-up release has been stable for a week. A snapshot alone is not the backup
+of record — it is tied to the cluster and zone; the off-cluster dump in A is what survives the cluster.
+
+**Restore proof (executed 2026-11-24, passed):** the dump restores cleanly and matches production. The
+local pg_restore is PostgreSQL 14, which cannot read PG16's format-1.15 archives — install
+`postgresql@16` (Homebrew) and use its client against a scratch PG16 cluster (same major as production):
+
+```bash
+P16=/opt/homebrew/opt/postgresql@16/bin
+$P16/initdb -D /tmp/atsiq-backup-20261124/scratch-pg16 --auth=trust -U postgres
+$P16/pg_ctl -D /tmp/atsiq-backup-20261124/scratch-pg16 -o "-p 54398 -c listen_addresses=127.0.0.1" start
+$P16/createdb -h 127.0.0.1 -p 54398 -U postgres atsiq_restore_check
+$P16/pg_restore -h 127.0.0.1 -p 54398 -U postgres -d atsiq_restore_check \
+  --no-owner --no-privileges -j 4 /tmp/atsiq-backup-20261124/atsiq-20261124.dump   # exit 0, no errors
+
+# compare: table count + rows per table, production vs restore
+Q="select table_name, (xpath('/row/c/text()', query_to_xml(format('select count(*) as c \
+  from %I.%I', table_schema, table_name), false, true, '')))[1]::text::int as rows \
+  from information_schema.tables where table_schema='public' and table_type='BASE TABLE' \
+  order by table_name"
+kubectl -n atsiq exec atsiq-db-1 -c postgres -- psql -U postgres -d atsiq -Atc "$Q" > counts-prod.txt
+$P16/psql -h 127.0.0.1 -p 54398 -U postgres -d atsiq_restore_check -Atc "$Q" > counts-restored.txt
+diff counts-prod.txt counts-restored.txt
+```
+
+**Result:** 62 tables on both sides; **61 of 62 row-for-row identical** (427k rows total). The one
+exception is `app_logs` — restored 425,896 rows vs live 425,780 at compare time, i.e. the restore is
+_ahead_ of live production: `app_logs` is a live, production-only table (see §4) whose rows changed
+between the 12:03 dump and the compare, not a restore defect. Everything else matched exactly.
 
 **C. Later (post-release, real backup posture):** move CNPG to proper backups —
 `barmanObjectStore` targeting a GCS bucket (full + WAL archiving), a `ScheduledBackup` (daily base backup),
