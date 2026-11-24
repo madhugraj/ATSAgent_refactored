@@ -565,6 +565,10 @@ const KNOWN_STAGE_WRITERS = [
   "lifecycle.functions.ts",
   "collaboration.functions.ts",
   "candidates.functions.ts",
+  // Test fixture (a disposable application row), moved with @ats/ai in Phase 3
+  // from scripts/training-data.test.ts — scripts/ is not a scan root, so it
+  // only appears here now that it lives under packages/.
+  "training-data.test.ts",
 ];
 
 /** `.set({ stage: ...` — with stage first or later inside the object. */

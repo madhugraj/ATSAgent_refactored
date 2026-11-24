@@ -13,6 +13,15 @@ const { agentIssues, emailOutbox, orgMembers, organizations, users } =
 const { dispatchAgentAlerts, dispatchAgentDigests, localDayHour } =
   await import("../apps/web/src/server/agents/alerts.server");
 const { evaluateAgentHealth } = await import("../apps/web/src/server/agents/health.server");
+// The alerts package no longer imports the outbox (map §5: foundation must
+// not import comms) — inject the real one, exactly as boot.ts does.
+const outbox = await import("../apps/web/src/lib/email-outbox.server");
+const { setAgentAlertMailer } = await import("../apps/web/src/server/agents/alerts.server");
+setAgentAlertMailer({
+  enqueueEmail: outbox.enqueueEmail,
+  getOrgEmailSettings: outbox.getOrgEmailSettings,
+  formatInOrgTZ: outbox.formatInOrgTZ,
+});
 
 const stamp = Date.now();
 const ownerEmail = `digest-owner-${stamp}@test.local`;

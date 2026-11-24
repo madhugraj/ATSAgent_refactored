@@ -155,6 +155,10 @@ Shims are marked `// SHIM: remove in Phase 8`. `inventory.csv` is updated.
    DATABASE_URL=postgres://…/atsagent_test bun scripts/migrate-pg.mjs && bun run test
    ```
 4. Never work in a checkout another session or teammate is switching branches in. Use your own clone or `git worktree`.
+   Every worktree gets its **own `bun install`** — never symlink `node_modules` to another checkout: workspace
+   packages (`@ats/*`) then resolve to the _other_ branch's in-flight state and every result is untrustworthy
+   (bit Developer 3 in `-p9` and the Phase 3 prep worktrees, 2026-11-24). Each parallel track also gets its own
+   disposable test database (name it `atsagent_<track>_test`); never share one between concurrent runs.
 
 ---
 
@@ -437,6 +441,11 @@ handoff: docs/refactor/phase-log.md#phase-N-handoff
 ---
 
 ## Part F: Escalation and decisions
+
+**Merging under branch protection (2026-11-24):** with only one GitHub account available, merges happen by
+admin override **only after** the reviewer's file (`docs/refactor/reviews/phase-N-review.md`) records an
+approval/verdict for the phase. CI must be green on the merge commit's head. If a second reviewer account is
+added later, this reverts to normal PR approvals.
 
 Stop and write a question in the handoff note (and tell the lead) when:
 

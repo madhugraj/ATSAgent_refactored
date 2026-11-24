@@ -34,7 +34,7 @@ const call = (...calls: AgentToolCall[]): AgentStepResult => ({
 });
 
 const realGateway = await import("../apps/web/src/lib/ai-gateway.server");
-mock.module("../apps/web/src/lib/ai-gateway.server", () => ({
+mock.module("@ats/ai/server", () => ({
   ...realGateway,
   aiAgentStep: async (opts: { messages: AgentMessage[]; tools?: { name: string }[] }) => {
     seen.push({

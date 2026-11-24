@@ -5,7 +5,10 @@
  *
  * Alerts go to the platform's channels — the same ones agent issues use, at
  * platform rather than organisation level:
- *  - e-mail to every platform admin (member_reminder template, as agent alerts);
+ *  - e-mail to every platform admin (member_reminder template, as agent alerts),
+ *    sent through an injected notifier — the composition root
+ *    (apps/web/src/boot.ts) registers the app's e-mail stack with
+ *    {@link setSloNotifier}; this package never imports comms/outbox code;
  *  - an optional signed webhook (PLATFORM_ALERT_WEBHOOK_URL, HMAC-SHA256 with
  *    PLATFORM_ALERT_WEBHOOK_SECRET in `X-ATSAgent-Signature`, as agent alerts);
  *  - an ERROR log line `slo.burn_alert` that a Cloud Monitoring log-based alert
@@ -40,7 +43,7 @@ import {
   type Slo,
   type SloId,
 } from "./slo";
-import { agentRuns, platformAdmins, serviceRequestMinutes, sloAlerts } from "@db/schema";
+import { agentRuns, serviceRequestMinutes, sloAlerts } from "@db/schema";
 
 const RETENTION_DAYS = 35;
 export const INSTANCE_ID = `${hostname().slice(0, 60)}-${Math.random().toString(16).slice(2, 8)}`;
@@ -318,6 +321,37 @@ export async function serviceHealthData(now = Date.now()): Promise<ServiceHealth
 
 const RANK: Record<string, number> = { serious: 1, critical: 2 };
 
+/**
+ * The e-mail side of a burn alert belongs to the app, not to this package
+ * (map §4 L0 / §5: a foundation package must not import comms/outbox). The
+ * composition root (apps/web/src/boot.ts) registers the real sender — the
+ * app's member_reminder mail to every platform admin — with
+ * {@link setSloNotifier}; the notice carries the exact text and metadata the
+ * alert always carried. The notifier returns the delivery channels it used
+ * (e.g. `["email"]`) for the alert's audit row. Without a notifier the alert
+ * still opens, logs `slo.burn_alert`, pages through the webhook and is
+ * audited — only the e-mail is skipped, and nothing throws.
+ */
+export type SloAlertNotice = {
+  alertId: string;
+  slo: { id: SloId; name: string; target: number; windowDays: number };
+  severity: BurnSeverity;
+  burnRate: number;
+  windowMinutes: number;
+  heading: string;
+  message: string;
+  actionUrl: string;
+};
+
+export type SloNotifier = (notice: SloAlertNotice) => Promise<string[]>;
+
+let sloNotifier: SloNotifier | null = null;
+
+/** Register the app's alert e-mail sender (apps/web/src/boot.ts); null unregisters. */
+export function setSloNotifier(notify: SloNotifier | null): void {
+  sloNotifier = notify;
+}
+
 export type SloEvalCounts = {
   opened: number;
   escalated: number;
@@ -438,26 +472,22 @@ async function notifySloAlert(
     target: s.target,
   });
 
-  if (process.env["SMTP_URL"]) {
-    const admins = await db.select({ email: platformAdmins.email }).from(platformAdmins);
-    const { sendTemplateEmail } = await import("@/lib/email-templates/send-email");
-    let sent = 0;
-    for (const a of admins) {
-      try {
-        await sendTemplateEmail("member_reminder", a.email, {
-          idempotencyKey: `slo-alert:${alertId}:${severity}:${a.email.toLowerCase()}`,
-          templateData: {
-            heading: `Service alert (${severity}): ${s.name}`.slice(0, 180),
-            message: `${s.name} is spending its error budget ${burn}× faster than allowed over the last ${windowMinutes >= 60 ? `${windowMinutes / 60} h` : `${windowMinutes} min`} (target ${(s.target * 100).toFixed(1)} % over ${s.windowDays} days). Check Service health and the request logs for the failing route group.`,
-            actionUrl: url,
-          },
-        });
-        sent++;
-      } catch (e) {
-        log.warn("slo.alert.email_failed", { error: e instanceof Error ? e : String(e) });
-      }
+  if (sloNotifier) {
+    const notice: SloAlertNotice = {
+      alertId,
+      slo: { id: s.id, name: s.name, target: s.target, windowDays: s.windowDays },
+      severity,
+      burnRate: burn,
+      windowMinutes,
+      heading: `Service alert (${severity}): ${s.name}`.slice(0, 180),
+      message: `${s.name} is spending its error budget ${burn}× faster than allowed over the last ${windowMinutes >= 60 ? `${windowMinutes / 60} h` : `${windowMinutes} min`} (target ${(s.target * 100).toFixed(1)} % over ${s.windowDays} days). Check Service health and the request logs for the failing route group.`,
+      actionUrl: url,
+    };
+    try {
+      channels.push(...(await sloNotifier(notice)));
+    } catch (e) {
+      log.warn("slo.alert.email_failed", { error: e instanceof Error ? e : String(e) });
     }
-    if (sent) channels.push("email");
   }
 
   const hook = process.env["PLATFORM_ALERT_WEBHOOK_URL"];

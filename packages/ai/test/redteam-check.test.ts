@@ -1,9 +1,9 @@
 /**
- * Model safety check (src/server/redteam/, docs/red-team.md) against the
- * disposable database with a scripted model: a resistant model passes and
- * unlocks Autonomous for that model only; a model that follows one attack,
- * or a probe that cannot run, fails; reruns are throttled.
- * Run: DATABASE_URL=... SESSION_SECRET=... bun test scripts/redteam-check.test.ts
+ * Model safety check (packages/ai/src/server/redteam/, docs/red-team.md)
+ * against the disposable database with a scripted model: a resistant model
+ * passes and unlocks Autonomous for that model only; a model that follows one
+ * attack, or a probe that cannot run, fails; reruns are throttled.
+ * Run: DATABASE_URL=... SESSION_SECRET=... bun test packages/ai/test/redteam-check.test.ts
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { eq } from "drizzle-orm";
@@ -22,8 +22,12 @@ type Grade = {
 let behave: (prompt: string) => Reply | Grade | null = () => null;
 const seen: { system: string; prompt: string; feature: string }[] = [];
 
-const real = await import("../apps/web/src/lib/ai-gateway.server");
-mock.module("../apps/web/src/lib/ai-gateway.server", () => ({
+// The check resolves the gateway through the app entry (the same module as
+// before the move), so the mock keeps targeting that path; the real gateway is
+// taken from its own file so capturing it does not load the check itself
+// (a module mock can only rebind modules imported after it is registered).
+const real = await import("../src/server/ai-gateway.server");
+mock.module("../../../apps/web/src/lib/ai-gateway.server", () => ({
   ...real,
   resolveAiConfig: async () => ({ provider: "openai", model: currentModel, apiKey: "sk-test" }),
   aiJson: async (o: { system: string; prompt: string; feature: string }) => {
@@ -36,11 +40,11 @@ mock.module("../apps/web/src/lib/ai-gateway.server", () => ({
 }));
 let currentModel = "model-a";
 
-const { db } = await import("../apps/web/src/server/db");
-const { aiRedteamChecks, organizations, users } = await import("../apps/web/drizzle/schema");
+const { db } = await import("@ats/db/server");
+const { aiRedteamChecks, organizations, users } = await import("@ats/db/server");
 const { runSafetyCheck, hasValidSafetyCheck, safetyCheckView } =
-  await import("../apps/web/src/server/redteam/check.server");
-const { PROBES } = await import("../apps/web/src/server/redteam/probes");
+  await import("../src/server/redteam/check.server");
+const { PROBES } = await import("../src/server/redteam/probes");
 
 let orgId: string;
 let userId: string;

@@ -27,6 +27,7 @@ import {
   orgMembers,
   organizations,
   userRoles,
+  type EmailOutboxKind,
 } from "@db/schema";
 
 const ALERT_ROLES = ["hr_head", "president_cbo"] as const;
@@ -53,6 +54,37 @@ export type AlertPayload = {
 
 export function signAlert(body: string, secret: string): string {
   return `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+}
+
+/**
+ * The e-mail outbox belongs to the app's comms stack, not to this package
+ * (map §4 L0 / §5: a foundation package must not import comms/outbox). The
+ * composition root (apps/web/src/boot.ts) registers the real outbox functions
+ * here with {@link setAgentAlertMailer}; the alert text, recipients, trigger
+ * cadence and outbox keys are unchanged. Without a mailer (worker runtimes,
+ * tests that do not opt in) alert e-mail is skipped — delivery continues
+ * through the webhook, nothing throws.
+ */
+export type AgentAlertEmail = {
+  orgId: string;
+  kind: EmailOutboxKind;
+  templateName: string;
+  toEmail: string;
+  idempotencyKey: string;
+  templateData?: Record<string, string | undefined>;
+};
+
+export type AgentAlertMailer = {
+  enqueueEmail: (input: AgentAlertEmail) => Promise<void>;
+  getOrgEmailSettings: (orgId: string) => Promise<{ enabled: boolean; timezone: string }>;
+  formatInOrgTZ: (date: Date, timezone: string) => string;
+};
+
+let mailer: AgentAlertMailer | null = null;
+
+/** Register the app's e-mail outbox (apps/web/src/boot.ts); null unregisters. */
+export function setAgentAlertMailer(m: AgentAlertMailer | null): void {
+  mailer = m;
 }
 
 /** People who receive alert e-mail: active owners, HR heads and CBOs of the org. */
@@ -141,10 +173,14 @@ export async function dispatchAgentAlerts(
           )
           .limit(1)
       ).length > 0;
-    if (settings?.alertEmailEnabled !== false && issue.severity === "critical" && !repeat) {
-      const { enqueueEmail } = await import("@/lib/email-outbox.server");
+    if (
+      mailer &&
+      settings?.alertEmailEnabled !== false &&
+      issue.severity === "critical" &&
+      !repeat
+    ) {
       for (const r of await alertRecipients(issue.orgId)) {
-        await enqueueEmail({
+        await mailer.enqueueEmail({
           orgId: issue.orgId,
           kind: "member_reminder",
           templateName: "member_reminder",
@@ -265,9 +301,8 @@ export async function dispatchAgentDigests(
       ),
     );
   const orgIds = [...new Set([...withIssues, ...withReminders].map((o) => o.orgId))];
-  if (!orgIds.length) return { digests: 0 };
-  const { enqueueEmail, getOrgEmailSettings, formatInOrgTZ } =
-    await import("@/lib/email-outbox.server");
+  if (!orgIds.length || !mailer) return { digests: 0 };
+  const { enqueueEmail, getOrgEmailSettings, formatInOrgTZ } = mailer;
   const base = env.PUBLIC_SITE_URL.replace(/\/$/, "");
   let digests = 0;
   for (const orgId of orgIds) {
@@ -438,7 +473,12 @@ export async function sendTestAlertEmail(ctx: {
 }): Promise<{ ok: boolean; message: string }> {
   if (!ctx.alertEmailEnabled)
     return { ok: false, message: "Switch on alert e-mail and save first." };
-  const { enqueueEmail, getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  if (!mailer)
+    return {
+      ok: false,
+      message: "E-mail is not available in this runtime (no outbox registered).",
+    };
+  const { enqueueEmail, getOrgEmailSettings } = mailer;
   if (!(await getOrgEmailSettings(ctx.orgId)).enabled)
     return {
       ok: false,

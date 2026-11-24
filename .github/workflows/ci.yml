@@ -119,20 +119,4 @@ jobs:
       # bundles must boot on their own (phase-2 review B1). Copy them into
       # bare directories, start with dummy env, and require the health line.
       - name: Worker boot smoke (no node_modules)
-        run: |
-          rm -rf /tmp/voice-smoke /tmp/parser-smoke
-          mkdir -p /tmp/voice-smoke /tmp/parser-smoke
-          cp .output/voice-worker/* /tmp/voice-smoke/
-          cp .output/parser-worker/* /tmp/parser-smoke/
-          cd /tmp/voice-smoke
-          DATABASE_URL=postgres://127.0.0.1:1/nope SESSION_SECRET=dummy-secret-0123456789abcdef0123456789abcdef \
-            SIP_SERVER=127.0.0.1 SIP_PORT=5060 SIP_USER=smoke SIP_PASSWORD=smoke SIP_DOMAIN=smoke.local \
-            timeout 10 node -e "setTimeout(()=>process.exit(0),8000); import('./index.mjs').catch(e=>{console.error(e.message); process.exit(1)})" > voice.log 2>&1 || true
-          grep -q "voice_worker.started" voice.log || { echo "voice worker did not start:"; cat voice.log; exit 1; }
-          ! grep -qE "ERR_MODULE_NOT_FOUND|Cannot find package|PACKAGE_IMPORT_NOT_DEFINED" voice.log
-          cd /tmp/parser-smoke
-          PARSER_TOKEN=smoke-token PORT=0 \
-            timeout 10 node -e "setTimeout(()=>process.exit(0),8000); import('./index.mjs').catch(e=>{console.error(e.message); process.exit(1)})" > parser.log 2>&1 || true
-          grep -q "parser worker listening" parser.log || { echo "parser worker did not start:"; cat parser.log; exit 1; }
-          ! grep -qE "ERR_MODULE_NOT_FOUND|Cannot find package|PACKAGE_IMPORT_NOT_DEFINED" parser.log
-          echo "both workers boot without node_modules" 
+        run: bash scripts/worker-boot-smoke.sh

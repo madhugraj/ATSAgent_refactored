@@ -83,3 +83,20 @@ This class of bug is invisible to every check we have today.
 3. `WARN_MAX` is set to 171.
 
 Then I'll approve #4, and Phase 3 can start.
+
+## Re-review of `96c0067` … `8f61def` (2026-11-24, reviewer)
+
+- **B1: fixed, verified.**
+  - The voice worker's externals are back to Phase 1's list.
+  - `server-only` is aliased to an empty module.
+  - The bundle ships `package.json` with an `imports` map that points `#tanstack-start-server-fn-resolver` at a stub (`getServerFnById = undefined`).
+  - Reviewer's repro: both bundles copied to bare temp dirs and run with `node`. The voice worker logs `voice_worker.started` and the parser logs `parser worker listening`. No resolution errors.
+- **Smoke step in CI:** present and correct. Both workers boot from bare `/tmp` dirs, CI requires each one's health line, and it fails on `ERR_MODULE_NOT_FOUND` / `Cannot find package` / `PACKAGE_IMPORT_NOT_DEFINED`.
+- **`WARN_MAX` = 171:** ✅. **A3:** ✅ `undici` and `zod` are declared.
+- **gitleaks allowlist:** narrow enough. It is limited to `ci.yml`, and only for the `SESSION_SECRET|SIP_PASSWORD|PARSER_TOKEN=<dummy>` shapes.
+- **Executor's finding confirmed:** the source repo's voice worker at `25d6e6f` fails identically from a bare dir (`ERR_PACKAGE_IMPORT_NOT_DEFINED #tanstack-start-server-fn-resolver`). Production is either running an older image or a broken worker. **Action (source repo, a bug fix allowed during the freeze):**
+  1. Port the same build fix and smoke step to `ATSAgent`.
+  2. The owner checks which image the `voice-worker` deployment runs, and whether its pods are healthy or crash-looping.
+- **Nit:** make the stub throw a clear error (`"server functions are not available in the voice worker"`) instead of `undefined`. If dead code ever becomes live, it then fails loudly at the call site.
+
+**Verdict: APPROVE**, once the `verify` check on `8f61def` is green. It was still pending at the time of this re-review.

@@ -1,0 +1,18 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    // Interim (while app-side shims stand, removed in Phase 8): the moved
+    // redteam check still consumes two app-side modules — `@/lib/ai-gateway.server`
+    // so every existing caller (and the gateway mock in agent-governance and the
+    // other agent tests) keeps resolving to one module, and `@/lib/screening.server`
+    // (the redteam→screening edge that the later registerRedteamTarget change PR
+    // removes) — and this package's typecheck program reaches app files through
+    // its tests. Same aliases as apps/web/tsconfig.json, so this package and the
+    // app resolve them to the same files.
+    "paths": {
+      "@/*": ["../../apps/web/src/*"],
+      "@db/*": ["../../apps/web/drizzle/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

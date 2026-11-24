@@ -24,7 +24,7 @@ import {
 const seen: { feature: string; system: string; prompt: string }[] = [];
 let assessFixture: AssessOutput;
 const realGateway = await import("../apps/web/src/lib/ai-gateway.server");
-mock.module("../apps/web/src/lib/ai-gateway.server", () => ({
+mock.module("@ats/ai/server", () => ({
   ...realGateway,
   aiJson: async (opts: { feature: string; system: string; prompt: string }) => {
     seen.push(opts);

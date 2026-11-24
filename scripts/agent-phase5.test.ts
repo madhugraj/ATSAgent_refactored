@@ -39,7 +39,7 @@ const call = (...calls: AgentToolCall[]): AgentStepResult => ({
 
 let aiAgentStepCalls = 0;
 const realGateway = await import("../apps/web/src/lib/ai-gateway.server");
-mock.module("../apps/web/src/lib/ai-gateway.server", () => ({
+mock.module("@ats/ai/server", () => ({
   ...realGateway,
   aiAgentStep: async () => {
     aiAgentStepCalls += 1;
@@ -92,8 +92,16 @@ const { compareRuns, diffToolSequences } =
   await import("../apps/web/src/server/agents/replay.server");
 const { recommendAutonomy, autonomyRecommendations, AUTONOMY } =
   await import("../apps/web/src/server/agents/autonomy.server");
-const { dispatchAgentAlerts, sendTestAlertEmail } =
+const { dispatchAgentAlerts, sendTestAlertEmail, setAgentAlertMailer } =
   await import("../apps/web/src/server/agents/alerts.server");
+// The alerts package no longer imports the outbox (map §5: foundation must
+// not import comms) — inject the real one, exactly as boot.ts does.
+const outbox = await import("../apps/web/src/lib/email-outbox.server");
+setAgentAlertMailer({
+  enqueueEmail: outbox.enqueueEmail,
+  getOrgEmailSettings: outbox.getOrgEmailSettings,
+  formatInOrgTZ: outbox.formatInOrgTZ,
+});
 const { buildOtlpPayload, exportAgentTraces } =
   await import("../apps/web/src/server/agents/otel.server");
 const { platformAgentConsoleData } = await import("../apps/web/src/server/agents/platform.server");

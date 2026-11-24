@@ -12,7 +12,7 @@ import { and, eq } from "drizzle-orm";
 /** What the fake checker answers: a fix when the letter says "probation of 12 months". */
 const realGateway = await import("../apps/web/src/lib/ai-gateway.server");
 let lastPrompt = "";
-mock.module("../apps/web/src/lib/ai-gateway.server", () => ({
+mock.module("@ats/ai/server", () => ({
   ...realGateway,
   aiJson: async (opts: { feature: string; prompt?: string }) => {
     if (opts.feature !== "offer_policy_check")

@@ -28,7 +28,7 @@ const { coverageWords, notReached } = await import("../apps/web/src/lib/screenin
 const lastGrade: { system?: string; prompt?: string } = {};
 /** What the desk's going-back judge was last given. */
 const lastJudge: { prompt?: string } = {};
-mock.module("../apps/web/src/lib/ai-gateway.server", () => ({
+mock.module("@ats/ai/server", () => ({
   ...realGateway,
   aiJson: async (opts: { feature: string; system?: string; prompt?: string }) => {
     if (opts.feature === "screening_grade")

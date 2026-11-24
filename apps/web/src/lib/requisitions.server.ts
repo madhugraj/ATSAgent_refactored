@@ -10,26 +10,19 @@ import { and, desc, eq, like } from "drizzle-orm";
 import { db } from "../server/db";
 import { jobDescriptions, requisitions } from "@db/schema";
 import { emitAgentEvent } from "../server/agents/events";
-import { assertRole, type AppRole } from "./auth.middleware";
+import {
+  assertRole,
+  APPROVER_ROLE,
+  type AppRole,
+  type LifecycleActor,
+  type ReqStatus,
+} from "@ats/auth/server";
 import type { OrgProfileSections } from "./org-profile";
 
-export type LifecycleActor = {
-  orgId: string;
-  userId: string;
-  memberEmail: string;
-  /** Set when an agent performs the action for this member (recorded in trails). */
-  via?: "agent";
-};
-
-export type ReqStatus =
-  | "draft"
-  | "pending_dh"
-  | "pending_hr"
-  | "pending_cbo"
-  | "approved"
-  | "rejected"
-  | "on_hold"
-  | "closed";
+// The actor vocabulary (LifecycleActor, ReqStatus, APPROVER_ROLE, actorFor)
+// lives in @ats/auth/server next to the role checks it feeds (map §4 L1,
+// auth row). Re-exported here so this module's surface is unchanged.
+export { APPROVER_ROLE, actorFor, type LifecycleActor, type ReqStatus } from "@ats/auth/server";
 
 /**
  * The requisition approval chain (DH → HR → CBO): each target status names the
@@ -60,13 +53,6 @@ export const NEXT_APPROVAL: Partial<Record<ReqStatus, ReqStatus>> = {
   pending_dh: "pending_hr",
   pending_hr: "pending_cbo",
   pending_cbo: "approved",
-};
-
-/** Which role approves a requisition waiting at `status`. */
-export const APPROVER_ROLE: Partial<Record<ReqStatus, AppRole>> = {
-  pending_dh: "department_head",
-  pending_hr: "hr_head",
-  pending_cbo: "president_cbo",
 };
 
 export type RequisitionFields = {
@@ -696,15 +682,6 @@ export async function requestJdChangesCore(
     actorUserId: actor.userId,
     payload: { requisitionId: jd.requisitionId, comment: input.comment },
   });
-}
-
-/** Resolve the member identity an agent acts as. */
-export async function actorFor(orgId: string, userId: string): Promise<LifecycleActor> {
-  const { activeOrgOf } = await import("./auth.middleware");
-  const org = await activeOrgOf(userId);
-  if (!org || org.orgId !== orgId)
-    throw new Error("The person this agent works for has left the organisation.");
-  return { orgId, userId, memberEmail: org.memberEmail, via: "agent" };
 }
 
 export type ApproverEdit = {

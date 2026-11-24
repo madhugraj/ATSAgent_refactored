@@ -25,7 +25,7 @@ Phase 0 notes found during the merge:
 | 0            | `fix/offer-stage-events` (madhugraj/ATSAgent#76) + `chore/p0-fixes` (**#80**, merged `ca7599c`)                                                                                                                                                                                                                                                                        | source repo                                                      | Gate 0: pass 2026-11-23 (typecheck ✓, lint 0 errors ✓, 89 files / 1367 tests / 0 fail ✓, agents:lock no diff ✓)                                                                                                                                                                    | **Signed off 2026-11-23** (Claude; independent re-run at `ca7599c`: 89 files / 1,367 pass / 0 fail). See `reviews/phase-0-review.md`; R1 due before Phase 2  | 2026-11-23 |
 | 1            | ATSAgent_refactored @ `main` (remote madhugraj/ATSAgent_refactored, private). **History rewritten 2026-11-23** to purge the accidentally-committed `.turbo` cache (F3): old→new SHAs — `c6aa095`→`653ef1f` (bootstrap), `61df2e8`→`d2e0061` (docs), `9298d75`→`c3eea66` (conditions C1–C4/A1), `f57916c`→`0265855` (docs row), `a7b4551`→`b450d70` (dependabot paths). | monorepo shell; tools/                                           | Gate 1: pass 2026-11-23 (turbo typecheck+build ✓; lint, per-file tests and migrations run through root scripts ✓; app boots + login ✓, inventory 0 unmapped ✓, no forbidden files ✓, 89 files / 1367 tests = source parity ✓, agents:lock no diff ✓, depcruise 0 errors at warn ✓) | **PASS with conditions C1–C4** (Claude, 2026-11-23; independent re-run: 89 files / 1,367 pass / 0 fail, src byte-identical). See `reviews/phase-1-review.md` | 2026-11-23 |
 | 2            |                                                                                                                                                                                                                                                                                                                                                                        |                                                                  |                                                                                                                                                                                                                                                                                    |                                                                                                                                                              |            |
-| 3            |                                                                                                                                                                                                                                                                                                                                                                        |                                                                  |                                                                                                                                                                                                                                                                                    |                                                                                                                                                              |            |
+| 3            | `refactor/p3-l1-platform` (12+ commits: sync, 5 package moves, kernel cycle fix, SLO notify, ALS guards, gate additions, hardening suite, merge with main post-9a/tzfix)                                                                                                                                                                                               | @ats/audit, @ats/auth, @ats/ai, @ats/kernel, @ats/platform-http  | Gate 3: pass 2026-11-24 (typecheck 14/14 ✓, lint 0 errors ✓, package suites ✓, scripts suite 0 fail ✓, agents:lock no diff ✓, worker boot smoke ✓, depcruise 171 ✓, parity 12 prefixes/4 origins ✓, attribution ✓, limiter bursts ✓, CSRF ✓, ALS guards proven ✓)                  | _awaiting review_                                                                                                                                            | 2026-11-24 |
 | 4            |                                                                                                                                                                                                                                                                                                                                                                        |                                                                  |                                                                                                                                                                                                                                                                                    |                                                                                                                                                              |            |
 | 5            |                                                                                                                                                                                                                                                                                                                                                                        |                                                                  |                                                                                                                                                                                                                                                                                    |                                                                                                                                                              |            |
 | 6            |                                                                                                                                                                                                                                                                                                                                                                        |                                                                  |                                                                                                                                                                                                                                                                                    |                                                                                                                                                              |            |
@@ -35,6 +35,78 @@ Phase 0 notes found during the merge:
 | 10           |                                                                                                                                                                                                                                                                                                                                                                        |                                                                  |                                                                                                                                                                                                                                                                                    |                                                                                                                                                              |            |
 
 <!-- Append one handoff note per phase below, using template E2 in 00-TEAM-BRIEF.md. -->
+
+### Phase 3 handoff: 2026-11-24 (Dev 1)
+
+- **Branch / PRs:** `refactor/p3-l1-platform`, 16 commits: `a2d2d24` sync 3d55eb1 · `fee9bed` @ats/audit ·
+  `8e406dc` @ats/auth · `7d8e7d2` @ats/ai · `8391fff` @ats/kernel + cycle fix · `700620a` @ats/platform-http ·
+  `e8e06be` SLO notify + ALS guards · `78de958` gate additions · `55462ad`…`3041f63` hardening suite ·
+  merge with `origin/main` (post-9a #7, tzfix #13) resolving the gateway/server.ts/lock conflicts.
+- **Source sync:** `SOURCE_SHA` 3d55eb1 → **bca8574 staged on branch `sync/bca8574`** (4 commits, freeze
+  exception for #87 + #90, product owner approved). It rebases onto the Phase 3 merge after this PR lands
+  (the only real conflict: orchestrator sweeps importing `@ats/kernel/server` — mechanical). Dev 2's #91 and
+  the 9a migration `0094_service_tokens` do not clash with 0092/0093.
+- **Packages created:** @ats/audit (writeAudit) · @ats/auth (identity/password/step-up/action-token/claims/
+  oauth-state + the framework-neutral core extracted from auth.middleware/requisitions.server; the TanStack
+  wrapper stays in the app with the unchanged requireOrg/requireRole/requireOrgOwner/requirePlatformAdmin
+  surface) · @ats/ai (gateway whole-move — the transport/providers/ledger split stays a later change PR —
+  ledger, pricing, spend cap, prompt-echo, training, redteam, context, injection) · @ats/kernel (events,
+  policy, registry, manifest.server, task-liveness, hitl, run-messages, ports) · @ats/platform-http
+  (rate-limit, cron-auth, the extracted server.ts pipeline).
+- **Change PRs (logic):**
+  1. **The §5 cycle fix:** kernel events.ts no longer dynamically imports the orchestrator — emitAgentEvent
+     inserts + calls `onAgentEvent` handlers; `apps/web/src/boot.ts` (new composition root) registers the
+     orchestrator kick, preserving AGENT_INLINE_KICK=0 semantics. Kernel has zero orchestrator imports.
+     The boot-wiring test fails if boot.ts stops registering it.
+  2. **SLO notify injection** (owed from Phase 2): observability takes an injected notifier; boot registers
+     the app's email path. observability has zero comms/mail imports — the parser worker can now drop them.
+  3. **ALS load-once guards:** each of kernel/ai/observability arms a globalThis symbol in its /server
+     entry; a duplicated copy throws the named loud error at import. Proven by test.
+  4. **boot wiring in the build:** apps/web package.json marks `./src/boot.ts` in `sideEffects` so
+     tree-shaking cannot silently drop the registrations — `worker-boot-smoke.sh` asserts the guards and
+     the alert mailer are present in the built bundle.
+- **Gate 3 (workflow gate agent + coordinator re-run):** typecheck 11→14/14 · lint 0 errors / 271 warnings ·
+  package suites 67 tests · scripts suite 82→86 files, 0 fail · `agents:lock` no diff ·
+  attribution verified field-level (`ai_usage_events.agentRunId` set in-run, null out-of-run;
+  `training_inferences.candidateId` resolved) · limiter bursts on every branch (`/_serverFn`,
+  `/api/public/*`, `/api/auth/login`, `/api/auth/confirm` tighter-contrast, `/api/auth/session`, `/me`,
+  `/api/agents/*`, `/api/mcp`, `/api/workflows/*`) · `/metrics` 404/401 · cross-site CSRF 403 ·
+  worker boot smoke ✓ · depcruise ratchet 171 ✓ · parity 12 prefixes / 4 origins vs bca8574 ✓.
+- **Hardening suite (product owner's criteria):** scripts/check-platform-parity.mjs + bca8574 snapshot
+  (mutation-tested) · scripts/rate-limit.test.ts 22 tests · scripts/als-single-instance.test.ts (proves the
+  landed guards fire on a genuine cache-busted second import — probe verified bun creates one) ·
+  scripts/boot-wiring.test.ts · scripts/ai-call-path-audit.test.ts (providers only in the gateway;
+  AI_FEATURES slugs, no bare literals; server-fn responses free of model/engine outside a documented
+  baseline). The 17 ai-gateway mocks + the ledger mock re-pointed to `@ats/ai/server` per Dev 2's
+  mock-paths.md; usage assertions prove interception at the new specifier (all 17 files green).
+- **Freeze exception (recorded):** #87 + #90 synced via `sync/bca8574`; brings migrations 0092/0093 (columns
+  on panelists [interviews] and screening_calls [voice] — no new tables, owners already correct), the two
+  new agents (25 agents, lock regenerated deliberately on that branch), email kinds/templates, three
+  orchestrator sweeps, voice/short-call.server.ts.
+- **Depcruise watch (product owner):** the sync raises warnings 171 → 183 (+12 no-cycles edges). WARN_MAX
+  deliberately NOT raised. New edges for map §10 review: orchestrator → voice/confirm-calls.server,
+  → lib/panelist-mobile.server, → lib/interview-reminders.server, → voice/scheduling-request.server;
+  voice/confirm-calls.server → desk.server + agents/{context,policy}; voice/call-session → voice/
+  confirm-calls; voice/scheduling-request → voice/confirm-calls; voice/scheduling-session → voice/short-call;
+  interviewer-brief.server → panelist-mobile.server; panelists.server → voice/phone; tools-phase2 →
+  tools-confirm-calls; definitions → voice/confirm-call-prompts.
+- **Deviations:** (1) interim tsconfig paths remain in observability/security (shrink as L2 lands);
+  (2) the gateway is not yet split into transport/providers/ledger/json (later change PR); (3) the auth
+  core extraction drops `createServerOnlyFn` wrapping on the extracted fns (identity functions at runtime;
+  the /server entry keeps the server-only marker); (4) merged `origin/main` into the branch rather than
+  rebasing — the tzfix (#13) had edited the gateway file that the ai move relocates, and the resolution
+  ports #13's deterministic withToday into `@ats/ai/server` (verified byte-identical output).
+- **Findings for the reviewer (AI call-path audit baseline):** pre-existing vendor-leak candidates —
+  salary-benchmark.functions returns `result.model`; onboarding.functions returns `read.model`;
+  verification/assessment.functions return `result.model`; platform-ai-usage.functions renders usage rows'
+  models on the admin page (carve-out covers only the BYO page); ontology.functions `stats.model: engine`
+  (may be a non-vendor label). Bug fixes allowed under the freeze — needs a product ruling.
+- **Findings recorded elsewhere:** worker-bundle bun-ICU incident (#11/#12/#13 on main, fixed and
+  documented); 9a handoff on `services/9a-template` (Dev 3).
+- **Questions for reviewer:** (1) approve the 12 new sync edges for map §10 (list above); (2) rule on the
+  vendor-leak findings (fix now as freeze-exception bug fixes, or amend the invariant's carve-out for the
+  platform-admin page); (3) confirm the platform-http extraction shape (server.ts ~30 lines, pipeline.ts
+  composable) matches the Option-B intent.
 
 ### Phase 9a handoff → Developer 3 (2026-11-24)
 
