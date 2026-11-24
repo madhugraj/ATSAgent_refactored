@@ -330,3 +330,17 @@ The re-run at `ca7599c` found 125 tables, 24 unmapped files and 5 new wrong-way 
 **The 23 new tables:** the executor proposes owners in `table-owners.mjs` using the same rule as §7 (the writer owns the table). The reviewer approves them at Gate 1. §7's count becomes 125.
 
 **Before Phase 2:** fix review finding R1, so the stage-writer guard scans `src`, `apps` and `packages` and asserts a minimum file count.
+
+## 11. Rulings from the Phase 4 dry runs (reviewer, 2026-11-24)
+
+Rehearsed the legal/comms/integrations moves against the Phase 3 branch (`a4008c4`); findings and
+reasoning in `notes/dev2-phase4-dryruns.md` (PR #17).
+
+| #   | Topic                                  | Ruling                                                                                                                                                                                                          |
+| --- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `email-brand.server`                   | Moves to `@ats/comms/server` (L0 imports only; `send-email` needs it).                                                                                                                                          |
+| 2   | `createMeetingLinkCore` wrapper        | Drops `createServerOnlyFn`: exported only from `./server` (server-only marker there); the app wrapper keeps `createServerFn` + its middleware unchanged.                                                        |
+| 3   | `ics`                                  | Split: `buildIcs` (pure) → `@ats/comms/shared`; `downloadIcs` (Blob/document) stays an apps/web UI helper — domain packages are DOM-free.                                                                       |
+| 4   | comms move order                       | (a) transport + `onInboundMail(handler)` registry change PR → (b) intake/onboarding/job-channel handlers stay in the app, registered in `boot.ts` → (c) the `email-outbox` move. (a) is a prerequisite for (c). |
+| 5   | integrations ↔ web `readSecrets` cycle | Temporary: lazy import only, `// SHIM: remove when the credential store moves to @ats/org`, counted in depcruise warnings (WARN_MAX must not rise). Prefer Dev 1 landing `@ats/org`'s credential store first.   |
+| 6   | `server-only` in `shared` entries      | `@ats/*/shared` entries must be browser-safe (rule 5); checked at the Phase 3 review before #15 merges.                                                                                                         |

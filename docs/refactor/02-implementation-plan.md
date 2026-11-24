@@ -129,6 +129,10 @@ Order: `audit` → `auth` → `ai` → `kernel` → `platform-http`.
 - `desk-core`: extract the chat store and `notifyRequisitionThread` from `desk.server.ts`. Change the ~50 domain call sites
   from `import("…/desk.server")` to `@ats/desk-core/server`. **The call stays synchronous at the same point**, so message order is unchanged.
 - `comms`: add `onInboundMail` registry. Split `local-inbox.server` into transport (comms) and handlers (candidates/onboarding, registered in boot).
+  **Order (ruling 2026-11-24, map §11):** (a) the transport + registry extraction is its own change PR and a PREREQUISITE for the
+  `email-outbox` move (outbox calls `local-inbox.inboxAddress` via `careersReplyAddress`); (b) the intake/onboarding/job-channel handlers stay
+  in the app and register in `boot.ts`; (c) then `email-outbox` moves. `ics` splits: `buildIcs` → `comms/shared`, `downloadIcs` stays in web.
+  `email-brand.server` moves to comms/server (map §11 ruling 1).
 - `integrations`: meetings/LinkedIn provider code. `org` keeps a generic credential store.
 - `legal`: move the `LegalSection` type out of `components/LegalPage.tsx`.
 - `org-profile` / `org-context` start runs through `AgentPort`.
