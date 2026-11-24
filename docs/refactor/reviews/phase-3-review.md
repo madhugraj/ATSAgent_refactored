@@ -49,10 +49,18 @@
 ## Rulings on the executor's questions
 
 1. **The 12 new sync edges (`sync/bca8574`, #87/#90):** **approved as temporary**, recorded in map §10 as "freeze-exception edges, resolved in Phase 7". They are all in voice, orchestrator and interviews, which are L4/L3 work Phase 7 untangles. The sync PR may set `WARN_MAX` to **114 + 12 = 126 at most**, with the edges listed in the PR. That's a one-off exception: the number may not go above what the sync adds.
-2. **Vendor-leak findings:**
-   - **`salary-benchmark`, `onboarding`, `verification` and `assessment` returning `result.model` / `read.model`:** these break the invariant. Fix them as bug-fix PRs in the source repo (allowed under the freeze): strip the field from the wire return and keep it in the database. These are Developer 2's domains (offers, onboarding, interviews), so Developer 2 owns them. Then remove the four entries from the audit baseline.
-   - **`ontology.functions` `stats.model: engine`:** check it. If it carries a vendor or model name, it gets the same fix. If it's a neutral label, rename the field so the audit stops matching it.
-   - **`platform-ai-usage` (the platform admin page shows model names):** **product decision.** The invariant as written allows model names only on the organisation's own BYO-key page. Either strip them there too, or amend the AGENTS.md invariant to allow the internal platform-admin console. The product owner decides.
+2. **Vendor-leak findings** (corrected 2026-11-25 after Developer 2 checked them):
+   - **`salary-benchmark`, `onboarding`, `verification`, `assessment`: verified false positives.** Every
+     `model:` hit is a **DB write** (`.values` / `.set`), and the wire returns exclude the field: `toWire(row)`
+     leaves it out, `{status, note}`, `{ok}`, and `{model: _model, ...wire}`. No invariant breach, so **no source
+     change** (moving the writes now would be refactor churn during the freeze).
+   - **Developer 1:** annotate those baseline entries as "verified false positive: persisted column, not returned",
+     or tighten the audit to skip `.set({…})` / `.values({…})` blocks, as a small follow-up after #15.
+   - The core extractions stay with the Phase 6 change PRs (offers, onboarding, interviews).
+   - **`ontology.functions` `stats.model: engine`:** check it. If it carries a vendor or model name, strip it from the
+     wire. If it's a neutral label, rename the field.
+   - **`platform-ai-usage` (the platform admin page shows model names):** **product decision.** Strip them, or amend
+     the AGENTS.md invariant to allow the internal platform-admin console.
 3. **platform-http shape** (`server.ts` about 30 lines, `pipeline.ts` composable): **matches the Option-B intent.** Approved.
 
 ## Deviations
