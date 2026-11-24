@@ -31,7 +31,13 @@ const OWNERS = {
     "org_pool_shares",
   ],
   legal: ["org_agreements"],
-  platform: ["audit_log", "rate_limit_hits", "service_request_minutes", "slo_alerts"],
+  platform: [
+    "audit_log",
+    "rate_limit_hits",
+    "service_request_minutes",
+    "slo_alerts",
+    "service_tokens",
+  ],
   ai: [
     "ai_settings",
     "ai_provider_credentials",

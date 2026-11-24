@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "data": {
+    "fitScore": 0.82,
+    "verdict": "shortlist",
+    "reasons": ["relevant tenure", "matching stack"]
+  },
+  "usage": {
+    "promptTokens": 1823,
+    "completionTokens": 96,
+    "totalTokens": 1919
+  }
+}

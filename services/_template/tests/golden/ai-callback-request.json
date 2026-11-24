@@ -1,0 +1,5 @@
+{
+  "system": "Score the application against the job description. Return JSON only.",
+  "prompt": "JD: <untrusted_data label=\"jd\">...</untrusted_data>\nCV: <untrusted_data label=\"cv\">...</untrusted_data>",
+  "orgId": "7e9b1f52-3a44-4c1b-9c2e-8f1d2a3b4c5d"
+}

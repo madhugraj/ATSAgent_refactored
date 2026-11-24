@@ -75,11 +75,18 @@ the source repo's `AGENTS.md` (security invariants; they apply in full), then th
 3. Run the phase gate locally (plan, "Gate N", plus the standard gate).
 4. Fill the phase row and the handoff note in `phase-log.md` (template in Part E).
 5. Roles (decided): **an executor session builds each phase; a separate reviewer session reviews it.**
-   Never review your own phase. Ask the reviewer: **"review phase N in ATSAgent_refactored"**. The reviewer checks out your branch into a
-   separate review folder (`/Users/yavar/Documents/CoE/ATSAgent_refactored-review`, so your working copy is never
-   touched), runs the gate independently, and returns findings by severity.
-   Fix blockers, then the phase is signed off. Do not start phase N+1 on a package that phase N's review touched
-   until sign-off.
+   **Team (decided 2026-11-24): 3 developers, split by package ownership.**
+   - **Dev 1:** the critical path (Phases 3, 4 `desk-core`/`org`, 5 `pipeline`, 7 `agents`/`desk`/`voice`/`workspace`,
+     10). Owns the shared files and the `SOURCE_SHA` sync.
+   - **Dev 2:** the domains (Phase 4–5 test prep, 4 `legal`/`comms`/`integrations`, 5 `requisitions`/`candidates`/
+     `distribution`, 6 all, 7 `analytics`).
+   - **Dev 3:** Python and infra (Phase 9a/9b, Phase 8, and the pre-cut-over production release).
+   - The schedule and parallel-work rules are in plan §"Effort and staffing". Never edit another developer's package.
+     Never review your own phase. Ask the reviewer: **"review phase N in ATSAgent_refactored"**. The reviewer checks out your branch into a
+     separate review folder (`/Users/yavar/Documents/CoE/ATSAgent_refactored-review`, so your working copy is never
+     touched), runs the gate independently, and returns findings by severity.
+     Fix blockers, then the phase is signed off. Do not start phase N+1 on a package that phase N's review touched
+     until sign-off.
 
 **Definition of done for every PR:** typecheck, lint and all tests green. The dependency-cruiser rules for touched
 packages pass at their current level (warn or error). `agents:lock` shows no diff. No server code in the client bundle.

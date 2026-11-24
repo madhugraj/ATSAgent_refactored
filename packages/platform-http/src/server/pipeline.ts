@@ -131,6 +131,17 @@ export function isPublicApiPath(path: string): boolean {
 }
 
 /**
+ * Internal service-to-service API (refactor plan Phase 9): token-authenticated
+ * callbacks from the Python services (POST /api/internal/ai). Limited like the
+ * public paths so a runaway service cannot spend unbounded LLM budget. The
+ * /api/internal prefix is stable — the limiter keys on it, and the services'
+ * client and deploy config depend on it.
+ */
+export function isInternalApiPath(path: string): boolean {
+  return path === "/api/internal" || path.startsWith("/api/internal/");
+}
+
+/**
  * Server-function RPCs are also public attack surface — the apply endpoint is
  * one — so they are limited per caller per function (the /_serverFn/<id> path
  * already names the function). Without this, the public apply path has no
@@ -382,7 +393,10 @@ export async function rateLimitedDispatch(
   }
   if (
     request.method !== "OPTIONS" &&
-    (isPublicApiPath(url.pathname) || isServerFnPath(url.pathname) || group === "metrics")
+    (isPublicApiPath(url.pathname) ||
+      isInternalApiPath(url.pathname) ||
+      isServerFnPath(url.pathname) ||
+      group === "metrics")
   ) {
     return (await allowRequest(`${clientIp(request)}:${url.pathname}`))
       ? handleAppRequest(request, url, env, ctx, app)

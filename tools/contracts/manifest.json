@@ -1,0 +1,20 @@
+[
+  {
+    "id": "BiasReportRequest",
+    "service": "_template",
+    "module": "services/_template/contracts/demo.ts",
+    "export": "BiasReportRequest"
+  },
+  {
+    "id": "AiCallbackRequest",
+    "service": "_template",
+    "module": "apps/web/src/lib/ai-callback.contract.ts",
+    "export": "AiCallbackRequest"
+  },
+  {
+    "id": "AiCallbackOk",
+    "service": "_template",
+    "module": "apps/web/src/lib/ai-callback.contract.ts",
+    "export": "AiCallbackOk"
+  }
+]
