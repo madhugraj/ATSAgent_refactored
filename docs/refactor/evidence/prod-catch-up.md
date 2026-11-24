@@ -126,12 +126,10 @@ shape, or alter a column production never got.
 There is **no backup settings and no backups today** (confirmed live). Nothing in §7 runs until steps A and
 B have succeeded once and a restore has been tested.
 
-**Status 2026-11-24: A and B are done and verified once** (the exact commands below were executed today,
-read-only against production), with one caveat: the **off-cluster GCS upload is blocked** — the operator
-account (`madhu.r@yavar.ai`) has no `storage.buckets.create`/`buckets.list` in any project, and no bucket
-name is recorded anywhere in the repo. The dump currently sits on the operator's machine until the product
-owner either creates a bucket or grants the storage role. Until then the backup-of-record is the B
-snapshot (in-cluster, zone-bound).
+**Status 2026-11-24: A, B and the restore proof are done and verified** (the exact commands below were
+executed today, read-only against production). The bucket is **`gs://atsiq`** (project `atsiq-508808`,
+provided by the product owner — the operator account cannot create or list buckets); the verified dump is
+at `gs://atsiq/backups/atsiq-20261124.dump`. Per-release backups repeat A (dump + copy) and B (snapshot).
 
 **A. pg_dump, stored off-cluster (the primary, portable backup) — exact commands, executed 2026-11-24:**
 
@@ -142,10 +140,10 @@ kubectl -n atsiq exec atsiq-db-1 -c postgres -- \
   pg_dump -U postgres -Fc --no-owner --no-privileges atsiq \
   > $D/atsiq-20261124.dump          # 13 MB compressed (DB 191 MB), exit 0
 
-# 2. upload off-cluster  ← BLOCKED on IAM today (see status note above)
-gcloud storage buckets create gs://atsiq-db-backups --project=yavar-studio \
-  --location=asia-south1 --uniform-bucket-level-access --public-access-prevention
-gcloud storage cp $D/atsiq-20261124.dump gs://atsiq-db-backups/atsiq-20261124.dump
+# 2. upload off-cluster — bucket gs://atsiq (project atsiq-508808, product-owner-provided;
+#    the operator account has object-level access only, no buckets.create/list)
+gcloud storage cp $D/atsiq-20261124.dump gs://atsiq/backups/atsiq-20261124.dump
+gcloud storage ls -l gs://atsiq/backups/   # verify: 1 object, 13899783 bytes
 ```
 
 **B. Disk snapshot of the data PVC — done 2026-11-24 (`readyToUse=true`, restoreSize 10Gi):**
