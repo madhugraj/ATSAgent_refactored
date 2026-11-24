@@ -4,10 +4,10 @@
  * and the /metrics endpoint, SLO maths, persisted SLI minutes, the Service
  * health data and burn-rate alerts — against the disposable local database.
  */
-import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { and, eq, gte, inArray } from "drizzle-orm";
 
-import type { SliMinute } from "@ats/observability/server";
+import type { SliMinute, SloAlertNotice } from "@ats/observability/server";
 
 const { db } = await import("../../../apps/web/src/server/db");
 const { agentRuns, auditLog, organizations, serviceRequestMinutes, sloAlerts, users } =
@@ -411,6 +411,92 @@ describe("persisted SLIs and burn alerts", () => {
     const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId));
     expect(run!.traceId.replace(/-/g, "")).toBe(ctx.traceId);
     await db.delete(agentRuns).where(inArray(agentRuns.id, [runId]));
+  });
+});
+
+/* ------------------------------------------------- injected SLO notify (map §5) */
+
+describe("injected SLO notify", () => {
+  // Both server-function SLOs count the same route group, so start from an
+  // empty field: earlier tests in this file (and earlier runs) leave SLI
+  // minutes and alerts inside this window.
+  beforeEach(async () => {
+    await db
+      .delete(serviceRequestMinutes)
+      .where(gte(serviceRequestMinutes.minute, new Date(FUTURE - 86_400_000)));
+    await db.delete(sloAlerts).where(gte(sloAlerts.openedAt, new Date(FUTURE - 86_400_000)));
+  });
+
+  test("an injected notify records the alert text; no real e-mail is involved", async () => {
+    // 1 h of heavy slow requests on server functions: the latency SLO burns.
+    const seen: SloAlertNotice[] = [];
+    sloServer.setSloNotifier(async (notice) => {
+      seen.push(notice);
+      return ["email"];
+    });
+    try {
+      await sloServer.writeMinutes(
+        Array.from({ length: 60 }, (_, i) => minute(i + 1, 100, 0, 90)),
+        `${INSTANCE}-d`,
+      );
+      const out = await sloServer.evaluateSloBurn(FUTURE);
+      expect(out.opened).toBe(1);
+      expect(out.notified).toBe(1);
+      expect(seen).toHaveLength(1);
+      expect(seen[0]!.slo).toEqual({
+        id: "server_fn_latency",
+        name: "Server-function latency",
+        target: 0.95,
+        windowDays: 30,
+      });
+      expect(seen[0]!.severity).toBe("critical");
+      expect(seen[0]!.heading).toBe("Service alert (critical): Server-function latency");
+      expect(seen[0]!.message).toContain("is spending its error budget");
+      expect(seen[0]!.actionUrl).toContain("/platform-health");
+      expect(seen[0]!.alertId).toBe(
+        (
+          await db
+            .select()
+            .from(sloAlerts)
+            .where(and(eq(sloAlerts.slo, "server_fn_latency"), eq(sloAlerts.status, "open")))
+        )[0]!.id,
+      );
+      // The audit row records the channels the notifier reported.
+      const audits = await db
+        .select()
+        .from(auditLog)
+        .where(
+          and(eq(auditLog.action, "slo.alert.notified"), eq(auditLog.entityId, seen[0]!.alertId)),
+        );
+      expect((audits[0]!.detail as { channels: string[] }).channels).toEqual(["log", "email"]);
+
+      // Re-evaluating while still burning does not notify again.
+      await sloServer.evaluateSloBurn(FUTURE + 60_000);
+      expect(seen).toHaveLength(1);
+    } finally {
+      sloServer.setSloNotifier(null);
+    }
+  });
+
+  test("without an injected notifier the burn path logs the alert and does not throw", async () => {
+    // 1 h of heavy 5xx on server functions: the availability SLO burns.
+    await sloServer.writeMinutes(
+      Array.from({ length: 60 }, (_, i) => minute(i + 1, 100, 90)),
+      `${INSTANCE}-e`,
+    );
+    let out!: Awaited<ReturnType<typeof sloServer.evaluateSloBurn>>;
+    const lines = await captureLogs(async () => {
+      out = await sloServer.evaluateSloBurn(FUTURE + 120_000);
+    });
+    expect(out.notified).toBe(1); // claimed; the e-mail channel is simply absent
+    // The log line a log-based alert policy pages on is still emitted…
+    expect(lines.filter((l) => l["msg"] === "slo.burn_alert").length).toBeGreaterThanOrEqual(1);
+    // …and nothing threw: the alert row is open and marked notified.
+    const [row] = await db
+      .select()
+      .from(sloAlerts)
+      .where(and(eq(sloAlerts.slo, "server_fn_availability"), eq(sloAlerts.status, "open")));
+    expect(row?.notifiedAt).not.toBeNull();
   });
 });
 
