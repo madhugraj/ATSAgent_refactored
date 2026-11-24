@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const DEFAULT_SOURCE = "docs/refactor/evidence/server-source-bca8574.ts";
-const DEFAULT_REFACTORED = "apps/web/src/server.ts";
+const DEFAULT_REFACTORED = "packages/platform-http/src/server/pipeline.ts";
 
 /** Functions whose bodies hold the limiter's path-prefix literals. */
 const REQUIRED_PATH_FNS = [

@@ -30,7 +30,7 @@ const lastTool = (m: Msg[]) => [...m].reverse().find((x) => x.role === "tool")!.
 
 let gatewayCalls = 0;
 const realGateway = await import("../apps/web/src/lib/ai-gateway.server");
-mock.module("../apps/web/src/lib/ai-gateway.server", () => ({
+mock.module("@ats/ai/server", () => ({
   ...realGateway,
   aiAgentStep: async (opts: { messages: Msg[] }) => {
     gatewayCalls += 1;

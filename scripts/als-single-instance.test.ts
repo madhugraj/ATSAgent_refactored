@@ -111,22 +111,19 @@ test("mechanism: a Symbol.for registration makes the second copy of a context mo
 });
 
 test("kernel: a second instance of the agent run scope module fails loudly", async () => {
-  const mod = await loadScope("kernel", "../apps/web/src/server/agents/events");
-  const guard = mod["assertSingleInstance"];
-  if (typeof guard !== "function") throw new Error(`kernel: ${CLEAN_FAIL}`);
-  expectSecondRegistrationToThrow("kernel", guard as Guard);
+  await import("@ats/kernel/server"); // this process's single instance arms the guard
+  const second = import("@ats/kernel/server?second-instance=1");
+  expect(second).rejects.toThrow(/loaded twice/i);
 });
 
 test("ai: a second instance of the agent run / AI-subject context module fails loudly", async () => {
-  const mod = await loadScope("ai", "../apps/web/src/server/agents/context");
-  const guard = mod["assertSingleInstance"];
-  if (typeof guard !== "function") throw new Error(`ai: ${CLEAN_FAIL}`);
-  expectSecondRegistrationToThrow("ai", guard as Guard);
+  await import("@ats/ai/server");
+  const second = import("@ats/ai/server?second-instance=1");
+  expect(second).rejects.toThrow(/loaded twice/i);
 });
 
 test("observability: a second instance of the request-context module fails loudly", async () => {
-  const mod = await loadScope("observability", "../apps/web/src/server/request-context");
-  const guard = mod["assertSingleInstance"];
-  if (typeof guard !== "function") throw new Error(`observability: ${CLEAN_FAIL}`);
-  expectSecondRegistrationToThrow("observability", guard as Guard);
+  await import("@ats/observability/server");
+  const second = import("@ats/observability/server?second-instance=1");
+  expect(second).rejects.toThrow(/loaded twice/i);
 });

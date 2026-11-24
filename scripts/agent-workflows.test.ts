@@ -18,7 +18,7 @@ const script: AgentStepResult[] = [];
 const usage = { promptTokens: 10, completionTokens: 5, totalTokens: 15 };
 let aiAgentStepCalls = 0;
 const realGateway = await import("../apps/web/src/lib/ai-gateway.server");
-mock.module("../apps/web/src/lib/ai-gateway.server", () => ({
+mock.module("@ats/ai/server", () => ({
   ...realGateway,
   aiAgentStep: async () => {
     aiAgentStepCalls += 1;

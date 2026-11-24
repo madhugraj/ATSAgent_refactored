@@ -9,7 +9,7 @@ import { describe, expect, mock, test } from "bun:test";
 const replies: unknown[] = [];
 const calls: { prompt: string; feature: string; orgId: string }[] = [];
 const realGateway = await import("../apps/web/src/lib/ai-gateway.server");
-mock.module("../apps/web/src/lib/ai-gateway.server", () => ({
+mock.module("@ats/ai/server", () => ({
   ...realGateway,
   aiJson: async (o: { prompt: string; feature: string; orgId: string }) => {
     calls.push(o);

@@ -90,7 +90,7 @@ const AI_FIXTURES: Record<string, unknown> = {
 };
 let aiAgentStepCalls = 0;
 let aiJsonCalls = 0;
-mock.module("../apps/web/src/lib/ai-gateway.server", () => ({
+mock.module("@ats/ai/server", () => ({
   ...realGateway,
   aiAgentStep: async (opts: { messages: Msg[] }) => {
     aiAgentStepCalls += 1;

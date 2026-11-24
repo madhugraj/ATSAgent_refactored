@@ -72,7 +72,7 @@ const VIEW: Record<string, { rating: number; verdict: "select" | "hold" | "rejec
 
 let gatewayCalls = 0;
 const realGateway = await import("../apps/web/src/lib/ai-gateway.server");
-mock.module("../apps/web/src/lib/ai-gateway.server", () => ({
+mock.module("@ats/ai/server", () => ({
   ...realGateway,
   aiAgentStep: async (opts: { messages: Msg[] }) => {
     gatewayCalls += 1;

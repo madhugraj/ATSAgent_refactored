@@ -35,7 +35,7 @@ const say = (text: string): AgentStepResult => ({
 });
 
 const realGateway = await import("../apps/web/src/lib/ai-gateway.server");
-mock.module("../apps/web/src/lib/ai-gateway.server", () => ({
+mock.module("@ats/ai/server", () => ({
   ...realGateway,
   aiJson: async (opts: { prompt?: string; schema?: { parse: (v: unknown) => unknown } }) => {
     lastDeskPrompt = opts.prompt ?? "";
