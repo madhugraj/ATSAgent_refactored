@@ -7,19 +7,45 @@ This note is the punch list for the real PRs.
 
 ## Cross-cutting (for Dev 1)
 
-1. **Placeholder `server-only` in shared entries**: `packages/*/src/shared/index.ts` shipped by
-   Phase 3 carries `import "@tanstack/react-start/server-only"`. Legal's dry run had to remove it —
-   shared is client-imported (rule 5). **Check every L1/L2 package's shared entry for the same bug**
-   before Phase 4 PRs land.
+1. ~~Placeholder `server-only` in shared entries~~ — **resolved (Dev 1):** the bug was in my dry-run
+   worktrees' scaffolds, not Phase 3; main's #10 scaffolds are already clean (reviewer stripped them)
+   and every Phase 3 shared entry was checked. Nothing to fix; the rule stands: only browser-safe
+   surface in `shared`.
 2. **`bun.lock`** changes in all three real PRs (legal: workspace deps @ats/audit+@ats/db +
    drizzle-orm + zod; comms: react 19, @react-email/components|render, nodemailer, workspace deps;
-   integrations: workspace deps). Routed through you per phase4-split.
-3. **inventory.csv**: `email-templates/*` rows say `comms,shared` — wrong, React templates are
-   `comms,server` (map rule 4). Also `tools/refactor/inventory.mjs` doesn't exist in this repo (the
-   Phase 1 tooling never landed beyond contracts/depcruise/tsconfig) — Phase 4/5 can't regenerate it.
+   integrations: workspace deps). Dev 1 folds all declared deps into one install per PR (standing
+   offer — open the PR and ping).
+3. ~~`inventory.csv` email-templates rows~~ — **resolved (Dev 1):** 27 rows fixed on the Phase 3
+   branch (rides the #15 merge): `email-templates/*.tsx` → `comms,server`; `email-settings.shared.ts`
+   correctly stays `comms,shared`. The tool exists at `scripts/refactor/inventory.mjs` (the plan's
+   `tools/refactor` was consolidated under `scripts/` in Phase 1) — my "missing" claim was wrong.
 4. Interim `tsconfig` path aliases (`@/*`, `@db/*` → `../../apps/web/…`) are needed in legal, comms
    and integrations (same block security/ai/kernel already carry) because package typechecks reach
    app code through tests and cross-package dynamic imports. Phase 8 removals.
+
+## Reviewer rulings 2026-11-24 (checked against refactored main; binding)
+
+1. **email-brand.server → `@ats/comms/server`: APPROVED.** Imports are L0 only (db, storage, log,
+   schema) and send-email needs it. Move whole.
+2. **`createMeetingLinkCore` without `createServerOnlyFn`: APPROVED, two conditions** — exported
+   only from `./server` (which carries the server-only marker), and the app's server-function
+   wrapper keeps `createServerFn` + its middleware (`requireOrg`/`requireRole`) unchanged.
+3. **ics: SPLIT, don't move whole.** `buildIcs` (pure) → `@ats/comms/shared`. `downloadIcs`
+   (Blob, document) stays in apps/web as a UI helper — domain packages stay DOM-free — and
+   `interviewer-brief.server` imports this module too. The two routes import `downloadIcs` from the
+   app and `buildIcs` from the package.
+4. **local-inbox order: AGREED.** (a) change PR extracting the inbound transport into comms with an
+   `onInboundMail(handler)` registry; (b) the handlers touching intake/onboarding/job-channels stay
+   in the app and register in `boot.ts`; (c) only then the email-outbox move. (a) is a prerequisite;
+   noted in the plan's Phase 4 section (same PR).
+5. **integrations ↔ web `readSecrets` cycle: accepted TEMPORARILY, three conditions** — stays a
+   lazy import; marked `// SHIM: remove when the credential store moves to @ats/org`; counted in the
+   depcruise warnings (WARN_MAX must not rise — offset elsewhere or explain). Better: coordinate
+   with Dev 1 so org's credential store lands before the integrations move and the cycle never
+   exists.
+6. **server-only in shared placeholders: correct catch.** Shared entries must be browser-safe; the
+   reviewer checks every `@ats/*/shared` entry during the #15 review and it must be fixed before
+   #15 merges.
 
 ## legal (rehearsal complete — first real PR is ready to write)
 
