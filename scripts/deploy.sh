@@ -98,7 +98,7 @@ push_file "$WORK/ctx.tgz" atsiq-deploy-build /ctx.tgz
 kubectl -n "$NS" exec atsiq-deploy-build -- sh -c \
   'rm -rf /build && mkdir /build && tar -xzf /ctx.tgz -C /build 2>/dev/null; cd /build && bun install --frozen-lockfile >/dev/null 2>&1 && bun run build > build.log 2>&1' \
   || { kubectl -n "$NS" exec atsiq-deploy-build -- tail -20 /build/build.log; fail "app build failed — see the log above."; }
-kubectl -n "$NS" exec atsiq-deploy-build -- sh -c 'cd /build && tar -czf /out.tgz .output' >/dev/null
+kubectl -n "$NS" exec atsiq-deploy-build -- sh -c 'cd /build/apps/web && tar -czf /out.tgz .output' >/dev/null
 
 fetch_file atsiq-deploy-build /out.tgz "$WORK/out.tgz"
 echo "  app build ok ($(du -h "$WORK/out.tgz" | cut -f1))"

@@ -1,5 +1,8 @@
 # syntax=docker/dockerfile:1
-# ATSIQ production image — Nitro node-server output (.output/server/index.mjs).
+# ATSIQ production image — one .output layout (Phase 8 prep): the Nitro
+# node-server (.output/server/index.mjs) plus both worker bundles
+# (.output/voice-worker/, .output/parser-worker/) — all three boot from this
+# single image.
 
 # Base images pinned by digest (docs/guardrails.md P2-3); Dependabot proposes updates.
 FROM oven/bun:1@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d AS build
@@ -25,6 +28,8 @@ WORKDIR /app
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000
-COPY --from=build /app/.output ./.output
+# One .output: vite build writes apps/web/.output and the two worker build
+# scripts bundle into apps/web/.output/{voice,parser}-worker beside it.
+COPY --from=build /app/apps/web/.output ./.output
 EXPOSE 3000
 CMD ["node", ".output/server/index.mjs"]

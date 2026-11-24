@@ -1,7 +1,8 @@
 /**
  * Bundle the sandboxed document parser (src/server/parser/worker.ts) for the
- * production image: one ESM file at .output/parser-worker/index.mjs, run as its
- * own Cloud Run service (`node .output/parser-worker/index.mjs`).
+ * production image: one ESM file at apps/web/.output/parser-worker/index.mjs
+ * (one .output layout with the web server and the voice worker — Phase 8 prep),
+ * run as `node .output/parser-worker/index.mjs` from /app in the image.
  * docs/guardrails.md P2-1. Runs after `vite build`, which empties .output first.
  */
 // Entry and outdir are repo-root-relative regardless of the cwd the
@@ -21,7 +22,7 @@ const out = await Bun.build({
     "playwright-core/*",
   ],
   entrypoints: [join(REPO_ROOT, "apps/web/src/server/parser/worker.ts")],
-  outdir: join(REPO_ROOT, ".output/parser-worker"),
+  outdir: join(REPO_ROOT, "apps/web/.output/parser-worker"),
   naming: "index.mjs",
   target: "node",
   format: "esm",

@@ -1,8 +1,9 @@
 /**
  * Bundle the voice worker (src/server/voice/worker.ts) for the production
- * image: one ESM file at .output/voice-worker/index.mjs that runs on Node 22
- * beside the web server (`node .output/voice-worker/index.mjs`). Runs after
- * `vite build`, which empties .output first.
+ * image: one ESM file at apps/web/.output/voice-worker/index.mjs that runs on
+ * Node 22 beside the web server (`node .output/voice-worker/index.mjs` in the
+ * image, where /app/.output is apps/web/.output). Runs after `vite build`,
+ * which empties .output first.
  */
 // Entry and outdir are repo-root-relative regardless of the cwd the
 // app package.json invokes this with (apps/web).
@@ -56,7 +57,7 @@ function emitHashImportStubs(OUTDIR) {
 
 const out = await Bun.build({
   entrypoints: [join(REPO_ROOT, "apps/web/src/server/voice/worker.ts")],
-  outdir: join(REPO_ROOT, ".output/voice-worker"),
+  outdir: join(REPO_ROOT, "apps/web/.output/voice-worker"),
   naming: "index.mjs",
   target: "node",
   format: "esm",
@@ -96,7 +97,7 @@ if (!out.success) {
   process.exit(1);
 }
 emitHashImportStubs(
-  join(dirname(fileURLToPath(import.meta.url)), "..", ".output/voice-worker"),
+  join(dirname(fileURLToPath(import.meta.url)), "..", "apps/web/.output/voice-worker"),
   "index.mjs",
 );
 console.log(`voice worker: ${out.outputs.map((o) => o.path).join(", ")}`);
