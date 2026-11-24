@@ -1,0 +1,16 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    // Interim (while app-side shims stand, removed in Phase 8): the moved
+    // manifest hash still consumes the app-side gateway entry
+    // (`@/lib/ai-gateway.server`) so every existing caller — and the gateway
+    // mock in the agent tests — keeps resolving to one module. Same aliases as
+    // apps/web/tsconfig.json, so this package and the app resolve them to the
+    // same files.
+    "paths": {
+      "@/*": ["../../apps/web/src/*"],
+      "@db/*": ["../../apps/web/drizzle/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}
