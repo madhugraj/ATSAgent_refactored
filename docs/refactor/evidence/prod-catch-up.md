@@ -241,6 +241,17 @@ the Deployment**") is the right one:
 
 ```bash
 # 0. product owner approval recorded; §4 reconciliation decisions recorded; §5 backups taken and verified; §6 rehearsal green
+# 0b. IMAGE BOOT PROOF (review, layout-approved PR #16): before the image may
+#     reach production, prove from the image itself that all three entries
+#     boot — not just that the bundles boot. Pull the just-pushed image and:
+#       docker run --rm "$IMAGE" node .output/server/index.mjs &     # → GET / 200
+#       docker run --rm --entrypoint node "$IMAGE" \
+#         .output/voice-worker/index.mjs                             # → voice_worker.started
+#       docker run --rm --entrypoint node "$IMAGE" \
+#         .output/parser-worker/index.mjs                            # → parser worker listening
+#     (dummy env per §6-style throwaway values; run on any machine with
+#     Docker, e.g. the deploy operator's — not necessarily this laptop).
+#     No 200/started/listen line from any entry → stop, do not roll out.
 # 1. migrations (runs the TARGET SHA's tree, reads DATABASE_URL from secret atsiq-env)
 scripts/deploy.sh migrate <target-sha>
 # 2. rollout (web; voice worker rolled with the same image, waits out in-progress calls ≤ 2400s)
