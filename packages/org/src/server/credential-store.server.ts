@@ -10,6 +10,45 @@ import { eq } from "drizzle-orm";
 
 import { db, integrationCredentials } from "@ats/db/server";
 import { decryptSecret, encryptSecret } from "@ats/security/server";
+import { env } from "@ats/config/server";
+
+/**
+ * Integration base URLs are org-member-supplied and the server attaches stored
+ * credentials to requests against them — so the host must be https and must be
+ * an approved job-board partner domain, or the endpoint becomes an
+ * authenticate-and-reflect SSRF. Moved here from the app's integrations.server
+ * with the credential store (map §11 ruling 10; the distribution boards assert
+ * it via @ats/org/server).
+ */
+const DEFAULT_INTEGRATION_HOSTS = [
+  "api.naukri.com",
+  "www.naukri.com",
+  "api.indeed.com",
+  "providers.indeed.com",
+];
+
+export type IntegrationConfig = Record<string, string | number | boolean | null>;
+
+export function assertIntegrationBaseUrl(rawBaseUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(rawBaseUrl);
+  } catch {
+    throw new Error("The API base URL is not a valid URL.");
+  }
+  if (url.protocol !== "https:") throw new Error("The API base URL must use https.");
+  const extra = (env.INTEGRATION_ALLOWED_HOSTS ?? "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+  const allowed = new Set([...DEFAULT_INTEGRATION_HOSTS, ...extra]);
+  const host = url.hostname.toLowerCase();
+  if (!allowed.has(host) && ![...allowed].some((a) => host.endsWith(`.${a}`))) {
+    throw new Error("That API base URL is not an approved partner endpoint.");
+  }
+  if (url.username || url.password) throw new Error("Credentials in URLs are not allowed.");
+  return url.toString().replace(/\/$/, "");
+}
 
 export async function readSecrets(integrationId: string): Promise<Record<string, string>> {
   const [row] = await db

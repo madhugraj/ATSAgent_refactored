@@ -13,40 +13,15 @@ import { env } from "../server/env";
 // also retires the temporary readSecrets cycle accepted in map §11 ruling 5:
 // the app and the (later) integrations package now both import the store
 // downward from org.
-export { readSecrets, writeSecrets, clearSecrets } from "@ats/org/server";
+import { assertIntegrationBaseUrl, type IntegrationConfig } from "@ats/org/server";
 
-/**
- * Integration base URLs are org-member-supplied and the server attaches stored
- * credentials to requests against them — so the host must be https and must be
- * an approved job-board partner domain, or the endpoint becomes an
- * authenticate-and-reflect SSRF.
- */
-const DEFAULT_INTEGRATION_HOSTS = [
-  "api.naukri.com",
-  "www.naukri.com",
-  "api.indeed.com",
-  "providers.indeed.com",
-];
-export function assertIntegrationBaseUrl(rawBaseUrl: string): string {
-  let url: URL;
-  try {
-    url = new URL(rawBaseUrl);
-  } catch {
-    throw new Error("The API base URL is not a valid URL.");
-  }
-  if (url.protocol !== "https:") throw new Error("The API base URL must use https.");
-  const extra = (env.INTEGRATION_ALLOWED_HOSTS ?? "")
-    .split(",")
-    .map((h) => h.trim().toLowerCase())
-    .filter(Boolean);
-  const allowed = new Set([...DEFAULT_INTEGRATION_HOSTS, ...extra]);
-  const host = url.hostname.toLowerCase();
-  if (!allowed.has(host) && ![...allowed].some((a) => host.endsWith(`.${a}`))) {
-    throw new Error("That API base URL is not an approved partner endpoint.");
-  }
-  if (url.username || url.password) throw new Error("Credentials in URLs are not allowed.");
-  return url.toString().replace(/\/$/, "");
-}
+export {
+  readSecrets,
+  writeSecrets,
+  clearSecrets,
+  assertIntegrationBaseUrl,
+  type IntegrationConfig,
+} from "@ats/org/server";
 
 export type ProviderId =
   "linkedin" | "naukri" | "indeed" | "github" | "careers" | "zoom" | "google_meet" | "teams";
@@ -55,8 +30,6 @@ export type TestOutcome = {
   status: "ok" | "pending" | "failed";
   message: string;
 };
-
-export type IntegrationConfig = Record<string, string | number | boolean | null>;
 
 /* --------------------------------------------------------- provider tests */
 
