@@ -231,7 +231,7 @@ export async function respondToOffer(
             counter?.note ? ` — "${counter.note}"` : ""
           }. The Offer agent proposes a revision inside the band, which is approved again.`;
   try {
-    const desk = await import("../server/desk/desk.server");
+    const desk = await import("@ats/desk-core/server");
     const conv = await desk.conversationForRequisition(o.offer.orgId!, o.requisitionId);
     if (conv) await desk.postMessage(conv, { role: "desk", body: told });
   } catch {

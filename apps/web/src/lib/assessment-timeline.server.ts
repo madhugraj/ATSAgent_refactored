@@ -179,7 +179,7 @@ async function context(row: Row) {
 async function tellThread(orgId: string, requisitionId: string | null, body: string) {
   if (!requisitionId) return;
   try {
-    const desk = await import("../server/desk/desk.server");
+    const desk = await import("@ats/desk-core/server");
     const conv = await desk.conversationForRequisition(orgId, requisitionId);
     if (conv) await desk.postMessage(conv, { role: "desk", body });
   } catch {

@@ -846,7 +846,7 @@ export async function tellDesk(
       .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
       .limit(1);
     if (!a) return;
-    const desk = await import("../server/desk/desk.server");
+    const desk = await import("@ats/desk-core/server");
     const conv = await desk.conversationForRequisition(orgId, a.requisitionId);
     if (conv) await desk.postMessage(conv, { role: "desk", body: body(a.name ?? "the candidate") });
   } catch {

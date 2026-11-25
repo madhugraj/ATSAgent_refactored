@@ -36,6 +36,30 @@ Phase 0 notes found during the merge:
 
 <!-- Append one handoff note per phase below, using template E2 in 00-TEAM-BRIEF.md. -->
 
+### Phase 4 handoff (Dev 1 half): 2026-11-24
+
+- **Branch / PRs:** `refactor/p4-deskcore-org` → PR (Dev 1's half). Dev 2's legal landed (#21); comms and
+  integrations follow their sequence (integrations gated on @ats/org landing, which this PR provides).
+- **Packages created:** @ats/desk-core (store/threads/text/effects; notifyRequisitionThread added) and
+  @ats/org (org-profile*/org-context*/master*/templates*, org-setup, integration-seeds, the generic
+  credential store). Both follow the Phase 2/3 recipe with declared workspace deps ("workspace:*" — Dev 2's
+  style, agreed as the going-forward practice).
+- **Change PRs (logic):** (1) deleteThread/restoreThread runtime cancellation is INJECTED via
+  registerDeskThreadEffects (L2→L4 seam; the kernel AgentPort stays at its map-listed four methods) —
+  registered in boot.ts for production and at desk.server load for tests/direct importers; (2) org-profile/
+  org-context start runs through the kernel AgentPort via apps/web/src/agent-port.server.ts — packages/org
+  has zero agents/runtime or orchestrator imports.
+- **Gate 4 (Dev 1 half): 10/10.** Suite 83 files / 1,336 pass / 0 fail on this branch pre-merge;
+  post-merge re-run pending PR CI. Depcruise: desk-core 0 violations; app ratchet count fell 114 → 98
+  (repoints removed edges) — WARN_MAX left for the phase-4 review to lower (~98). AI call-path audit green.
+- **Deviations needing reviewer awareness:** (a) the effects-injection seam (kernel AgentPort deliberately
+  not extended; observability mailer precedent); (b) the test split at the org/agents seam (agent-card +
+  agent-runs tests new; some desk-side assertions moved); (c) verbatim-extraction proven for 16 moved
+  bodies, with the two seams the only behavioural-neutrality deltas.
+- **Followups:** adopt notifyRequisitionThread at the conversationForRequisition+postMessage pairs over
+  time (mechanical); repoint remaining desk.server importers (orchestrator, tools, hiring-desk, org-desk)
+  as their packages land; Phase 8 removes the 9 shims.
+
 ### Phase 3 handoff: 2026-11-24 (Dev 1)
 
 - **Branch / PRs:** `refactor/p3-l1-platform`, 16 commits: `a2d2d24` sync 3d55eb1 · `fee9bed` @ats/audit ·

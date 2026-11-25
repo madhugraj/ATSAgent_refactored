@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const WARN_MAX = 114; // Phase 3 count (review: 171 at Phase 2 — the L1 moves broke the cycles). Lower per phase.
+export const WARN_MAX = 89; // Phase 4 count (review C1; 171 at Phase 2, 114 at Phase 3 — the moves keep breaking cycles). Lower per phase.
 
 // depcruise runs from apps/web (its tsconfig lives there); this script may
 // be invoked from the repo root (CI) or apps/web.

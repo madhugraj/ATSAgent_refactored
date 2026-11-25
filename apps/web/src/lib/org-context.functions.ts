@@ -148,16 +148,21 @@ export const startOrgContextBuild = createServerFn({ method: "POST" })
       throw new Error(
         "The Organisation context agent is switched off. Switch it on in Governance → Agent settings, or keep writing the profile by hand.",
       );
-    const { startRun } = await import("../server/agents/runtime.server");
-    const { runId } = await startRun({
+    // Through the kernel port (map §4 L2/§5 "AgentPort.enqueue/kick"): boot.ts
+    // registers the runtime's startRun and the orchestrator's kick, so this
+    // starts the same run row and fires the same inline kick as the direct
+    // runtime imports did.
+    const { agentPort } = await import("@ats/kernel/server");
+    const port = agentPort();
+    if (!port) throw new Error("The agent runtime is not wired up yet.");
+    const { runId } = await port.enqueue({
       orgId: context.orgId,
       agentType: "org_context",
       principalUserId: context.userId,
       goal: "Build the organisation's profile: read the organisation's records, its website and every uploaded document, propose what you find as profile items with their exact quotes, then submit the version for approval.",
       subjectType: "org_profile",
     });
-    const { kickAgents } = await import("../server/agents/orchestrator.server");
-    kickAgents(context.orgId);
+    port.kick(context.orgId);
     return { runId };
   });
 

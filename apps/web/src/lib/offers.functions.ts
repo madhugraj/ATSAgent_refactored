@@ -498,7 +498,7 @@ export const sendBackOfferCore = createServerOnlyFn(async function sendBackOffer
       .innerJoin(candidates, eq(candidates.id, applications.candidateId))
       .where(eq(applications.id, o.applicationId))
       .limit(1);
-    const desk = await import("../server/desk/desk.server");
+    const desk = await import("@ats/desk-core/server");
     const conv = a ? await desk.conversationForRequisition(actor.orgId, a.requisitionId) : null;
     if (conv)
       await desk.postMessage(conv, {

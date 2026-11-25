@@ -1,0 +1,16 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    // Interim (while app-side shims stand, removed in Phase 8): moved files
+    // still reach not-yet-moved app modules through dynamic imports (the
+    // org profile's invited-member mail via the comms stack, the labour
+    // policy's approved rules, the CV text helper). Same aliases as
+    // apps/web/tsconfig.json, so this package and the app resolve them to
+    // the same files.
+    "paths": {
+      "@/*": ["../../apps/web/src/*"],
+      "@db/*": ["../../apps/web/drizzle/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

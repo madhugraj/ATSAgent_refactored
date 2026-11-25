@@ -11,7 +11,7 @@ import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../server/db";
-import { plainPreview } from "../server/desk/desk.server";
+import { plainPreview } from "@ats/desk-core/server";
 import { agentPolicies, agentRuns, agentTasks, userRoles, type AgentType } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
 import { AGENT_CATALOG, WHITELISTABLE_TEMPLATES } from "./agents.catalog";

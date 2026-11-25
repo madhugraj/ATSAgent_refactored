@@ -574,7 +574,7 @@ export async function reviewProposal(orgId: string, id: string): Promise<PlanRev
     .set({ status: "awaiting_approval", review })
     .where(and(eq(planChangeProposals.id, id), eq(planChangeProposals.status, "reviewing")));
   try {
-    const desk = await import("../server/desk/desk.server");
+    const desk = await import("@ats/desk-core/server");
     const conv = await desk.conversationForRequisition(orgId, p.requisitionId);
     if (conv)
       await desk.postMessage(conv, {

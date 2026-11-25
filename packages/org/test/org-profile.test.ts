@@ -1,25 +1,27 @@
 /**
- * Organisation profile, O0 (docs/org-context-agent-plan.md), against the
- * disposable database:
+ * @ats/org — the organisation profile lifecycle, O0
+ * (docs/org-context-agent-plan.md), against the disposable database:
  *  - refusals: pay figures (money, LPA, lakh/crore/k or % next to a pay
  *    word) and staff names / e-mails / phones are refused with a reason and
  *    nothing is saved; the pay philosophy in words is kept;
  *  - versions: a draft by the HR head / CBO / owner, submitted, then
  *    approved, declined or sent back by the HR head or the owner only;
  *    approved versions never change; the next draft copies the approved one;
- *  - the approval card: an agent's request (gate subject org_profile) is
- *    decided through resolveTask as the person, never by the agent;
+ *  - the two-person rule: an author cannot approve their own version;
  *  - the hard gate: no requisition while the organisation requires an
  *    approved profile it lacks; every event audited; tenant-scoped.
- * Run: DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test scripts/org-profile.test.ts
+ *
+ * The agent-gate card half of the old scripts/org-profile.test.ts (the
+ * resolveTask decisions and the card text the runtime renders) stays an
+ * app-level integration test: scripts/org-profile-agent-card.test.ts.
+ *
+ * Run: DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test packages/org/test/
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { and, eq, inArray } from "drizzle-orm";
 
-const { db } = await import("../apps/web/src/server/db");
-const {
-  agentRuns,
-  agentTasks,
+import {
+  db,
   auditLog,
   hrmsEmployees,
   orgMembers,
@@ -29,11 +31,12 @@ const {
   sourceIntegrations,
   userRoles,
   users,
-} = await import("../apps/web/drizzle/schema");
-const pure = await import("../apps/web/src/lib/org-profile");
-const core = await import("../apps/web/src/lib/org-profile.server");
-const runtime = await import("../apps/web/src/server/agents/runtime.server");
-const lifecycle = await import("../apps/web/src/lib/requisitions.server");
+} from "@ats/db/server";
+import * as pure from "@ats/org/shared";
+import * as core from "@ats/org/server";
+// Interim app import (removed in Phase 5): the hard gate is enforced inside
+// the requisitions core, still an app module.
+const lifecycle = await import("../../../apps/web/src/lib/requisitions.server");
 
 const stamp = Date.now();
 let orgId: string;
@@ -47,11 +50,11 @@ const as = (userId: string, org = orgId) => ({ orgId: org, userId });
 const item = (
   text: string,
   visibility: "candidate" | "internal" = "candidate",
-  id = crypto.randomUUID(),
+  id: string = crypto.randomUUID(),
 ) => ({ id, text, visibility, source: { kind: "person" as const } });
 
 beforeAll(async () => {
-  const url = process.env.DATABASE_URL ?? "";
+  const url = process.env["DATABASE_URL"] ?? "";
   if (!["127.0.0.1", "localhost", "::1"].includes(new URL(url).hostname))
     throw new Error("Refusing non-local database");
   const mk = async (tag: string, fullName: string | null = null) =>
@@ -342,7 +345,7 @@ describe("versions and decisions", () => {
   });
 });
 
-/* ------------------------------------------------------- the approval card */
+/* ------------------------------------------------------- the two-person rule */
 
 describe("two-person rule", () => {
   test("an editor from the audit trail cannot approve; send back is still allowed", async () => {
@@ -401,94 +404,6 @@ describe("two-person rule", () => {
     expect(row!.detail).toMatchObject({ selfApproved: true });
     await db.delete(organizations).where(eq(organizations.id, soloOrg!.id));
     await db.delete(users).where(eq(users.id, solo!.id));
-  });
-});
-
-describe("an agent's request is decided by a person", () => {
-  async function gate(versionId: string) {
-    const [run] = await db
-      .insert(agentRuns)
-      .values({
-        orgId,
-        agentType: "copilot",
-        principalUserId: hr,
-        goal: "keep the profile current",
-        status: "awaiting_human",
-      } as never)
-      .returning({ id: agentRuns.id });
-    const [task] = await db
-      .insert(agentTasks)
-      .values({
-        orgId,
-        runId: run!.id,
-        kind: "gate",
-        title: "Organisation profile approval",
-        assigneeRole: "hr_head",
-        proposedAction: {
-          toolCallId: "t1",
-          name: "request_approval",
-          args: { subject: { type: "org_profile", versionId, expects: "pending" } },
-        },
-      } as never)
-      .returning({ id: agentTasks.id });
-    return { runId: run!.id, taskId: task!.id };
-  }
-
-  test("sent back from the card: the person's words on the task and the version", async () => {
-    const d = await core.startDraftCore(as(hr));
-    await core.submitDraftCore(as(hr), { versionId: d.id });
-    const { taskId, runId } = await gate(d.id);
-    await expect(
-      runtime.resolveTask({
-        orgId,
-        taskId,
-        userId: recruiter,
-        decision: { status: "approved" },
-      }),
-    ).rejects.toThrow();
-    expect((await reload(d.id)).status).toBe("pending");
-    await runtime.resolveTask({
-      orgId,
-      taskId,
-      userId: hr,
-      decision: { status: "rejected", reason: "Add the policies", changes: true },
-    });
-    const v = await reload(d.id);
-    expect(v.status).toBe("changes_requested");
-    expect(v.decisionNote).toBe("Add the policies");
-    const [t] = await db.select().from(agentTasks).where(eq(agentTasks.id, taskId));
-    expect(t!.status).toBe("rejected");
-    expect(t!.response).toMatchObject({ reason: "Add the policies", changes: true });
-    const [r] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId));
-    expect(r!.status).toBe("queued");
-  });
-
-  test("approved on the Profile page: the waiting request closes", async () => {
-    const open = (await core.profileState(orgId)).open!;
-    await core.submitDraftCore(as(hr), { versionId: open.id });
-    const { taskId } = await gate(open.id);
-    await core.decideVersionCore(as(owner), { versionId: open.id, decision: "approve" });
-    const [t] = await db.select().from(agentTasks).where(eq(agentTasks.id, taskId));
-    expect(t!.status).toBe("approved");
-  });
-
-  test("the card states the changes and every candidate-visible line", () => {
-    const text = runtime.orgProfileDetail(
-      { about: [item("Old", "candidate", "a")] },
-      {
-        version: 3,
-        injectionFlagged: true,
-        sections: {
-          about: [item("A bank for small businesses", "candidate", "a")],
-          tone: [item("Warm and plain")],
-        },
-      },
-    );
-    expect(text).toContain("About: 1 changed");
-    expect(text).toContain("Candidates may hear or read (1)");
-    expect(text).toContain("A bank for small businesses");
-    expect(text).not.toContain("Warm and plain");
-    expect(text).toContain("looks like instructions");
   });
 });
 

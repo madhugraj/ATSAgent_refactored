@@ -953,7 +953,7 @@ export async function postCallToThread(
   dueAt: Date | null,
 ) {
   if (!call.applicationId) return;
-  const desk = await import("../desk/desk.server");
+  const desk = await import("@ats/desk-core/server");
   const convId = await desk.conversationForSubject(orgId, "application", call.applicationId);
   if (!convId) return;
   const [row] = await db

@@ -1220,7 +1220,7 @@ export async function startRun(input: {
   let conversationId = input.conversationId ?? null;
   if (!conversationId && input.subjectId) {
     try {
-      const { conversationForSubject } = await import("../desk/desk.server");
+      const { conversationForSubject } = await import("@ats/desk-core/server");
       conversationId = await conversationForSubject(
         input.orgId,
         input.subjectType,

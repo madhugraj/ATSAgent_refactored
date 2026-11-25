@@ -1,30 +1,34 @@
 /**
- * The Organisation context agent, O1 + O2 (docs/org-context-agent-plan.md),
- * against the disposable database:
+ * @ats/org — the organisation context cores, O1 + O2
+ * (docs/org-context-agent-plan.md), against the disposable database:
  *  - the pure pieces: HTML→text, same-host links, robots.txt, chunking and
  *    the internal-line matcher a JD is refused by;
  *  - orgContextFor: the approved version only, candidate filtering, the
  *    never-say rules rendered by code, the no-profile line;
- *  - sources: the website host guard (owner confirmation), the hourly
- *    limiter, the unchanged-hash skip without an AI call, the planted
- *    instruction held back, documents (pay / staff refusals, "(source
- *    removed)");
- *  - consumers: a JD repeating an internal line is refused at save; a
- *    consuming run is stamped with the version it read; the monthly sweep
- *    dispatches only what is due; hiring and organisation threads never mix.
- * Run: DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test scripts/org-context.test.ts
+ *  - sources: the website host guard (owner confirmation), the unchanged-hash
+ *    skip, the planted instruction held back, documents (pay / staff
+ *    refusals, "(source removed)");
+ *  - consumers: a JD repeating an internal line is refused at save; hiring
+ *    and organisation threads never mix; the agent writes only from the
+ *    sources' text (missing/held-back pages, proposals after a decline).
+ *
+ * The run-stamping, monthly sweep, profile-reset and org-desk halves of the
+ * old scripts/org-context.test.ts stay app-level integration tests:
+ * scripts/org-context-agent-runs.test.ts (they drive the agents runtime and
+ * the desk, which this package must not import).
+ *
+ * Run: DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test packages/org/test/
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 process.env["SECRET_ENCRYPTION_KEY"] ??= Buffer.alloc(32, 7).toString("base64");
 
-const { db } = await import("../apps/web/src/server/db");
-const {
-  agentPolicies,
-  agentRuns,
+import {
+  db,
   auditLog,
   hiringConversations,
+  hiringMessages,
   hrmsEmployees,
   jobDescriptions,
   orgContextSources,
@@ -36,11 +40,13 @@ const {
   sourceIntegrations,
   userRoles,
   users,
-} = await import("../apps/web/drizzle/schema");
-const pure = await import("../apps/web/src/lib/org-profile");
-const core = await import("../apps/web/src/lib/org-profile.server");
-const ctx = await import("../apps/web/src/lib/org-context.server");
-const lifecycle = await import("../apps/web/src/lib/requisitions.server");
+} from "@ats/db/server";
+import * as pure from "@ats/org/shared";
+import * as core from "@ats/org/server";
+import * as ctx from "@ats/org/server";
+// Interim app import (removed in Phase 5): the JD consumer check runs inside
+// the requisitions core, still an app module.
+const lifecycle = await import("../../../apps/web/src/lib/requisitions.server");
 
 const stamp = Date.now();
 let orgId: string;
@@ -51,7 +57,7 @@ let recruiter: string;
 const as = (userId: string) => ({ orgId, userId });
 
 beforeAll(async () => {
-  const url = process.env.DATABASE_URL ?? "";
+  const url = process.env["DATABASE_URL"] ?? "";
   if (!["127.0.0.1", "localhost", "::1"].includes(new URL(url).hostname))
     throw new Error("Refusing non-local database");
   const mk = async (tag: string, fullName: string | null = null) =>
@@ -453,14 +459,17 @@ describe("consumers", () => {
         "About us\nAcme builds instruments.\nReporting\nThe instrumentation team reports to the director of engineering.",
     };
     await expect(
-      lifecycle.saveJobDescriptionCore({ orgId, userId: hr }, { requisitionId: req!.id, jd }),
+      lifecycle.saveJobDescriptionCore(
+        { orgId, userId: hr, memberEmail: `${hr}@acme-instruments.test` },
+        { requisitionId: req!.id, jd },
+      ),
     ).rejects.toThrow(/internal-only profile line/);
     const clean = {
       ...jd,
       full_text: "About us\nAcme builds instruments.\nWhat you will do\nInspect instruments.",
     };
     const saved = await lifecycle.saveJobDescriptionCore(
-      { orgId, userId: hr },
+      { orgId, userId: hr, memberEmail: `${hr}@acme-instruments.test` },
       { requisitionId: req!.id, jd: clean },
     );
     expect(saved.version).toBe(1);
@@ -483,159 +492,9 @@ describe("consumers", () => {
     expect(org?.kind).toBe("org_profile");
     await db.delete(hiringConversations).where(eq(hiringConversations.orgId, orgId));
   });
-
-  test("a consuming agent's run is stamped with the version it read; the writer's is not", async () => {
-    const { ensureAgentsRegistered } = await import("../apps/web/src/server/agents");
-    const runtime = await import("../apps/web/src/server/agents/runtime.server");
-    ensureAgentsRegistered();
-    await db.insert(agentPolicies).values([
-      { orgId, agentType: "jd", enabled: true },
-      { orgId, agentType: "org_context", enabled: true },
-    ] as never);
-    const versionId = (await core.profileState(orgId)).approved!.id;
-    const { runId: consumer } = await runtime.startRun({
-      orgId,
-      agentType: "jd",
-      principalUserId: hr,
-      goal: "t",
-    });
-    const { runId: writer } = await runtime.startRun({
-      orgId,
-      agentType: "org_context",
-      principalUserId: hr,
-      goal: "t",
-    });
-    // One tick: the system prompt is assembled (stamping a consumer) before
-    // the model call, which fails here without a key — the stamp stays.
-    await runtime.runAgentTick({ orgId, max: 4 });
-    const rows = await db
-      .select({ id: agentRuns.id, stamped: agentRuns.orgProfileVersionId })
-      .from(agentRuns)
-      .where(inArray(agentRuns.id, [consumer, writer]));
-    const byId = new Map(rows.map((r) => [r.id, r.stamped]));
-    expect(byId.get(consumer)).toBe(versionId);
-    expect(byId.get(writer)).toBeNull();
-  });
 });
 
-/* ---------------------------------------------------------------- sweep */
-
-describe("monthly re-read sweep", () => {
-  test("a due organisation starts one run and books the next month; a not-due one starts none", async () => {
-    const orchestrator = await import("../apps/web/src/server/agents/orchestrator.server");
-    await db
-      .insert(agentPolicies)
-      .values({ orgId, agentType: "org_context", enabled: true })
-      .onConflictDoNothing();
-    const state = await core.profileState(orgId);
-    const versionId = state.approved!.id;
-    await db
-      .update(orgProfiles)
-      .set({ websiteUrl: "https://www.acme-instruments.test/", nextRereadAt: null })
-      .where(eq(orgProfiles.orgId, orgId));
-    await db.delete(agentRuns).where(eq(agentRuns.orgId, orgId));
-    await orchestrator.scheduleSweeps({ orgId });
-    const started = await db
-      .select({ goal: agentRuns.goal, type: agentRuns.agentType })
-      .from(agentRuns)
-      .where(and(eq(agentRuns.orgId, orgId), eq(agentRuns.agentType, "org_context")));
-    expect(started.length).toBe(1);
-    expect(started[0]!.goal).toContain("Monthly website re-read");
-    const [p] = await db
-      .select({ next: orgProfiles.nextRereadAt })
-      .from(orgProfiles)
-      .where(eq(orgProfiles.orgId, orgId));
-    expect(p!.next!.getTime()).toBeGreaterThan(Date.now() + 29 * 864e5);
-    void versionId;
-    await db.delete(agentRuns).where(eq(agentRuns.orgId, orgId));
-    await orchestrator.scheduleSweeps({ orgId });
-    const after = await db
-      .select({ id: agentRuns.id })
-      .from(agentRuns)
-      .where(and(eq(agentRuns.orgId, orgId), eq(agentRuns.agentType, "org_context")));
-    expect(after).toHaveLength(0);
-  });
-});
-
-describe("deleting the profile", () => {
-  test("HR head or owner only, reason required, every version gone", async () => {
-    // Seed an approved version so there is something real to delete.
-    const [v] = await db
-      .insert(orgProfileVersions)
-      .values({
-        orgId,
-        version: 90,
-        status: "approved",
-        sections: {
-          about: [
-            {
-              id: "del",
-              text: "Soon to be deleted.",
-              visibility: "candidate",
-              source: { kind: "person" },
-            },
-          ],
-        },
-        decidedAt: new Date(),
-      } as never)
-      .returning({ id: orgProfileVersions.id });
-    await db
-      .insert(orgProfiles)
-      .values({ orgId, currentVersionId: v!.id, requireProfile: true })
-      .onConflictDoUpdate({
-        target: orgProfiles.orgId,
-        set: { currentVersionId: v!.id, requireProfile: true },
-      });
-
-    await expect(
-      core.resetProfileCore(as(recruiter), { reason: "recruiters cannot delete" }),
-    ).rejects.toThrow(/HR head/);
-    await expect(core.resetProfileCore(as(hr), { reason: "no" })).rejects.toThrow(/why/);
-
-    // An old chat thread with a message: the reset must clear it too.
-    const oldThread = (
-      await db
-        .insert(hiringConversations)
-        .values({ orgId, createdBy: hr, kind: "org_profile" })
-        .returning({ id: hiringConversations.id })
-    )[0]!.id;
-
-    const res = await core.resetProfileCore(as(hr), { reason: "Starting over with new material." });
-    expect(res.versions).toBeGreaterThanOrEqual(1);
-    const after = await core.profileState(orgId);
-    expect(after.approved).toBeNull();
-    expect(after.open).toBeNull();
-    expect(after.requireProfile).toBe(false);
-    // A clean slate: the saved website and its read pages are gone too.
-    const [p] = await db
-      .select({ websiteUrl: orgProfiles.websiteUrl, lastRereadAt: orgProfiles.lastRereadAt })
-      .from(orgProfiles)
-      .where(eq(orgProfiles.orgId, orgId));
-    expect(p?.websiteUrl ?? null).toBeNull();
-    expect(p?.lastRereadAt ?? null).toBeNull();
-    const liveSources = await db
-      .select({ id: orgContextSources.id })
-      .from(orgContextSources)
-      .where(and(eq(orgContextSources.orgId, orgId), isNull(orgContextSources.deletedAt)));
-    expect(liveSources).toHaveLength(0);
-    expect((await audits("org_profile.reset")) > 0).toBe(true);
-
-    // The chat starts fresh: a new thread, only the greeting in it.
-    const { ensureAgentsRegistered } = await import("../apps/web/src/server/agents");
-    ensureAgentsRegistered();
-    const { ensureOrgThread } = await import("../apps/web/src/server/desk/org-desk.server");
-    const fresh = await ensureOrgThread(orgId, hr);
-    expect(fresh.id).not.toBe(oldThread);
-    const [hidden] = await db
-      .select({ deletedAt: hiringConversations.deletedAt })
-      .from(hiringConversations)
-      .where(eq(hiringConversations.id, oldThread));
-    expect(hidden?.deletedAt).not.toBeNull(); // hidden with the rest of the reset
-    await db.delete(hiringConversations).where(eq(hiringConversations.id, fresh.id));
-    await db.delete(orgProfiles).where(eq(orgProfiles.orgId, orgId));
-    await db.delete(orgProfileVersions).where(eq(orgProfileVersions.orgId, orgId));
-  });
-});
+/* ---------------------------------- the agent writes from the sources' text */
 
 describe("the agent writes from the sources' text", () => {
   test("a page that says it does not exist is never a source", () => {
@@ -652,7 +511,6 @@ describe("the agent writes from the sources' text", () => {
 
   test("read_org_sources hands over page text and the admin's words — not held-back or missing pages, not button presses", async () => {
     const { createHash } = await import("node:crypto");
-    const { hiringMessages } = await import("../apps/web/drizzle/schema");
     const h = (s: string) => createHash("sha256").update(s).digest("hex");
     const page = (url: string, text: string, injectionFlagged = false) =>
       db
@@ -738,14 +596,5 @@ describe("the agent writes from the sources' text", () => {
     expect(state.open?.sections["culture"]?.map((i) => i.text)).toContain(
       "Engineers ship to production every week.",
     );
-  });
-
-  test("the org chat asks about empty sections first, then thin ones", async () => {
-    const { sectionsToAsk } = await import("../apps/web/src/server/desk/org-desk.server");
-    const ask = sectionsToAsk({ about: 5, products: 1, customers: 0, domain: 4 });
-    expect(ask[0]).toBe("customers");
-    expect(ask).toContain("products");
-    expect(ask).not.toContain("about");
-    expect(ask).not.toContain("domain");
   });
 });
