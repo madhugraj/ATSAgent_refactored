@@ -22,7 +22,13 @@ export async function attachmentText(filename: string, bytes: Uint8Array): Promi
   const url = process.env["PARSER_URL"];
   if (!url) return storableText(await extractTextLocal(filename, bytes));
   const { parseRemote } = await import("../server/parser/client");
-  return storableText(await parseRemote(url, filename, bytes));
+  const text = await parseRemote(url, filename, bytes);
+  // Phase 9b shadow (refactor plan): the Python parser service sees the same
+  // payload; the TS result stays the served one and the diff is only logged.
+  // Fire-and-forget — it must never delay or fail the live path.
+  const { shadowParseCompare } = await import("../server/parser/shadow");
+  void shadowParseCompare(filename, bytes, text).catch(() => {});
+  return storableText(text);
 }
 
 /**
