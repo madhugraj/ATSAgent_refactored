@@ -4,7 +4,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { db } from "../server/db";
-import { candidates, applications, requisitions } from "@db/schema";
+import { candidates, applications, requisitions, users } from "@db/schema";
 import { assertRole, requireOrg } from "./auth.middleware";
 
 /**
@@ -156,13 +156,25 @@ export const createCandidate = createServerFn({ method: "POST" })
       const { assertRequisitionInOrg } = await import("../server/guards");
       await assertRequisitionInOrg(data.requisitionId, context.orgId);
       try {
-        await db.insert(applications).values({
-          requisitionId: data.requisitionId,
-          candidateId: row.id,
-          orgId: context.orgId,
-          source: data.source,
-          stage: "sourced",
-        });
+        // skipReusable BY DESIGN (stage-writers §9): the requisition IS the
+        // role this portal CV was captured for — assertReusable must not
+        // reject the CV's own originating requisition.
+        const { addApplicationsCore } = await import("./pipeline.server");
+        const [me] = await db
+          .select({ email: users.email })
+          .from(users)
+          .where(eq(users.id, context.userId))
+          .limit(1);
+        await addApplicationsCore(
+          { orgId: context.orgId, userId: context.userId, memberEmail: me?.email ?? "" },
+          {
+            requisitionId: data.requisitionId,
+            candidateIds: [row.id],
+            source: data.source,
+            entryStage: "sourced",
+            skipReusable: true,
+          },
+        );
       } catch (e) {
         console.error("[createCandidate] could not attach the application:", e);
       }
