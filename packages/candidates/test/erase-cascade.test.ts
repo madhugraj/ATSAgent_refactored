@@ -98,7 +98,7 @@ async function seedCandidate(org: string, fullName: string) {
 async function seedApplication(candidateId: string) {
   const [a] = await db
     .insert(applications)
-    .values({ orgId, requisitionId: reqId, candidateId, stage: "ai_screened", source: "apply" })
+    .values({ orgId, requisitionId: reqId, candidateId, source: "apply" })
     .returning({ id: applications.id });
   return a!.id;
 }
