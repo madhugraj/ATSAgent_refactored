@@ -637,7 +637,7 @@ async function bookOfferSlot(
     let meetingLink: string | null = null;
     if (offer.mode === "online" && offer.meetingProvider) {
       try {
-        const { createMeetingLinkCore } = await import("./meetings.functions");
+        const { createMeetingLinkCore } = await import("@ats/integrations/server");
         meetingLink = (
           await createMeetingLinkCore(offer.orgId, {
             provider: offer.meetingProvider as "zoom" | "google_meet" | "teams",

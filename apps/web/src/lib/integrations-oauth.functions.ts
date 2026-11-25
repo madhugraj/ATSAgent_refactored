@@ -7,7 +7,7 @@ import {
   emailDomainOf,
   oauthConfigured,
   type MeetingOAuthProvider,
-} from "./meetings-oauth.server";
+} from "@ats/integrations/server";
 import { assertAllowedOrigin, signOAuthState } from "./oauth-state";
 
 /**

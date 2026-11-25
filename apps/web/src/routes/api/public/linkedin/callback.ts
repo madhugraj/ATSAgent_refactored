@@ -5,7 +5,9 @@
  */
 import { createFileRoute } from "@tanstack/react-router";
 
-import { exchangeCode, fetchMember, verifyState } from "@/lib/linkedin.server";
+// exchangeCode here is the package index-pinned linkedin.server version
+// (map §11 / Phase 4 integrations move).
+import { exchangeCode, fetchMember, verifyState } from "@ats/integrations/server";
 
 function back(origin: string, params: Record<string, string>): Response {
   const url = new URL("/integrations", origin);

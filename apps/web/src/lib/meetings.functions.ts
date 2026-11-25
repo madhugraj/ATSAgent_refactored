@@ -1,10 +1,13 @@
 import { and, asc, eq } from "drizzle-orm";
-import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
-import { z } from "zod";
+import { createServerFn } from "@tanstack/react-start";
 
 import { db } from "../server/db";
 import { sourceIntegrations } from "@db/schema";
 import { requireOrg } from "./auth.middleware";
+// Meeting-link core (map §11 ruling 2): lives in @ats/integrations/server,
+// exported only from its server entry; the createServerFn wrappers below keep
+// their middleware unchanged and delegate to it.
+import { CreateInput, createMeetingLinkCore } from "@ats/integrations/server";
 
 export type MeetingProviderRow = {
   id: string;
@@ -46,49 +49,12 @@ export const meetingProviders = createServerFn({ method: "GET" })
     }));
   });
 
-const CreateInput = z.object({
-  provider: z.enum(["zoom", "google_meet", "teams"]),
-  topic: z.string().min(1).max(200),
-  startIso: z.string().min(1),
-  durationMins: z.number().min(15).max(240),
-  attendees: z.array(z.string().email()).max(20).default([]),
-  agenda: z.string().max(2000).optional().nullable(),
-});
+// Same file name and export names as before the move; the core now lives in
+// @ats/integrations/server (ruling 2) and this re-export keeps the old import
+// surface for callers that reach it through this file.
+export { createMeetingLinkCore };
 
 /** Create a real meeting with the HR user's own provider credentials. */
-/** Shared by the Interviews page and the Interview coordinator agent. */
-export const createMeetingLinkCore = createServerOnlyFn(async function createMeetingLinkCore(
-  orgId: string,
-  data: z.infer<typeof CreateInput>,
-) {
-  const [row] = await db
-    .select({
-      id: sourceIntegrations.id,
-      enabled: sourceIntegrations.enabled,
-      hasCredentials: sourceIntegrations.hasCredentials,
-      label: sourceIntegrations.label,
-    })
-    .from(sourceIntegrations)
-    .where(and(eq(sourceIntegrations.orgId, orgId), eq(sourceIntegrations.provider, data.provider)))
-    .limit(1);
-  if (!row) throw new Error("That meeting provider is not set up yet.");
-  if (!row.enabled || !row.hasCredentials)
-    throw new Error(
-      `${row.label} is not connected — add the credentials on the Integrations page first.`,
-    );
-
-  const { readSecrets } = await import("./integrations.server");
-  const { createMeeting } = await import("./meetings.server");
-  const secrets = await readSecrets(row.id);
-  return createMeeting(data.provider, secrets, {
-    topic: data.topic,
-    startIso: data.startIso,
-    durationMins: data.durationMins,
-    attendees: data.attendees,
-    agenda: data.agenda ?? null,
-  });
-});
-
 export const createMeetingLink = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .validator((data: unknown) => CreateInput.parse(data))

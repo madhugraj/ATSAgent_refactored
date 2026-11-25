@@ -358,7 +358,7 @@ export async function performSubstituteGate(
   const { writeAudit } = await import("../audit");
   let outcome: "swapped" | "re-offer" | "not booked" = "not booked";
   if (booked?.scheduledAt) {
-    const { isFree } = await import("@/lib/calendar-availability.server");
+    const { isFree } = await import("@ats/integrations/server");
     const free = (
       await isFree(orgId, sub.email, booked.scheduledAt.toISOString(), booked.durationMins)
     ).free;
