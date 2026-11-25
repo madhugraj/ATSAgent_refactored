@@ -112,6 +112,73 @@ export async function moveStageCore(
 }
 
 /**
+ * The bulk twin of moveStageCore (lifecycle.functions.ts's moveStages):
+ * partial success by design — a mixed batch moves the rows whose transition
+ * is allowed and reports the rest as blocked instead of aborting (§7). One
+ * batched journal write for the whole batch; the email pass keys on the
+ * batch's own stage_events ids. Step-up on bulk reject stays in the
+ * server-fn layer; same-stage rows are no-ops, like moveStageCore.
+ */
+export async function moveStagesCore(
+  actor: LifecycleActor,
+  input: { applicationIds: string[]; toStage: Stage; reason?: string | null; note?: string | null },
+): Promise<{ moved: number; blocked: number }> {
+  const unique = [...new Set(input.applicationIds)];
+  if (!unique.length) return { moved: 0, blocked: 0 };
+
+  const rows = await db
+    .select({ id: applications.id, stage: applications.stage })
+    .from(applications)
+    .where(and(inArray(applications.id, unique), eq(applications.orgId, actor.orgId)));
+
+  const movedIds: string[] = [];
+  const journals: {
+    orgId: string;
+    applicationId: string;
+    fromStage: Stage;
+    toStage: Stage;
+    actor: string;
+    reason: string | null;
+    note: string | null;
+  }[] = [];
+  let blocked = 0;
+
+  for (const row of rows) {
+    const from = row.stage as Stage;
+    if (from === input.toStage) continue; // same stage: a no-op, like the core
+    if (!canMove(from, input.toStage)) {
+      blocked++;
+      continue;
+    }
+    movedIds.push(row.id);
+    journals.push({
+      orgId: actor.orgId,
+      applicationId: row.id,
+      fromStage: from,
+      toStage: input.toStage,
+      actor: actorLabel(actor),
+      reason: input.reason?.trim() || null,
+      note: input.note?.trim() || null,
+    });
+  }
+
+  if (movedIds.length) {
+    await db
+      .update(applications)
+      .set({
+        stage: input.toStage,
+        stageReason: input.reason?.trim() || null,
+        stageNote: input.note?.trim() || null,
+        lastActivityAt: new Date(),
+      })
+      .where(inArray(applications.id, movedIds));
+    const { recordStageTransitions } = await import("./stage-events.server");
+    await recordStageTransitions(journals);
+  }
+  return { moved: movedIds.length, blocked };
+}
+
+/**
  * A stage the offer workflow sets as a consequence of an offer action
  * (raising, releasing, accepting). The offer action already checked the
  * actor's role and the offer transition, so no funnel check runs here, but
