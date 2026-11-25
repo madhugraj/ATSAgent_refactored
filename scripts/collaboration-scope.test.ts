@@ -163,6 +163,48 @@ describe("respondReferral duplicate-pair existence check is org-scoped", () => {
     await db.delete(candidateReferrals).where(eq(candidateReferrals.id, referralTwoId));
     await db.delete(users).where(eq(users.id, other));
   });
+
+  test("a role_only portal CV referred into another role is refused pre-flip", async () => {
+    // Portal terms limit a role_only CV to the role it was captured for.
+    // The reusability assertion runs BEFORE the ownership transfer and the
+    // referral status flip, so nothing is written and the referral stays
+    // pending for a different outcome.
+    await db
+      .update(candidates)
+      .set({ poolUse: "role_only", poolUseSource: "portal" })
+      .where(eq(candidates.id, candidateOneId));
+    const referralRoleOnlyId = (
+      await db
+        .insert(candidateReferrals)
+        .values({
+          orgId: orgAId,
+          candidateId: candidateOneId,
+          requisitionId: requisitionId,
+          fromUser: referrerId,
+          toUser: recipientId,
+          status: "pending",
+          note: "Gate 4 role_only test",
+        })
+        .returning({ id: candidateReferrals.id })
+    )[0]!.id;
+    // The accepting user IS the referral's recipient — the refusal comes
+    // from the reusability assertion, not the recipient check.
+    const sessionToken = await createSession(recipientId);
+    await expect(respondAs(sessionToken, referralRoleOnlyId, true)).rejects.toThrow(
+      /whose terms limit the CV to the role it was for/,
+    );
+    const [ref] = await db
+      .select({ status: candidateReferrals.status })
+      .from(candidateReferrals)
+      .where(eq(candidateReferrals.id, referralRoleOnlyId));
+    expect(ref!.status).toBe("pending"); // nothing changed
+    const apps = await db
+      .select({ id: applications.id, requisitionId: applications.requisitionId })
+      .from(applications)
+      .where(and(eq(applications.orgId, orgAId), eq(applications.candidateId, candidateOneId)));
+    expect(apps.some((a) => a.requisitionId === requisitionId)).toBe(false); // no attach
+    await db.delete(candidateReferrals).where(eq(candidateReferrals.id, referralRoleOnlyId));
+  });
 });
 
 describe("same-org duplicate suppression (behavioural, via the shared harness)", () => {
