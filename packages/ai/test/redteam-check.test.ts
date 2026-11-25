@@ -27,7 +27,7 @@ const seen: { system: string; prompt: string; feature: string }[] = [];
 // taken from its own file so capturing it does not load the check itself
 // (a module mock can only rebind modules imported after it is registered).
 const real = await import("../src/server/ai-gateway.server");
-mock.module("../../../apps/web/src/lib/ai-gateway.server", () => ({
+mock.module("../src/server/ai-gateway.server", () => ({
   ...real,
   resolveAiConfig: async () => ({ provider: "openai", model: currentModel, apiKey: "sk-test" }),
   aiJson: async (o: { system: string; prompt: string; feature: string }) => {

@@ -8,7 +8,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test test/"
+    "test": "for f in test/*.test.ts; do bun test \"$f\" || exit 1; done"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14"
