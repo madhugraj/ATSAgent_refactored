@@ -87,7 +87,7 @@ const { registerPhase1Agents } = await import("../apps/web/src/server/agents/def
 const { resolveTask, runAgentTick, startRun } =
   await import("../apps/web/src/server/agents/runtime.server");
 const { processAgentEvents } = await import("../apps/web/src/server/agents/orchestrator.server");
-const lifecycle = await import("../apps/web/src/lib/requisitions.server");
+const lifecycle = await import("@ats/requisitions/server");
 
 /* ------------------------------------------------------------- fixtures */
 

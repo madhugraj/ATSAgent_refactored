@@ -12,7 +12,8 @@
  * core (map: from `requisitions.server`): agent tools act through `actorFor`
  * and the approval chain is checked with the same `assertRole` semantics, so
  * the actor vocabulary lives next to the role check it feeds.
- * `apps/web/src/lib/requisitions.server.ts` re-exports them.
+ * `@ats/requisitions/server` re-exports them (its app shim keeps the old
+ * import surface until Phase 8).
  */
 import { and, eq, inArray } from "drizzle-orm";
 

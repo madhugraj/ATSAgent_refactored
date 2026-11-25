@@ -102,11 +102,11 @@ registerDeskThreadEffects({ cancelRun, afterSubjectsDeleted });
 registerAppAgentPort();
 
 // Distribution's domain-event subscribers (map §5, runbook §2 distribution
-// item 1): the requisition.closed prerequisite. No-op safe — nothing emits
-// the event yet (requisitions.server.ts still closes the postings directly);
-// the registration is idempotent and the handler no-ops without a
-// requisitionId, and a double close touches only "pending"/"published"
-// posting rows so a second delivery writes nothing.
+// item 1): advanceRequisitionCore's close branch emits requisition.closed
+// through the kernel (Phase 5), and this subscriber closes the postings —
+// best-effort, exactly like the direct call it replaced. The handler no-ops
+// without a requisitionId, and a double close touches only "pending"/
+// "published" posting rows so a second delivery writes nothing.
 registerDistributionDomainEvents();
 
 // Candidate erasure (map §5 subjects.deleted): the erase core announces the

@@ -742,7 +742,7 @@ async function gateFor(orgId: string, subject: GateSubject): Promise<GateInfo | 
       subject: { type: "rejection", items },
     };
   }
-  const { APPROVER_ROLE } = await import("@/lib/requisitions.server");
+  const { APPROVER_ROLE } = await import("@ats/auth/server");
   if (subject.type === "requisition") {
     const [r] = await db
       .select({ status: requisitions.status })
@@ -777,7 +777,7 @@ async function performGate(
   subject: GateSubject,
   decision: TaskDecision,
 ): Promise<void> {
-  const lifecycle = await import("@/lib/requisitions.server");
+  const lifecycle = await import("@ats/requisitions/server");
   const { activeOrgOf } = await import("@/lib/auth.middleware");
   const org = await activeOrgOf(userId);
   if (!org || org.orgId !== orgId) throw new Error("You are not a member of this organisation.");

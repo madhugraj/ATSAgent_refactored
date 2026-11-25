@@ -22,7 +22,7 @@ const BY_HAND = JOB_CHANNELS.filter((c) => c.route === "assisted" || c.route ===
 ) as [string, ...string[]];
 
 const actor = async (ctx: ToolContext) => {
-  const { actorFor } = await import("@/lib/requisitions.server");
+  const { actorFor } = await import("@ats/auth/server");
   return actorFor(ctx.orgId, ctx.principalUserId);
 };
 

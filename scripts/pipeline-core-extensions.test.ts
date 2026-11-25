@@ -37,7 +37,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Stage } from "../apps/web/src/lib/lifecycle";
-import type { LifecycleActor } from "../apps/web/src/lib/requisitions.server";
+import type { LifecycleActor } from "@ats/auth/server";
 
 const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 

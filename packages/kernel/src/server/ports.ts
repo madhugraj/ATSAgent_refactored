@@ -86,6 +86,28 @@ export function domainEventHandlers(type: string): DomainEventHandler[] {
 }
 
 /**
+ * Announce a domain event ("requisition.closed", …) to the handlers
+ * registered for its type (boot.ts registrations), in registration order —
+ * the emit half of onDomainEvent, mirroring emitSubjectsDeleted. A handler
+ * that throws never fails the publishing transition (the direct call this
+ * replaces was best-effort: closePostingsForRequisition's failures land on
+ * the posting rows, and the scheduler's sweep catches anything left).
+ */
+export async function emitDomainEvent(e: DomainEvent): Promise<void> {
+  for (const handler of domainEventHandlers(e.type)) {
+    try {
+      await handler(e);
+    } catch (err) {
+      log.warn("kernel.domain_event.handler_failed", {
+        org_id: e.orgId,
+        type: e.type,
+        error: err as Error,
+      });
+    }
+  }
+}
+
+/**
  * "Records an agent may be working on were deleted or erased in this org"
  * (candidates erase, dedupe merge) — subscribers close the affected requests.
  * The erased subjects are carried by name so a subscriber can cascade the

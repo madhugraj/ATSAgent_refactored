@@ -34,9 +34,10 @@ import {
 } from "@ats/db/server";
 import * as pure from "@ats/org/shared";
 import * as core from "@ats/org/server";
-// Interim app import (removed in Phase 5): the hard gate is enforced inside
-// the requisitions core, still an app module.
-const lifecycle = await import("../../../apps/web/src/lib/requisitions.server");
+// The profile hard gate is enforced inside the requisitions core (Phase 5
+// move, map §4 L3). Test-only upward edge (org test → L3 package): it
+// exercises the core's org gates, which call back into @ats/org.
+const lifecycle = await import("@ats/requisitions/server");
 
 const stamp = Date.now();
 let orgId: string;
