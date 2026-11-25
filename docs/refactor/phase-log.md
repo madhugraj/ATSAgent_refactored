@@ -227,6 +227,7 @@ functions only) — fine for 9a, needed before 9b's first real service.
 
 **Question for reviewer:** approve the two documented deviations (consent = BYO-key credential;
 token table platform-scoped with env bootstrap) in the 9a review.
+
 ### Freeze-exception sync (staged, pending the Phase 3 merge): 2026-11-24
 
 - **Branch:** `sync/bca8574` (ATSAgent_refactored-sync worktree). Source `3d55eb1` → `bca8574`
@@ -255,7 +256,8 @@ token table platform-scoped with env bootstrap) in the 9a review.
   `voice/confirm-call-prompts.ts` — spawn 12 net-new no-cycles warnings. No WARN_MAX change.
 - Table owners: no new tables (0092/0093 add columns to `panelists` [interviews] and
   `screening_calls` [voice]); `table-owners.mjs` passes unchanged, owners already match the steer.
->>>>>>> 43be4fa (sync(bca8574) 4/4: SOURCE_SHA -> bca8574, phase-log freeze exception)
+
+> > > > > > > 43be4fa (sync(bca8574) 4/4: SOURCE_SHA -> bca8574, phase-log freeze exception)
 
 ### Phase 2 handoff: 2026-11-23
 
