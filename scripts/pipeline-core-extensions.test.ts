@@ -396,7 +396,7 @@ describe("moveStageCore ai principal + source (order 2)", () => {
 // ---------------------------------------------------------------------------
 
 describe("moveStagesCore bulk twin (order 3)", () => {
-  test.skip("a mixed valid/invalid batch returns {moved, blocked} without throwing", async () => {
+  test("a mixed valid/invalid batch returns {moved, blocked} without throwing", async () => {
     const core = bulkCore();
     const ok = await application("shortlisted");
     const closed = await application("rejected"); // rejected → l1 is not an allowed transition
@@ -411,7 +411,7 @@ describe("moveStagesCore bulk twin (order 3)", () => {
     expect((await appStageOf(closed.appId)).stage).toBe("rejected");
   });
 
-  test.skip("one batched journal write and one email enqueue per batch — not one per move", async () => {
+  test("one batched journal write and one email enqueue per batch — not one per move", async () => {
     const core = bulkCore();
     const first = await application("shortlisted");
     const second = await application("shortlisted");
@@ -441,7 +441,7 @@ describe("moveStagesCore bulk twin (order 3)", () => {
     );
   });
 
-  test.skip("stage_events.actor strings are preserved per move", async () => {
+  test("stage_events.actor strings are preserved per move", async () => {
     const core = bulkCore();
     const human = await application("shortlisted");
     await core(actorFor(recruiter, `p5-recruiter-${stamp}@test.local`), {
@@ -462,7 +462,7 @@ describe("moveStagesCore bulk twin (order 3)", () => {
     expect(viaEvent!.actor).toBe(`p5-owner-${stamp}@test.local (via agent)`);
   });
 
-  test.skip("the core batches the journal, never enqueues directly, and stays out of step-up", async () => {
+  test("the core batches the journal, never enqueues directly, and stays out of step-up", async () => {
     const core = bulkCore();
     expect(core).toBeTruthy();
     const source = readFileSync(
