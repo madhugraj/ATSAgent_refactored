@@ -386,3 +386,18 @@ follows the package.
 `requisition_board_postings`, `org_job_distribution`, `job_index_notifications`,
 `board_webhook_events`, `board_sync_state`. The tenancy tests move with their package;
 `table-owners.mjs` must stay green (it is CI-gated).
+
+## Reviewer rulings on R4/R5 (2026-11-25, PR #39 review)
+
+- **R4:** `server/parser/client.ts` goes WITH cv-text into `@ats/std/server` — its imports are
+  L0-legal (log only), cv-text (its only importer) is std per map §4, and apps/parser-worker already
+  depends on std cv-text. Mapping it to candidates was a domains.mjs error; correct domains.mjs in
+  the same PR that moves it.
+- **R5:** `@ats/std` is created NOW, in Phase 5, as an L0 package (the Phase 1 "std over
+  utils-in-config" decision, never executed). Shape: framework-free; `./shared` (browser-safe:
+  job-channels catalogue, money/iso/local-time/report-window etc. per map §4 L0 row) + `./server`
+  (cv-text, parser client); depends only on config/observability/security. Owner Dev 1 (L0 + shared
+  files); Dev 2 authors the skeleton PR + the job-channels move with Dev 1's one-line ack.
+  job-channels → `@ats/std/shared` as the intended shared catalogue (config stays env-only).
+- **Order:** std skeleton → job-channels + cv-text + parser client into std → then
+  distribution/candidates open. The T1 org→cv-text mark resolves to `@ats/std` in this step.
