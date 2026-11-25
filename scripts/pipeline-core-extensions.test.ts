@@ -493,7 +493,7 @@ describe("recordOfferStageCore offer_declined (order 4)", () => {
     return o!;
   }
 
-  test.skip("the candidate variant records offer_declined with the offer row's org and the decline reason", async () => {
+  test("the candidate variant records offer_declined with the offer row's org and the decline reason", async () => {
     const { appId } = await application("offer_released");
     const offer = await releasedOffer(appId);
     // The candidate answers through the private link: no actor at all — the
@@ -515,7 +515,7 @@ describe("recordOfferStageCore offer_declined (order 4)", () => {
     expect(event!.orgId).toBe(offer.orgId);
   });
 
-  test.skip("a double call journals once — the once-only claim stays ahead of the stage write", async () => {
+  test("a double call journals once — the once-only claim stays ahead of the stage write", async () => {
     // respondToOffer claims the answer in the offer update itself (where
     // status = "released") BEFORE calling the core, so a double click reaches
     // the stage write at most once (§6). The core's same-stage guard is the
