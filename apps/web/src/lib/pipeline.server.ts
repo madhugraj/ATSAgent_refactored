@@ -8,7 +8,14 @@ import { sourceLabel } from "./job-channels";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "../server/db";
-import { applications, candidateNotes, candidates, requisitions, screeningCalls } from "@db/schema";
+import {
+  offers,
+  applications,
+  candidateNotes,
+  candidates,
+  requisitions,
+  screeningCalls,
+} from "@db/schema";
 import { assertRole } from "./auth.middleware";
 import { canMove, REASON_REQUIRED, STAGE_LABEL, type Stage } from "./lifecycle";
 import type { LifecycleActor } from "./requisitions.server";
@@ -186,29 +193,58 @@ export async function moveStagesCore(
  * stale agent request cleanup.
  */
 export async function recordOfferStageCore(
-  actor: LifecycleActor,
-  input: { applicationId: string; toStage: "offer_pending" | "offer_released" | "offer_accepted" },
+  actor: LifecycleActor | null,
+  input: {
+    applicationId: string;
+    toStage: "offer_pending" | "offer_released" | "offer_accepted" | "offer_declined";
+    /** The candidate's decline reason (candidate variant) — recorded on the application and the trail. */
+    reason?: string | null;
+  },
 ): Promise<{ from: Stage; to: Stage; unchanged: boolean } | null> {
-  const [app] = await db
-    .select({ id: applications.id, stage: applications.stage })
-    .from(applications)
-    .where(and(eq(applications.id, input.applicationId), eq(applications.orgId, actor.orgId)))
-    .limit(1);
-  if (!app) return null;
+  // The candidate variant (§6): no actor at all — the org comes from the
+  // offer row, not from a member session.
+  let orgId: string | null = actor?.orgId ?? null;
+  let app: { id: string; stage: Stage } | undefined;
+  if (actor) {
+    [app] = await db
+      .select({ id: applications.id, stage: applications.stage })
+      .from(applications)
+      .where(and(eq(applications.id, input.applicationId), eq(applications.orgId, actor.orgId)))
+      .limit(1);
+  } else {
+    const [offerRow] = await db
+      .select({ orgId: offers.orgId })
+      .from(offers)
+      .where(eq(offers.applicationId, input.applicationId))
+      .limit(1);
+    if (!offerRow?.orgId) return null;
+    orgId = offerRow.orgId;
+    [app] = await db
+      .select({ id: applications.id, stage: applications.stage })
+      .from(applications)
+      .where(and(eq(applications.id, input.applicationId), eq(applications.orgId, offerRow.orgId)))
+      .limit(1);
+  }
+  if (!app || !orgId) return null;
   const from = app.stage as Stage;
   if (from === input.toStage) return { from, to: input.toStage, unchanged: true };
   await db
     .update(applications)
-    .set({ stage: input.toStage, lastActivityAt: new Date() })
-    .where(and(eq(applications.id, app.id), eq(applications.orgId, actor.orgId)));
+    .set({
+      stage: input.toStage,
+      stageReason: input.reason?.trim() || null,
+      lastActivityAt: new Date(),
+    })
+    .where(and(eq(applications.id, app.id), eq(applications.orgId, orgId)));
   const { recordStageTransition } = await import("./stage-events.server");
   await recordStageTransition({
-    orgId: actor.orgId,
+    orgId,
     applicationId: app.id,
     fromStage: from,
     toStage: input.toStage,
-    actor: actorLabel(actor),
+    actor: actor ? actorLabel(actor) : "candidate",
     cause: "offer",
+    reason: input.reason?.trim() || null,
   });
   return { from, to: input.toStage, unchanged: false };
 }
