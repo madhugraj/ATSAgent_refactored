@@ -29,7 +29,7 @@ import { db } from "@ats/db/server";
 import { env } from "@ats/config/server";
 import { writeAudit } from "@ats/audit/server";
 import { decryptSecret, encryptSecret } from "@ats/security/server";
-import { assertRequisitionInOrg } from "@/server/guards";
+import { assertRequisitionInOrg } from "@ats/requisitions/server";
 import {
   places,
   plainText,
