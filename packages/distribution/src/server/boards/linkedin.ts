@@ -7,9 +7,9 @@
  * honestly until the Job Posting product answers 200 — the feed-post designer
  * on the requisition page remains the always-available fallback.
  */
-import { safeFetch } from "../safe-fetch";
-import type { LinkedinCapability } from "../../lib/linkedin.server";
-import { LinkedinAuthError, probeCapabilities, REST_VERSION } from "../../lib/linkedin.server";
+import { safeFetch } from "@ats/security/server";
+import type { LinkedinCapability } from "@ats/integrations/server";
+import { LinkedinAuthError, probeCapabilities, REST_VERSION } from "@ats/integrations/server";
 import {
   integrationConfig,
   type BoardAdapter,

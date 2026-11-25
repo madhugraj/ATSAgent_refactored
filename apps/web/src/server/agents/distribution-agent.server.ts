@@ -44,7 +44,7 @@ const list = (xs: readonly string[]) =>
 /* ------------------------------------------------------------ one role */
 
 export async function roleChannels(orgId: string, requisitionId: string) {
-  const { distributionStatus, channelReport } = await import("../distribution/distribution.server");
+  const { distributionStatus, channelReport } = await import("@ats/distribution/server");
   const [req] = await rows<{ code: string; title: string; status: string }>(sql`
     select code, title, status::text status from requisitions
     where id = ${requisitionId} and org_id = ${orgId}`);

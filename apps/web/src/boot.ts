@@ -20,6 +20,7 @@ import { onAgentEvent } from "@ats/kernel/server";
 import { log, setAgentAlertMailer, setSloNotifier } from "@ats/observability/server";
 import { onInboundMail } from "@ats/comms/server";
 import { platformAdmins } from "@db/schema";
+import { registerDistributionDomainEvents } from "@ats/distribution/server";
 import { registerDeskThreadEffects } from "@ats/desk-core/server";
 import { registerAppAgentPort } from "./agent-port.server";
 import { afterSubjectsDeleted, cancelRun } from "./server/agents/runtime.server";
@@ -99,6 +100,14 @@ registerDeskThreadEffects({ cancelRun, afterSubjectsDeleted });
 // same order. apps/web/src/lib/org-profile.server.ts registers the same pair
 // at load so direct shim imports (tests, server-fn wrappers) are wired too.
 registerAppAgentPort();
+
+// Distribution's domain-event subscribers (map §5, runbook §2 distribution
+// item 1): the requisition.closed prerequisite. No-op safe — nothing emits
+// the event yet (requisitions.server.ts still closes the postings directly);
+// the registration is idempotent and the handler no-ops without a
+// requisitionId, and a double close touches only "pending"/"published"
+// posting rows so a second delivery writes nothing.
+registerDistributionDomainEvents();
 
 // Placeholder (later phases): the remaining domain-event (onDomainEvent) and
 // subject-deletion (onSubjectsDeleted) subscribers register here.

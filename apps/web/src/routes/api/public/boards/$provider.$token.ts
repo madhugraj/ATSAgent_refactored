@@ -18,7 +18,7 @@ async function handle(request: Request, provider: string, token: string): Promis
   // HMAC verification needs the raw, unmodified body.
   const rawBody = await request.text();
 
-  const { processBoardDelivery } = await import("@/server/boards/ingest.server");
+  const { processBoardDelivery } = await import("@ats/distribution/server");
   const outcome = await processBoardDelivery({
     provider,
     token,

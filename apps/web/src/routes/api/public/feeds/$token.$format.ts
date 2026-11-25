@@ -11,7 +11,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 async function handle(token: string, format: string): Promise<Response> {
-  const { feedXml } = await import("@/server/distribution/distribution.server");
+  const { feedXml } = await import("@ats/distribution/server");
   const xml = await feedXml(token, format);
   if (xml === null) return new Response("Not found", { status: 404 });
   return new Response(xml, {

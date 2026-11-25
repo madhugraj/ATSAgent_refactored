@@ -13,9 +13,9 @@
 import { createSign } from "node:crypto";
 import { and, eq, lt, sql } from "drizzle-orm";
 
-import { jobIndexNotifications } from "@db/schema";
-import { db } from "../db";
-import { env } from "../env";
+import { jobIndexNotifications } from "@ats/db/server";
+import { db } from "@ats/db/server";
+import { env } from "@ats/config/server";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const PUBLISH_URL = "https://indexing.googleapis.com/v3/urlNotifications:publish";

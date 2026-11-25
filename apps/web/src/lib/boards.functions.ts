@@ -8,6 +8,7 @@
  * as linkedin.functions.ts.
  */
 import { createServerFn } from "@tanstack/react-start";
+import { boardWebhookSetupCore, boardWebhookUrlCore } from "@ats/distribution/server";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -100,7 +101,7 @@ export const boardPostingStatus = createServerFn({ method: "GET" })
       .from(sourceIntegrations)
       .where(eq(sourceIntegrations.orgId, context.orgId));
 
-    const { getBoardAdapter, loadBoardConnection } = await import("../server/boards/registry");
+    const { getBoardAdapter, loadBoardConnection } = await import("@ats/distribution/server");
     const providers: BoardProviderStatus[] = [];
     for (const provider of PROVIDERS) {
       const row = rows.find((r) => r.provider === provider);
@@ -167,7 +168,7 @@ export const publishToBoard = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
   .validator((data: unknown) => PublishInput.parse(data))
   .handler(async ({ data, context }) => {
-    const { publishToBoardImpl } = await import("../server/boards/publish.server");
+    const { publishToBoardImpl } = await import("@ats/distribution/server");
     return publishToBoardImpl({
       orgId: context.orgId,
       actor: { memberEmail: context.memberEmail, userId: context.userId },
@@ -188,7 +189,7 @@ export const closeBoardPosting = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
   .validator((data: unknown) => CloseInput.parse(data))
   .handler(async ({ data, context }) => {
-    const { closeBoardPostingImpl } = await import("../server/boards/publish.server");
+    const { closeBoardPostingImpl } = await import("@ats/distribution/server");
     await closeBoardPostingImpl({
       orgId: context.orgId,
       actor: { memberEmail: context.memberEmail, userId: context.userId },
@@ -212,48 +213,13 @@ const PROVIDER_LABEL: Record<(typeof PROVIDERS)[number], string> = {
 export const boardWebhookSetup = createServerFn({ method: "POST" })
   .middleware([requireRole("hr_head")])
   .validator((data: unknown) => z.object({ provider: ProviderEnum }).parse(data))
-  .handler(async ({ data, context }) => {
-    const [row] = await db
-      .select({ id: sourceIntegrations.id })
-      .from(sourceIntegrations)
-      .where(
-        and(
-          eq(sourceIntegrations.orgId, context.orgId),
-          eq(sourceIntegrations.provider, data.provider),
-        ),
-      )
-      .limit(1);
-    if (!row) throw new Error(`${PROVIDER_LABEL[data.provider]} is not on the Integrations page.`);
-
-    const { randomBytes, createHash } = await import("node:crypto");
-    const token = randomBytes(24).toString("hex");
-    const hash = createHash("sha256").update(token).digest("hex");
-    const { encryptSecret } = await import("../server/crypto");
-    await db
-      .update(sourceIntegrations)
-      .set({
-        webhookToken: encryptSecret(token),
-        webhookTokenHash: hash,
-        webhookConfiguredAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(and(eq(sourceIntegrations.id, row.id), eq(sourceIntegrations.orgId, context.orgId)));
-
-    const { writeAudit } = await import("../server/audit");
-    await writeAudit({
-      actor: context.memberEmail,
+  .handler(async ({ data, context }) =>
+    boardWebhookSetupCore({
       orgId: context.orgId,
-      actorUserId: context.userId,
-      action: "board.webhook.rotate",
-      entityType: "integration",
-      entityId: row.id,
-      detail: { provider: data.provider },
-    });
-
-    const { env } = await import("../server/env");
-    const base = env.PUBLIC_SITE_URL.replace(/\/$/, "");
-    return { webhookUrl: `${base}/api/public/boards/${data.provider}/${token}` };
-  });
+      actor: { memberEmail: context.memberEmail, userId: context.userId },
+      provider: data.provider,
+    }),
+  );
 
 /** Per-board counts for the Integrations checklist. */
 export const boardIntegrationSummary = createServerFn({ method: "GET" })
@@ -330,7 +296,7 @@ export const boardConnectionStatus = createServerFn({ method: "GET" })
     let capsError: string | null = null;
     if (row.enabled) {
       try {
-        const { getBoardAdapter, loadBoardConnection } = await import("../server/boards/registry");
+        const { getBoardAdapter, loadBoardConnection } = await import("@ats/distribution/server");
         const conn = await loadBoardConnection(context.orgId, data.provider);
         const adapterCaps = await getBoardAdapter(data.provider).capabilities(conn);
         caps = {
@@ -364,29 +330,7 @@ export const boardConnectionStatus = createServerFn({ method: "GET" })
 export const boardWebhookUrl = createServerFn({ method: "POST" })
   .middleware([requireOrg])
   .validator((data: unknown) => z.object({ provider: ProviderEnum }).parse(data))
-  .handler(async ({ data, context }) => {
-    const [row] = await db
-      .select({
-        webhookToken: sourceIntegrations.webhookToken,
-        webhookConfiguredAt: sourceIntegrations.webhookConfiguredAt,
-      })
-      .from(sourceIntegrations)
-      .where(
-        and(
-          eq(sourceIntegrations.orgId, context.orgId),
-          eq(sourceIntegrations.provider, data.provider),
-        ),
-      )
-      .limit(1);
-    if (!row?.webhookToken) return { webhookUrl: null, configuredAt: null };
-    const { decryptSecret } = await import("../server/crypto");
-    const { env } = await import("../server/env");
-    const base = env.PUBLIC_SITE_URL.replace(/\/$/, "");
-    return {
-      webhookUrl: `${base}/api/public/boards/${data.provider}/${decryptSecret(row.webhookToken)}`,
-      configuredAt: row.webhookConfiguredAt ? row.webhookConfiguredAt.toISOString() : null,
-    };
-  });
+  .handler(async ({ data, context }) => boardWebhookUrlCore(context.orgId, data.provider));
 
 /**
  * Seed any missing integration catalog rows for this org and return the

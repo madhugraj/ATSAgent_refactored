@@ -32,14 +32,13 @@ const {
   users,
 } = await import("../apps/web/drizzle/schema");
 await import("../apps/web/src/server/agents");
-const channels = await import("../apps/web/src/lib/job-channels");
+const channels = await import("@ats/std/shared");
 const { inboxSource } = await import("../apps/web/src/lib/local-inbox.server");
 const { ingestCandidate } = await import("../apps/web/src/lib/intake.server");
 const { addApplicationsCore } = await import("../apps/web/src/lib/pipeline.server");
 const dist = await import("../apps/web/src/server/agents/distribution-agent.server");
 const { getTool } = await import("../apps/web/src/server/agents/registry");
-const { closePostingsForRequisition } =
-  await import("../apps/web/src/server/boards/publish.server");
+const { closePostingsForRequisition } = await import("@ats/distribution/server");
 const { decideToolCall } = await import("../apps/web/src/server/agents/policy");
 
 const stamp = Date.now();
@@ -418,7 +417,7 @@ describe("the daily check", () => {
 
 describe("hand postings planned by the agent, posted in the person's browser", () => {
   test("planning, the extension's queue, recording only from the portal, withdrawal on close", async () => {
-    const dist2 = await import("../apps/web/src/server/distribution/distribution.server");
+    const dist2 = await import("@ats/distribution/server");
     const r = await role("approved", { responsibilities: "Run it. Mail jobs@acme.example." });
     const actorA = { memberEmail: "agent:distribution", userId };
     // Live postings are left alone.

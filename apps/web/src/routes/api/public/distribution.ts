@@ -68,7 +68,7 @@ async function handle(request: Request) {
       { status: "error", detail: "Not paired." },
       { status: 401, headers: cors },
     );
-  const dist = await import("@/server/distribution/distribution.server");
+  const dist = await import("@ats/distribution/server");
   try {
     if (body.action === "queue") {
       return Response.json(

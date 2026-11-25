@@ -7,7 +7,7 @@
  * Until the pack lands, every outbound call is refused with the honest
  * "add it from your onboarding pack" message.
  */
-import { safeFetch } from "../safe-fetch";
+import { safeFetch } from "@ats/security/server";
 import { verifyBase64HmacSha256, verifyHexHmacSha256 } from "./hmac";
 import { assertBaseUrl, fetchClientToken, requirePath } from "./partner";
 import {

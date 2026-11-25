@@ -6,8 +6,8 @@
  */
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 
-import { db } from "../db";
-import { orgLinkedinConnections, sourceIntegrations } from "@db/schema";
+import { db } from "@ats/db/server";
+import { orgLinkedinConnections, sourceIntegrations } from "@ats/db/server";
 import {
   ingestPolledApplication,
   lastPolledAt,

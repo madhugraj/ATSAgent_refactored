@@ -21,7 +21,7 @@ import {
 } from "../apps/web/drizzle/schema";
 import { activeOrgOf, assertRole } from "../apps/web/src/lib/auth.middleware";
 import { capture, orgForCaptureToken } from "../apps/web/src/lib/capture.server";
-import { submitApplicationImpl } from "../apps/web/src/lib/apply.functions";
+import { submitApplicationImpl } from "@ats/distribution/server";
 import { storeResumeFile } from "../apps/web/src/lib/intake.server";
 
 let orgA: string;
