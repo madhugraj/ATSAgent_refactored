@@ -114,6 +114,19 @@ jobs:
           if kubectl -n "$NS" get secret scouts-voice >/dev/null 2>&1; then
             sed "s#IMAGE_PLACEHOLDER#$APP_IMAGE#" apps/web/infra/gke/40-voice-worker.yaml | kubectl apply -f -
           fi
+          # Phase 9b shadow: only when the real parser is deployed (the shadow
+          # shares its token secret); the shadow service files land with PR #33
+          # (35-parser-shadow.yaml + services/parser). The app gets
+          # PARSER_SHADOW_URL pointing at the cluster-internal service; the TS
+          # result stays the served one.
+          if kubectl -n "$NS" get secret scouts-parser >/dev/null 2>&1; then
+            SHADOW_IMAGE="$REGION-docker.pkg.dev/$PROJECT/${{ vars.GAR_REPOSITORY }}/scouts-parser-shadow:$TAG"
+            gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+            docker buildx build -f services/parser/Dockerfile --sbom=true               --provenance=mode=max --push -t "$SHADOW_IMAGE" services/parser
+            SHADOW_APP_IMAGE="$SHADOW_IMAGE@$(docker buildx imagetools inspect "$SHADOW_IMAGE" --format '{{ json .imageManifest.digest }}')"
+            sed "s#IMAGE_PLACEHOLDER#$SHADOW_APP_IMAGE#" apps/web/infra/gke/35-parser-shadow.yaml | kubectl apply -f -
+            kubectl -n "$NS" set env deploy/scouts-app PARSER_SHADOW_URL="http://scouts-parser-shadow.$NS.svc.cluster.local:8080"
+          fi
           kubectl -n "$NS" rollout status deploy/scouts-parser --timeout=300s
           kubectl -n "$NS" rollout status deploy/scouts-app --timeout=300s
 
