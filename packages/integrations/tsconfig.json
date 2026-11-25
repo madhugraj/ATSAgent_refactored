@@ -1,4 +1,15 @@
 {
   "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    // Interim (while app-side shims stand, removed in Phase 8): this package's
+    // typecheck program reaches the app (meeting-transcripts.server → app
+    // meeting-ref/vtt until they move to @ats/interviews/shared in Phase 6).
+    // Same aliases as apps/web/tsconfig.json and packages/legal+comms
+    // tsconfig.json, so every package resolves them to the same files.
+    "paths": {
+      "@/*": ["../../apps/web/src/*"],
+      "@db/*": ["../../apps/web/drizzle/*"]
+    }
+  },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }

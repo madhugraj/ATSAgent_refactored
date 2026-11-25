@@ -5,7 +5,7 @@
  */
 import { createFileRoute } from "@tanstack/react-router";
 
-import { finishProviderConnect } from "@/lib/meetings-oauth.server";
+import { finishProviderConnect } from "@ats/integrations/server";
 
 export const Route = createFileRoute("/api/public/integrations/microsoft/callback")({
   server: {

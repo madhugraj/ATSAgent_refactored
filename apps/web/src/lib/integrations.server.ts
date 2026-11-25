@@ -152,7 +152,7 @@ export async function testProvider(
     case "zoom":
     case "google_meet":
     case "teams": {
-      const { testMeetingProvider } = await import("./meetings.server");
+      const { testMeetingProvider } = await import("@ats/integrations/server");
       return testMeetingProvider(provider, secrets);
     }
     default:

@@ -1,12 +1,14 @@
 /**
  * Silent panel agents, S0 (docs/silent-panel-agent-plan.md): the meeting
  * reference read from a join link, and the WebVTT transcripts the providers
- * return. Run: bun test scripts/meeting-transcripts.test.ts
+ * return. Run: DATABASE_URL=… SESSION_SECRET=… bun test packages/integrations/test/meeting-transcripts.test.ts
  */
 import { describe, expect, test } from "bun:test";
 
-import { meetingRefOf } from "../apps/web/src/lib/meeting-ref";
-import { parseVtt } from "../apps/web/src/lib/vtt";
+// INTERIM (Phase 6): meetingRefOf/parseVtt stay app-side until they move
+// to @ats/interviews/shared (same app-relative import as legal's test).
+import { meetingRefOf } from "../../../apps/web/src/lib/meeting-ref";
+import { parseVtt } from "../../../apps/web/src/lib/vtt";
 
 describe("meetingRefOf", () => {
   test("Zoom: the numeric meeting id, from any zoom host and path form", () => {

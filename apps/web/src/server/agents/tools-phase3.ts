@@ -366,7 +366,7 @@ export function registerPhase3Tools(): void {
           `${i.interviewerEmail} is not an active member of the organisation or in its panel directory.`,
         );
       const app = await loadApplication(ctx.orgId, i.applicationId);
-      const { assertAfterEarlierRounds } = await import("@/lib/calendar-availability.server");
+      const { assertAfterEarlierRounds } = await import("@ats/integrations/server");
       await assertAfterEarlierRounds(ctx.orgId, i.applicationId, i.level, [when]);
 
       let meetingLink: string | null = null;
@@ -392,7 +392,7 @@ export function registerPhase3Tools(): void {
             `${i.meetingProvider} is not connected; omit meetingProvider or connect it in Integrations.`,
           );
         }
-        const { createMeetingLinkCore } = await import("@/lib/meetings.functions");
+        const { createMeetingLinkCore } = await import("@ats/integrations/server");
         const meeting = await createMeetingLinkCore(ctx.orgId, {
           provider: i.meetingProvider,
           topic: `L${i.level} interview: ${app.jobTitle}`,
@@ -448,7 +448,7 @@ export function registerPhase3Tools(): void {
     risk: "read",
     run: async (ctx, i) => {
       const { getOrgEmailSettings } = await import("@ats/comms/server");
-      const { findFreeSlots, roundNotBefore } = await import("@/lib/calendar-availability.server");
+      const { findFreeSlots, roundNotBefore } = await import("@ats/integrations/server");
       const timeZone = (await getOrgEmailSettings(ctx.orgId)).timezone;
       if (i.applicationId) await loadApplication(ctx.orgId, i.applicationId);
       const notBefore =

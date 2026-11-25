@@ -5,7 +5,7 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { orgLinkedinConnections, requisitions } from "@db/schema";
 import { requireOrg, requireRole } from "./auth.middleware";
-import type { LinkedinCapability } from "./linkedin.server";
+import type { LinkedinCapability } from "@ats/integrations/server";
 import {
   authorizeUrl,
   fetchMember,
@@ -14,7 +14,7 @@ import {
   postAsMember,
   probeCapabilities,
   signState,
-} from "./linkedin.server";
+} from "@ats/integrations/server";
 
 export type LinkedinStatus = {
   /** True when the ATSIQ LinkedIn app itself is set up (platform-side). */

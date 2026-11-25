@@ -12,5 +12,14 @@
   },
   "devDependencies": {
     "@types/bun": "^1.3.14"
+  },
+  "dependencies": {
+    "@ats/auth": "workspace:*",
+    "@ats/config": "workspace:*",
+    "@ats/db": "workspace:*",
+    "@ats/org": "workspace:*",
+    "@ats/security": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "zod": "^4.6.7"
   }
 }
