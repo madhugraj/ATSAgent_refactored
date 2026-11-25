@@ -12,12 +12,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
 
 const { db } = await import("../apps/web/src/server/db");
-const {
-  candidates,
-  inboxMessages,
-  organizations,
-  users,
-} = await import("../apps/web/drizzle/schema");
+const { candidates, inboxMessages, organizations, users } =
+  await import("../apps/web/drizzle/schema");
 // The transport and the handler live on opposite sides of the Phase 4 split:
 // comms resolves the tenant, local-inbox (app) files the mail. Reaching them
 // through the app's local-inbox module mirrors every real caller.
@@ -94,7 +90,12 @@ describe("inbound CV mail e2e (Gate 4)", () => {
     const [msg] = await db
       .select()
       .from(inboxMessages)
-      .where(and(eq(inboxMessages.orgId, orgId), eq(inboxMessages.providerMessageId, `gate4-${stamp}@mail.example`)));
+      .where(
+        and(
+          eq(inboxMessages.orgId, orgId),
+          eq(inboxMessages.providerMessageId, `gate4-${stamp}@mail.example`),
+        ),
+      );
     expect(msg).toBeDefined();
     expect(msg!.status).toBe("imported");
     expect(msg!.fromEmail).toBe("asha.rao@example.com");
@@ -149,7 +150,10 @@ describe("inbound CV mail e2e (Gate 4)", () => {
         {
           filename: "ravi-kumar-cv.txt",
           contentType: "text/plain",
-          content: Buffer.from("RAVI KUMAR\nBackend engineer.\nSKILLS: Go, Postgres", "utf8").toString("base64"),
+          content: Buffer.from(
+            "RAVI KUMAR\nBackend engineer.\nSKILLS: Go, Postgres",
+            "utf8",
+          ).toString("base64"),
         },
       ],
     });

@@ -121,7 +121,8 @@ export async function localInboxHandler(mail: ResolvedInbound): Promise<InboundR
     // Drizzle 0.45 wraps driver errors: the PG code lives on err.cause.code,
     // not err.code (the pre-wrap check stopped matching after the 0.45 bump,
     // so provider retries of one delivery surfaced as "error" — 2026-11-25).
-    const pgCode = (e as { code?: string; cause?: { code?: string } } | null)?.cause?.code ??
+    const pgCode =
+      (e as { code?: string; cause?: { code?: string } } | null)?.cause?.code ??
       (e as { code?: string } | null)?.code;
     if (pgCode === "23505") {
       return { status: "skipped", detail: "Already received.", messageId: null };
