@@ -544,7 +544,7 @@ describe("recordOfferStageCore offer_declined (order 4)", () => {
 // ---------------------------------------------------------------------------
 
 describe("addApplicationsCore options (order 5)", () => {
-  test.skip("skipReusable: a fresh role_only portal CV may attach to its own originating requisition", async () => {
+  test("skipReusable: a fresh role_only portal CV may attach to its own originating requisition", async () => {
     const candidate = await poolCandidate("role_only", "naukri");
 
     // Without the option the reuse-terms guard refuses the attach (§9: today's
@@ -573,7 +573,7 @@ describe("addApplicationsCore options (order 5)", () => {
     expect(app!.stage).toBe("applied"); // no entryStage given: the DB default stands
   });
 
-  test.skip("entryStage: sourced matches createCandidate; the default keeps the applied DB default", async () => {
+  test("entryStage: sourced matches createCandidate; the default keeps the applied DB default", async () => {
     const plain = await poolCandidate("pool", null);
     const res = await addApplicationsCore(ownerActor(), {
       requisitionId: reqId,
@@ -602,7 +602,7 @@ describe("addApplicationsCore options (order 5)", () => {
     expect(sourcedApp!.stage).toBe("sourced"); // createCandidate parity (§9)
   });
 
-  test.skip("a second org's application for the same (candidate, requisition) pair does not suppress the insert", async () => {
+  test("a second org's application for the same (candidate, requisition) pair does not suppress the insert", async () => {
     // Phase-2 review acceptance criterion (stage-writers.md §8): the
     // referral-accept existence check is org-scoped. Another org's row for the
     // same (candidateId, requisitionId) pair must not make the core report the

@@ -231,7 +231,15 @@ export function assertReusable(
 
 export async function addApplicationsCore(
   actor: LifecycleActor,
-  input: { requisitionId: string; candidateIds: string[]; source: string },
+  input: {
+    requisitionId: string;
+    candidateIds: string[];
+    source: string;
+    /** Portal CVs limited to their role may return to that role (§8: onboarding.functions parity). */
+    skipReusable?: boolean;
+    /** Entry stage instead of the DB default "applied" (§8: createCandidate parity — sourced). */
+    entryStage?: Stage;
+  },
 ): Promise<{ added: number; skipped: { candidateId: string; name: string; reason: string }[] }> {
   const [requisition] = await db
     .select({ id: requisitions.id })
@@ -252,7 +260,7 @@ export async function addApplicationsCore(
   if (owned.length !== requestedIds.length) {
     throw new Error("Some candidates are not in this organisation's talent pool.");
   }
-  assertReusable(owned);
+  if (!input.skipReusable) assertReusable(owned);
   // Candidates already in this requisition's pipeline are skipped and
   // reported, never a database error: the unique (requisition, candidate)
   // index used to fail the whole batch, and the caller then retried it.
@@ -285,6 +293,9 @@ export async function addApplicationsCore(
           candidateId,
           orgId: actor.orgId,
           source: input.source,
+          // createCandidate parity (§9): referrals and sourced portal entries
+          // land at "sourced"; the plain attach keeps the DB default "applied".
+          ...(input.entryStage ? { stage: input.entryStage } : null),
         })),
       )
       .onConflictDoNothing();
