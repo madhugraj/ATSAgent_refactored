@@ -793,6 +793,9 @@ export const stageEvents = pgTable(
     actor: text("actor"),
     reason: text("reason"),
     note: text("note"),
+    // Why the transition happened when the cause silences candidate-facing
+    // effects (interview_scheduled / offer); null for decision moves.
+    cause: text("cause"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("stage_events_application_idx").on(t.applicationId, t.createdAt)],

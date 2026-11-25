@@ -277,9 +277,9 @@ const ownerActor = (via?: "agent") => actorFor(owner, `p5-owner-${stamp}@test.lo
 // ---------------------------------------------------------------------------
 
 describe("moveStageCore cause: interview_scheduled (order 1)", () => {
-  test.skip("an l-stage move with the cause writes the trail row, and no stage email or advanced agent event", async () => {
-    // A dedicated requisition so the advanced-event assertion sees only this test's moves.
-    const req = await requisition("Cause Scheduler");
+  test("an l-stage move with the cause writes the trail row, and no stage email or advanced agent event", async () => {
+    // Assertions read agent_events on reqId — the requisition every fixture
+    // application attaches to. Earlier tests emit no advanced events on it.
     const scheduled = await application("shortlisted");
     const res = await moveStageCore(ownerActor(), {
       applicationId: scheduled.appId,
@@ -302,7 +302,7 @@ describe("moveStageCore cause: interview_scheduled (order 1)", () => {
     // No stage email: the invite email covers the scheduling (§5).
     expect((await stageEmailsOf(scheduled.appId)).length).toBe(0);
     // No application.advanced agent event: booking a round is not a decision.
-    expect((await agentEventsFor(req, "application.advanced")).length).toBe(0);
+    expect((await agentEventsFor(reqId, "application.advanced")).length).toBe(0);
 
     // The cause is load-bearing: the same move without it emails and advances.
     const decided = await application("shortlisted");
@@ -312,14 +312,14 @@ describe("moveStageCore cause: interview_scheduled (order 1)", () => {
       note: "Strong panel feedback",
     });
     expect((await stageEmailsOf(decided.appId)).length).toBe(1);
-    const advanced = await agentEventsFor(req, "application.advanced");
+    const advanced = await agentEventsFor(reqId, "application.advanced");
     expect(advanced.length).toBe(1);
     expect((advanced[0]!.payload as { applicationIds?: string[] }).applicationIds ?? []).toContain(
       decided.appId,
     );
   });
 
-  test.skip("every interview round accepts the cause and stays email-silent", async () => {
+  test("every interview round accepts the cause and stays email-silent", async () => {
     for (const stage of ["l1", "l2", "l3"] as const) {
       const { appId } = await application("shortlisted");
       const res = await moveStageCore(ownerActor(), {
@@ -347,7 +347,7 @@ describe("moveStageCore ai principal + source (order 2)", () => {
   // HR-controlled assertRole gate is never reached on the ai path.
   const aiActor = (userId: string): LifecycleActor => ({ orgId, userId, memberEmail: "ai" });
 
-  test.skip("an ai move journals actor ai, and outcome capture records by ai", async () => {
+  test("an ai move journals actor ai, and outcome capture records by ai", async () => {
     const screened = await application("applied");
     const res = await moveStageCore(aiActor(recruiter), {
       applicationId: screened.appId,
@@ -374,7 +374,7 @@ describe("moveStageCore ai principal + source (order 2)", () => {
     expect((feedback!.original as { by?: string }).by).toBe("ai");
   });
 
-  test.skip("a non-HR ai principal may move into an HR-controlled target (assertRole is never reached)", async () => {
+  test("a non-HR ai principal may move into an HR-controlled target (assertRole is never reached)", async () => {
     // Today this throws: the recruiter fails the HR head/owner gate. The test
     // documents the planned behaviour — the ai path never hits assertRole (§3:
     // "the AI path must never hit assertRole").

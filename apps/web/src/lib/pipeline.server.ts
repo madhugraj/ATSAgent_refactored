@@ -27,7 +27,16 @@ const actorLabel = (a: LifecycleActor) => (a.via ? `${a.memberEmail} (via agent)
 
 export async function moveStageCore(
   actor: LifecycleActor,
-  input: { applicationId: string; toStage: Stage; reason?: string | null; note?: string | null },
+  input: {
+    applicationId: string;
+    toStage: Stage;
+    reason?: string | null;
+    note?: string | null;
+    /** Why the move happened when it must stay candidate-silent (plan §5 order 1). */
+    cause?: "interview_scheduled" | "offer";
+    /** "ai" journals actor "ai", rides into outcome capture as by: "ai", and never reaches assertRole (§3). */
+    source?: "ai";
+  },
 ): Promise<{ from: Stage; to: Stage; unchanged: boolean }> {
   const [app] = await db
     .select({ id: applications.id, stage: applications.stage })
@@ -67,7 +76,9 @@ export async function moveStageCore(
       );
     skipNote = `Screening skipped: ${why}`;
   }
-  if (HR_CONTROLLED_TARGETS.has(input.toStage)) {
+  // The AI path (autoscore/matching cores) never reaches assertRole — the
+  // calling code is server-side and the org's own AI settings gate it (§3).
+  if (input.source !== "ai" && HR_CONTROLLED_TARGETS.has(input.toStage)) {
     await assertRole(
       actor.userId,
       actor.orgId,
@@ -85,14 +96,17 @@ export async function moveStageCore(
     })
     .where(eq(applications.id, app.id));
   const { recordStageTransition } = await import("./stage-events.server");
+  const ai = input.source === "ai";
   await recordStageTransition({
     orgId: actor.orgId,
     applicationId: app.id,
     fromStage: from,
     toStage: input.toStage,
-    actor: actorLabel(actor),
+    actor: ai ? "ai" : actorLabel(actor),
+    source: ai ? "ai" : undefined,
     reason: skipNote ?? (input.reason?.trim() || null),
     note: input.note?.trim() || null,
+    cause: input.cause ?? null,
   });
   return { from, to: input.toStage, unchanged: false };
 }
