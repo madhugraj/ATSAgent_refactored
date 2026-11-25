@@ -18,6 +18,7 @@ const { emitAgentEvent, onAgentEvent } = await import("../src/server/events");
 const {
   agentPort,
   domainEventHandlers,
+  emitSubjectsDeleted,
   onDomainEvent,
   onSubjectsDeleted,
   registerAgentPort,
@@ -151,30 +152,56 @@ describe("ports registries", () => {
 
   test("domain-event handlers are keyed by type and unsubscribe cleanly", () => {
     const seen: string[] = [];
+    // Counted as a delta: other suites in the same process (boot wiring) hold
+    // their own registrations, and the registries are global.
+    const before = domainEventHandlers("stage.changed").length;
     const off = onDomainEvent("stage.changed", () => {
       seen.push("stage");
     });
     onDomainEvent("requisition.closed", () => {
       seen.push("closed");
     });
-    expect(domainEventHandlers("stage.changed").length).toBe(1);
-    expect(domainEventHandlers("requisition.closed").length).toBe(1);
+    expect(domainEventHandlers("stage.changed").length).toBe(before + 1);
     expect(domainEventHandlers("nothing.changed").length).toBe(0);
     for (const h of domainEventHandlers("stage.changed")) h({ orgId, type: "stage.changed" });
     expect(seen).toEqual(["stage"]);
     off();
-    expect(domainEventHandlers("stage.changed").length).toBe(0);
+    expect(domainEventHandlers("stage.changed").length).toBe(before);
   });
 
   test("subject-deletion handlers register and unsubscribe", () => {
     let calls = 0;
+    const before = subjectsDeletedHandlers().length;
     const off = onSubjectsDeleted(() => {
       calls++;
     });
-    expect(subjectsDeletedHandlers().length).toBe(1);
-    for (const h of subjectsDeletedHandlers()) h(orgId);
+    expect(subjectsDeletedHandlers().length).toBe(before + 1);
+    for (const h of subjectsDeletedHandlers()) h(orgId, []);
     expect(calls).toBe(1);
     off();
-    expect(subjectsDeletedHandlers().length).toBe(0);
+    expect(subjectsDeletedHandlers().length).toBe(before);
+  });
+
+  test("emitSubjectsDeleted calls handlers in order with the named subjects; a throwing handler never fails the emit", async () => {
+    const seen: { orgId: string; subjects: { id: string; fullName: string }[]; from: string }[] =
+      [];
+    const off1 = onSubjectsDeleted((orgId, subjects) => {
+      throw new Error("subscriber exploded");
+    });
+    const off2 = onSubjectsDeleted((orgId, subjects) => {
+      seen.push({ orgId, subjects, from: "second" });
+    });
+    const subjects = [
+      { id: "00000000-0000-4000-8000-00000000000a", fullName: "Eve Erased" },
+      { id: "00000000-0000-4000-8000-00000000000b", fullName: "Dee Deleted" },
+    ];
+    try {
+      await emitSubjectsDeleted(orgId, subjects);
+      // The throwing first subscriber was swallowed; the second still ran.
+      expect(seen).toEqual([{ orgId, subjects, from: "second" }]);
+    } finally {
+      off1();
+      off2();
+    }
   });
 });

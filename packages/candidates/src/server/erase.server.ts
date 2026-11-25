@@ -10,6 +10,7 @@ import { and, eq, inArray } from "drizzle-orm";
 
 import { candidates, captureEvents } from "@ats/db/server";
 import { db } from "@ats/db/server";
+import { emitSubjectsDeleted } from "@ats/kernel/server";
 import { deleteObject } from "@ats/storage/server";
 
 export async function eraseCandidatesCore(
@@ -35,15 +36,15 @@ export async function eraseCandidatesCore(
     if (file.resumeFilePath) await deleteObject(file.resumeFilePath);
   }
   await db.delete(candidates).where(and(inArray(candidates.id, ids), eq(candidates.orgId, orgId)));
-  // Agent requests about these candidates' applications can no longer be decided.
-  // SHIM(upward): interim import of the app's agents runtime, moved verbatim
-  // (map §5 subjects.deleted: this becomes a kernel `subjects.deleted` emit +
-  // boot-registered subscriber in the follow-up change PR, not in this move).
-  // Relative interim so the alias ratchet (scripts/alias-ratchet.test.ts) is
-  // SHIM(upward): resolve in change PR A — the kernel subjects.deleted emit
-  // replaces this agents/runtime call (field-level cleanup test required).
-  const { afterSubjectsDeleted } =
-    await import("../../../../apps/web/src/server/agents/runtime.server");
-  await afterSubjectsDeleted(orgId);
+  // The delete has committed; announce the erasure (map §5 subjects.deleted) to
+  // the subscribers registered in the composition root — the agents runtime's
+  // stale-request sweep until Phase 7. The payload names the candidates so a
+  // subscriber can cascade the erasure into its own records (AGENTS.md
+  // training-data invariant) without re-querying the gone rows. A subscriber
+  // that throws never fails the erase.
+  await emitSubjectsDeleted(
+    orgId,
+    found.map(({ id, fullName }) => ({ id, fullName })),
+  );
   return found.map(({ id, fullName }) => ({ id, fullName }));
 }
