@@ -14,6 +14,7 @@
     "@types/bun": "^1.3.14"
   },
   "dependencies": {
+    "@ats/std": "workspace:*",
     "@ats/ai": "workspace:*",
     "@ats/audit": "workspace:*",
     "@ats/auth": "workspace:*",

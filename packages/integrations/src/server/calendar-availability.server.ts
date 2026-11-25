@@ -16,6 +16,12 @@ import { and, eq, gte, inArray, sql } from "drizzle-orm";
 
 import { db, interviews, interviewSlotOffers, sourceIntegrations } from "@ats/db/server";
 
+// zonedTime/wallDate (with their private tzOffset) moved to @ats/std/shared
+// (map §4 L0); re-exported here so the existing calendar-availability surface
+// (and its app shim) keeps exposing them unchanged.
+import { wallDate, zonedTime } from "@ats/std/shared";
+export { wallDate, zonedTime };
+
 export const WORKING = {
   startHour: 10,
   endHour: 17,
@@ -158,46 +164,6 @@ export async function busyFor(
       note: `The calendar could not be read (${e instanceof Error ? e.message : "error"}), so availability was not checked.`,
     };
   }
-}
-
-/** Offset (ms) of a time zone at an instant: local wall time minus UTC. */
-function tzOffset(at: number, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).formatToParts(new Date(at));
-  const n = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
-  return Date.UTC(n("year"), n("month") - 1, n("day"), n("hour"), n("minute"), n("second")) - at;
-}
-
-/** The UTC instant of a wall-clock time in a time zone. */
-export function zonedTime(
-  y: number,
-  m: number,
-  d: number,
-  h: number,
-  min: number,
-  timeZone: string,
-): number {
-  const guess = Date.UTC(y, m, d, h, min);
-  const first = guess - tzOffset(guess, timeZone);
-  return guess - tzOffset(first, timeZone);
-}
-
-export function wallDate(at: number, timeZone: string) {
-  const local = new Date(at + tzOffset(at, timeZone));
-  return {
-    y: local.getUTCFullYear(),
-    m: local.getUTCMonth(),
-    d: local.getUTCDate(),
-    wd: local.getUTCDay(),
-  };
 }
 
 /** Working-hour candidate start times (pure; unit-tested). */
