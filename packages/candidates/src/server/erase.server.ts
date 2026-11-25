@@ -40,7 +40,8 @@ export async function eraseCandidatesCore(
   // (map §5 subjects.deleted: this becomes a kernel `subjects.deleted` emit +
   // boot-registered subscriber in the follow-up change PR, not in this move).
   // Relative interim so the alias ratchet (scripts/alias-ratchet.test.ts) is
-  // not consumed; resolved by that change PR.
+  // SHIM(upward): resolve in change PR A — the kernel subjects.deleted emit
+  // replaces this agents/runtime call (field-level cleanup test required).
   const { afterSubjectsDeleted } =
     await import("../../../../apps/web/src/server/agents/runtime.server");
   await afterSubjectsDeleted(orgId);

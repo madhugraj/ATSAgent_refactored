@@ -19,7 +19,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const PACKAGES = join(import.meta.dir, "..", "packages");
-const MAX_ALIAS_IMPORTS = 5; // 6 known − 1 resolved at the candidates move (boards/ingest.server → @ats/candidates/server); drop plan in the header, 0 by Phase 8.
+const MAX_ALIAS_IMPORTS = 9; // TRUE total: 5 alias + 4 relative (counted now). Drop plans in the header — alias: 1 at the candidates move then ≤6; relative: −1 change PR A, −1 matching Phase 6, −1 interviews Phase 6. 0 by Phase 8.
 
 function sourceFiles(dir: string): string[] {
   if (!existsSync(dir)) return [];
@@ -35,8 +35,13 @@ test("packages import the app only through the marked upward shims (cap 8, dropp
   const total = sourceFiles(PACKAGES).reduce<string[]>((acc, f) => {
     const rel = f.slice(PACKAGES.length + 1);
     const text = readFileSync(f, "utf8");
+    const isDbSchemaTypeImport =
+      rel === "db/src/server/schema.ts" &&
+      (text.includes('$type<import("../../../../apps/web/src/lib/demand-outlook")') ||
+        text.includes('$type<import("../../../../apps/web/src/lib/pay-settings")'));
+    if (isDbSchemaTypeImport) return acc; // Phase 2 deviation 3: type-only, exempt
     for (const m of text.matchAll(
-      /from ["'](@\/|@db\/)[^"']+["']|import\(["'](@\/|@db\/)[^"']+["']\)/g,
+      /from ["'](@\/|@db\/|(?:\.\.\/)+apps\/)[^"']+["']|import\(["'](@\/|@db\/|(?:\.\.\/)+apps\/)[^"']+["']\)/g,
     )) {
       // A marked line is a known, tracked inversion — still counted, but
       // reported with its marker so the list and the count stay in step.
