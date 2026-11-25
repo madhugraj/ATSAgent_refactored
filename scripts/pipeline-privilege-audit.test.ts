@@ -28,6 +28,53 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
+test("addApplicationsCore options reach the core only from the named callers", () => {
+  // Phase-5 review P3: skipReusable bypasses the reuse-terms guard;
+  // entryStage bypasses the applied default. Only the stage-writers-named
+  // callers (onboarding portal-CV attach; createCandidate; collaboration
+  // referral accept) may pass them.
+  const allowedAddApps = [
+    "apps/web/src/lib/onboarding.functions.ts",
+    "apps/web/src/lib/candidates.functions.ts",
+    "apps/web/src/lib/collaboration.functions.ts",
+  ];
+  const offenders: string[] = [];
+  const scanDirs = ["apps/web/src/lib", "apps/web/src/server"];
+  for (const dir of scanDirs) {
+    const base = join(ROOT, dir);
+    if (!existsSync(base)) continue;
+    for (const f of sourceFiles(base)) {
+      const rel = f.slice(ROOT.length + 1);
+      if (ALLOWED.includes(rel) || allowedAddApps.includes(rel)) continue;
+      const text = readFileSync(f, "utf8");
+      if (!text.includes("addApplicationsCore")) continue;
+      for (const callAt of [...text.matchAll(/addApplicationsCore\s*\(/g)].map(
+        (m) => m.index ?? 0,
+      )) {
+        let depth = 0;
+        let end = callAt;
+        for (let i = callAt + "addApplicationsCore".length; i < text.length; i++) {
+          const ch = text[i];
+          if (ch === "(") depth++;
+          else if (ch === ")") {
+            depth--;
+            if (depth === 0) {
+              end = i;
+              break;
+            }
+          }
+        }
+        const args = text.slice(callAt, end);
+        if (/\b(skipReusable|entryStage)\s*:/.test(args))
+          offenders.push(
+            `${rel}: addApplicationsCore call passes ${/\b(skipReusable|entryStage)\s*:/.exec(args)![1]}:`,
+          );
+      }
+    }
+  }
+  expect(offenders.length ? offenders.join("\n") : "").toBe("");
+});
+
 test("source/cause reach moveStageCore only from the named writer cores", () => {
   const offenders: string[] = [];
   const scanDirs = ["apps/web/src/lib", "apps/web/src/server"];
