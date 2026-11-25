@@ -894,14 +894,9 @@ export async function uploadOrgDocumentCore(
       note = ocrResult.note;
     }
   } else {
-<<<<<<< HEAD
+    // cv-text is an L0 shared util (map §4 L0, §11 ruling 9) — downward, no
+    // upward mark needed.
     const { attachmentText } = await import("@ats/std/server");
-=======
-    // Interim app import: cv-text is a shared util that moves with the `std`
-    // package (map §4 L0) — @/ resolves through the package tsconfig.
-    const {
-      attachmentText,
-      await import("@ats/std/server");
     text = await attachmentText(input.fileName, input.bytes);
     if (!text) throw new Error("No text could be read from this document.");
   }
