@@ -343,3 +343,36 @@ the outcome in this file.
    documents three generations; only the GKE one matches the brief).
 7. Recover `17f59fa` provenance from the registry image manifest (best-effort; the release proceeds on the
    date-bounded baseline either way).
+
+## Release-gate results (2026-11-25, day before the window)
+
+All four §7 preconditions are green. Nothing was written to production
+beyond read-only dumps/counts; the gate image was pushed under a
+`release-gate-*` tag and the proof pods were deleted afterwards.
+
+1. **§4 decisions recorded** — `reconcile-decisions.md` (this directory):
+   7 keep / 6 drop / 0 unresolved across the 7 production-only migrations;
+   adversarially verified 19/19 against the repo; merged to main.
+2. **§6 rehearsal green** — 2026-11-24-verified dump re-restored from a
+   fresh 2026-11-25 dump into a scratch PG16 cluster: all 73 pending
+   migrations applied with zero failures, split around the 0058
+   duplicate-run pre-check, which found **zero duplicate active live runs**
+   (zero active runs at all — nothing to cancel). 0070's data migration
+   built 4 panelists from restored rows; the production-only objects
+   survived untouched.
+3. **§7 0b image boot proof green** — the real image was built in the
+   builder pod from source `origin/main` @ `930eb6bf` and pushed as
+   `asia-south1-docker.pkg.dev/yavar-studio/yavar-platform/atsiq:release-gate-930eb6bf`
+   (no rollout), then proven to boot all three FROM the image:
+   `GET / → 200`, `voice_worker.started`, `parser worker listening on 8080`.
+   Note for the runbook: the image has no working directory baked in —
+   always use the absolute `/app/.output/...` entrypoints (as crane-stage
+   and the Deployments do).
+4. **§9 check 1 green** — `INTEGRATION_ALLOWED_HOSTS` is not set in
+   `atsiq-env`: no custom import hosts, no exposure to the #94 uuid-chain
+   duplicate window.
+
+Release target: source `origin/main` HEAD on the morning of 2026-11-26;
+fresh backups (dump → gs://atsiq + PVC snapshot) are the first act of the
+window, then `deploy.sh migrate <sha>` → `deploy.sh <sha>` → smoke, under
+the operator account, with the §7 0b proof repeated for the release SHA.
