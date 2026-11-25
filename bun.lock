@@ -207,6 +207,7 @@
         "@ats/db": "workspace:*",
         "@ats/org": "workspace:*",
         "@ats/security": "workspace:*",
+        "@ats/std": "workspace:*",
         "drizzle-orm": "^0.45.4",
         "zod": "^4.6.7",
       },
@@ -256,6 +257,7 @@
         "@ats/db": "workspace:*",
         "@ats/kernel": "workspace:*",
         "@ats/security": "workspace:*",
+        "@ats/std": "workspace:*",
         "@ats/storage": "workspace:*",
         "drizzle-orm": "^0.45.4",
         "pdfjs-dist": "^6.4.299",
@@ -282,6 +284,20 @@
       "name": "@ats/security",
       "dependencies": {
         "undici": "^8.12.3",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+      },
+    },
+    "packages/std": {
+      "name": "@ats/std",
+      "dependencies": {
+        "@ats/observability": "workspace:*",
+        "@ats/security": "workspace:*",
+        "clsx": "^2.1.1",
+        "fflate": "^0.8.3",
+        "pdfjs-dist": "^6.4.299",
+        "tailwind-merge": "^3.7.0",
       },
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -324,6 +340,8 @@
     "@ats/platform-http": ["@ats/platform-http@workspace:packages/platform-http"],
 
     "@ats/security": ["@ats/security@workspace:packages/security"],
+
+    "@ats/std": ["@ats/std@workspace:packages/std"],
 
     "@ats/storage": ["@ats/storage@workspace:packages/storage"],
 

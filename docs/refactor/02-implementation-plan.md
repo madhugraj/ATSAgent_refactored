@@ -206,6 +206,9 @@ Plus registry refusal test (approve/hire/… tools are rejected) and health-rule
 - `apps/web`: final layout (map §4 L5). Routes become thin. Feature components go to `src/features/<domain>/`.
   `lib/data.ts` splits into per-feature `queries.ts`. shadcn goes to `packages/ui`. Split `AuthGate` (login/signup) and the 15 files over 800 lines
   (one PR per file, UI only). **Delete all shims.** Every dependency-cruiser rule is set to **error**.
+  **std deps hygiene (reviewer, 2026-11-25, PR #41):** `cn()` (clsx + tailwind-merge) came into
+  `@ats/std/shared` with the L0 utils; it is a UI styling helper — move it to apps/web (or a ui
+  package) in Phase 8 and drop both deps from `@ats/std`.
 - `apps/voice-worker`: own entry, bundle and Dockerfile. **Build fails on any `@tanstack/*` import.**
 - `apps/parser-worker`: own entry, bundle and Dockerfile.
 - Build: per-app outputs. Update `Dockerfile`(s), `.github/workflows/deploy.yml`, `scripts/deploy.sh` and GKE/Cloud Run manifests.
