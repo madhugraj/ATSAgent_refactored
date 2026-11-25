@@ -31,7 +31,7 @@ import { registerConfirmCallTools } from "./tools-confirm-calls";
 import { taskIsRemindable } from "./task-liveness";
 
 const actor = async (ctx: ToolContext) => {
-  const { actorFor } = await import("@/lib/requisitions.server");
+  const { actorFor } = await import("@ats/auth/server");
   return actorFor(ctx.orgId, ctx.principalUserId);
 };
 
@@ -556,7 +556,7 @@ export function registerPhase2Tools(): void {
     risk: "read",
     run: async (ctx, i) => {
       const cutoff = new Date(Date.now() - i.slaDays * 864e5);
-      const { APPROVER_ROLE } = await import("@/lib/requisitions.server");
+      const { APPROVER_ROLE } = await import("@ats/auth/server");
       const reqs = await db
         .select({
           id: requisitions.id,

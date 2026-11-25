@@ -28,7 +28,7 @@ import { registerTool, type ToolContext } from "./registry";
 const AppId = z.object({ applicationId: z.string().uuid() });
 
 const actorLabel = async (ctx: ToolContext) => {
-  const { actorFor } = await import("@/lib/requisitions.server");
+  const { actorFor } = await import("@ats/auth/server");
   const a = await actorFor(ctx.orgId, ctx.principalUserId);
   return `${a.memberEmail} (via agent)`;
 };

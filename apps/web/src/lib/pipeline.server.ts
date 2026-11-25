@@ -18,7 +18,7 @@ import {
 } from "@db/schema";
 import { assertRole } from "./auth.middleware";
 import { canMove, REASON_REQUIRED, STAGE_LABEL, type Stage } from "./lifecycle";
-import type { LifecycleActor } from "./requisitions.server";
+import type { LifecycleActor } from "@ats/auth/server";
 
 /** Offer and hiring stages are HR-controlled — not every org member may act. */
 export const HR_CONTROLLED_TARGETS = new Set<string>([

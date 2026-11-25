@@ -12,7 +12,7 @@ import { PROFILE_SECTIONS } from "@/lib/org-profile";
 import { registerTool, type ToolContext } from "./registry";
 
 const actor = async (ctx: ToolContext) => {
-  const { actorFor } = await import("@/lib/requisitions.server");
+  const { actorFor } = await import("@ats/auth/server");
   return actorFor(ctx.orgId, ctx.principalUserId);
 };
 

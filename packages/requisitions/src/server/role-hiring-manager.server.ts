@@ -5,8 +5,7 @@
  */
 import { and, eq, sql } from "drizzle-orm";
 
-import { orgMembers, requisitions } from "@db/schema";
-import { db } from "../server/db";
+import { db, orgMembers, requisitions } from "@ats/db/server";
 
 /** The role's hiring manager and the active members who can be picked (managers first). */
 export async function roleHiringManagerOf(orgId: string, requisitionId: string) {
@@ -60,7 +59,7 @@ export async function setRoleHiringManagerCore(
     .where(and(eq(requisitions.id, requisitionId), eq(requisitions.orgId, orgId)))
     .returning({ id: requisitions.id });
   if (!done.length) throw new Error("Requisition not found.");
-  const { writeAudit } = await import("../server/audit");
+  const { writeAudit } = await import("@ats/audit/server");
   await writeAudit({
     actor: `user:${actorUserId}`,
     actorUserId,

@@ -7,7 +7,7 @@
  * recruiter can edit before saving.
  */
 
-import { aiJson } from "./ai-gateway.server";
+import { aiJson } from "@ats/ai/server";
 
 export type RoleProfile = {
   must_have_skills: string[];

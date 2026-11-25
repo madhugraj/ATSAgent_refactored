@@ -25,7 +25,7 @@ import {
   type MasterKind,
   type Requisition,
 } from "@/lib/data";
-import { findDuplicateRequisitions } from "@/lib/jd-dedupe";
+import { findDuplicateRequisitions } from "@ats/requisitions/shared";
 import { errorToastMessage } from "@/lib/errors";
 import { suggestRoleProfile } from "@/lib/role-profile.functions";
 import { EmptyState, PageHeader, SkillPills, StatusBadge, inr } from "@/components/ats";

@@ -274,7 +274,7 @@ describe("two people acting on the same thing", () => {
         createdBy: hr,
       } as never)
       .returning({ id: requisitions.id });
-    const { advanceRequisitionCore } = await import("../apps/web/src/lib/requisitions.server");
+    const { advanceRequisitionCore } = await import("@ats/requisitions/server");
     const results = await Promise.allSettled([
       advanceRequisitionCore(asHr(), { id: r!.id, status: "pending_cbo" }),
       advanceRequisitionCore(asHr(), { id: r!.id, status: "pending_cbo" }),

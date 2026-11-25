@@ -18,6 +18,7 @@ const { emitAgentEvent, onAgentEvent } = await import("../src/server/events");
 const {
   agentPort,
   domainEventHandlers,
+  emitDomainEvent,
   emitSubjectsDeleted,
   onDomainEvent,
   onSubjectsDeleted,
@@ -202,6 +203,35 @@ describe("ports registries", () => {
     } finally {
       off1();
       off2();
+    }
+  });
+
+  test("emitDomainEvent fires only the type's handlers in registration order with the payload; a throwing handler never fails the emit", async () => {
+    const seen: { type: string; requisitionId?: unknown }[] = [];
+    const off1 = onDomainEvent("requisition.closed", (e) => {
+      throw new Error("subscriber exploded");
+    });
+    const off2 = onDomainEvent("requisition.closed", (e) => {
+      seen.push({ type: e.type, requisitionId: e.payload?.["requisitionId"] });
+    });
+    const off3 = onDomainEvent("stage.changed", () => {
+      seen.push({ type: "stage.changed" });
+    });
+    try {
+      await emitDomainEvent({
+        orgId,
+        type: "requisition.closed",
+        payload: { requisitionId: "00000000-0000-4000-8000-00000000000c" },
+      });
+      // Only the requisition.closed handlers ran (the stage.changed one is a
+      // different key), in registration order, and the throw was swallowed.
+      expect(seen).toEqual([
+        { type: "requisition.closed", requisitionId: "00000000-0000-4000-8000-00000000000c" },
+      ]);
+    } finally {
+      off1();
+      off2();
+      off3();
     }
   });
 });

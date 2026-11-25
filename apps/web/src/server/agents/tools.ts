@@ -18,7 +18,7 @@ import { placeLabel } from "@/lib/work-mode";
 import { registerTool, type ToolContext } from "./registry";
 
 const actor = async (ctx: ToolContext) => {
-  const { actorFor } = await import("@/lib/requisitions.server");
+  const { actorFor } = await import("@ats/auth/server");
   return actorFor(ctx.orgId, ctx.principalUserId);
 };
 
@@ -295,7 +295,7 @@ export function registerPhase1Tools(): void {
     risk: "write",
     describe: (i) => `Create draft requisition "${i.title}" (${i.openings} opening(s))`,
     run: async (ctx, i) => {
-      const { createRequisitionCore } = await import("@/lib/requisitions.server");
+      const { createRequisitionCore } = await import("@ats/requisitions/server");
       return createRequisitionCore(
         await actor(ctx),
         {
@@ -334,7 +334,7 @@ export function registerPhase1Tools(): void {
     risk: "write",
     describe: (i) => `Update draft requisition (${Object.keys(i.changes).join(", ")})`,
     run: async (ctx, i) => {
-      const { updateRequisitionDraftCore } = await import("@/lib/requisitions.server");
+      const { updateRequisitionDraftCore } = await import("@ats/requisitions/server");
       const c = i.changes;
       await updateRequisitionDraftCore(await actor(ctx), i.requisitionId, {
         ...c,
@@ -362,7 +362,7 @@ export function registerPhase1Tools(): void {
       `Set budget ${i.budgetCtc.toLocaleString("en")} (band ${i.bandMin.toLocaleString("en")}–${i.bandMax.toLocaleString("en")}) in the role's pay currency`,
     run: async (ctx, i) => {
       if (i.bandMin > i.bandMax) throw new Error("bandMin must not exceed bandMax.");
-      const { updateRequisitionCompensationCore } = await import("@/lib/requisitions.server");
+      const { updateRequisitionCompensationCore } = await import("@ats/requisitions/server");
       await updateRequisitionCompensationCore(await actor(ctx), {
         id: i.requisitionId,
         budgetCtc: i.budgetCtc,
@@ -448,7 +448,7 @@ export function registerPhase1Tools(): void {
     describe: () => "Save candidate-scoring weights",
     run: async (ctx, i) => {
       const { requisitionId, custom, ...w } = i;
-      const { saveRequisitionWeightsCore } = await import("@/lib/requisitions.server");
+      const { saveRequisitionWeightsCore } = await import("@ats/requisitions/server");
       // Totals and custom-dimension rules are checked by the core (weightsProblem).
       await saveRequisitionWeightsCore(await actor(ctx), requisitionId, w, custom ?? []);
       return { ok: true };
@@ -463,7 +463,7 @@ export function registerPhase1Tools(): void {
     risk: "write",
     describe: () => "Submit the requisition for Department Head approval",
     run: async (ctx, i) => {
-      const { advanceRequisitionCore } = await import("@/lib/requisitions.server");
+      const { advanceRequisitionCore } = await import("@ats/requisitions/server");
       await advanceRequisitionCore(await actor(ctx), {
         id: i.requisitionId,
         status: "pending_dh",
@@ -528,7 +528,7 @@ export function registerPhase1Tools(): void {
         reportingTo: r.hiringManager,
         employment: employmentWords(r.kindOfWork, r.contractMonths, r.extendable),
       });
-      const { saveJobDescriptionCore } = await import("@/lib/requisitions.server");
+      const { saveJobDescriptionCore } = await import("@ats/requisitions/server");
       const saved = await saveJobDescriptionCore(await actor(ctx), {
         requisitionId: r.id,
         jd,
@@ -557,7 +557,7 @@ export function registerPhase1Tools(): void {
     run: async (ctx, i) => {
       const r = await loadRequisition(ctx.orgId, i.requisitionId);
       if (r.status !== "approved") throw new Error("Only approved requisitions can be posted.");
-      const { setRequisitionIjpCore } = await import("@/lib/requisitions.server");
+      const { setRequisitionIjpCore } = await import("@ats/requisitions/server");
       await setRequisitionIjpCore(await actor(ctx), r.id, true);
       return { ok: true };
     },

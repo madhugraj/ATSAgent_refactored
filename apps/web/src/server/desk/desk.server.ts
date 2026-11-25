@@ -710,7 +710,7 @@ export async function createNewRole(
   const org = await activeOrgOf(userId);
   if (!org || org.orgId !== conv.orgId)
     throw new Error("You are not a member of this organisation.");
-  const { createRequisitionCore } = await import("@/lib/requisitions.server");
+  const { createRequisitionCore } = await import("@ats/requisitions/server");
   const created = await createRequisitionCore(
     { orgId: conv.orgId, userId, memberEmail: org.memberEmail },
     {
@@ -2944,7 +2944,7 @@ export async function closeRole(
   if (!org || org.orgId !== conv.orgId)
     throw new Error("You are not a member of this organisation.");
   const actor = { orgId: conv.orgId, userId, memberEmail: org.memberEmail };
-  const { advanceRequisitionCore } = await import("@/lib/requisitions.server");
+  const { advanceRequisitionCore } = await import("@ats/requisitions/server");
   if (req.status === "draft") {
     // The same rule as the Requisitions list: unused drafts only, HR leadership.
     await assertRole(userId, conv.orgId, ["hr_head", "president_cbo"]);
@@ -3702,7 +3702,7 @@ async function sendRequisitionBack(
   const { activeOrgOf } = await import("@/lib/auth.middleware");
   const org = await activeOrgOf(userId);
   if (!org || org.orgId !== conv.orgId) return;
-  const { sendBackRequisitionCore } = await import("@/lib/requisitions.server");
+  const { sendBackRequisitionCore } = await import("@ats/requisitions/server");
   let sent: { from: string; code: string };
   try {
     sent = await sendBackRequisitionCore(

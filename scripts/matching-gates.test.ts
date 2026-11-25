@@ -15,7 +15,7 @@ import {
   type ExperienceFit,
 } from "../apps/web/src/lib/matching.server";
 import { rankPool } from "../apps/web/src/server/agents/talent-search.server";
-import { weightsProblem } from "../apps/web/src/lib/requisitions.server";
+import { weightsProblem } from "@ats/requisitions/server";
 
 const DEFAULT_W = {
   skills: 40,
