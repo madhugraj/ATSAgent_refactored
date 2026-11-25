@@ -23,7 +23,9 @@ import { googleToken, graphToken, msDelegatedToken, zoomToken } from "./meetings
 // INTERIM (Phase 6): MeetingRef and the VTT parser stay app-side until they
 // move to @ats/interviews/shared (map §4 L3). Same alias bridge the other
 // packages carry; removed with the Phase 8 shims.
+// SHIM(upward): resolve in Phase 6 (interviews)
 import type { MeetingRef } from "@/lib/meeting-ref";
+// SHIM(upward): resolve in Phase 6 (interviews)
 import { parseVtt, type TranscriptSegment } from "@/lib/vtt";
 
 export type { TranscriptSegment };

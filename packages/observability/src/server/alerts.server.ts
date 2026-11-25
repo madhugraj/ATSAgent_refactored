@@ -343,7 +343,10 @@ export async function dispatchAgentDigests(
         (a.severity === "critical" ? 0 : 1) - (b.severity === "critical" ? 0 : 1) ||
         a.firstSeenAt.getTime() - b.firstSeenAt.getTime(),
     );
-    const { AGENT_LABEL } = await import("@/lib/agents.catalog");
+    const {
+      AGENT_LABEL,
+    } = // SHIM(upward): resolve in Phase 7 (agents), or inject the label map at boot
+      await import("@/lib/agents.catalog");
     const short = (d: Date) => {
       try {
         return new Intl.DateTimeFormat("en-GB", {
