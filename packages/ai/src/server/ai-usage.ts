@@ -1,4 +1,4 @@
-import { currentAgentRun, currentAiSubject } from "./context";
+import { currentAgentRun, currentAiSubject, currentService } from "./context";
 import { db } from "@ats/db/server";
 import { aiUsageEvents, type AiUsageStatus } from "@ats/db/server";
 
@@ -125,6 +125,8 @@ export async function recordAiUsage(input: {
   durationMs?: number | null;
   grounded?: boolean | null;
   errorMessage?: string | null;
+  /** Call-site provenance (e.g. which Python service made an internal call). */
+  metadata?: Record<string, unknown> | null;
 }): Promise<void> {
   try {
     const clamp = (n: number | null | undefined) =>
@@ -155,6 +157,9 @@ export async function recordAiUsage(input: {
         requisitionId: subject?.requisitionId ?? null,
         applicationId: subject?.applicationId ?? null,
         candidateId: subject?.candidateId ?? null,
+        // Which Python service made an internal call (plan §9) — set by the
+        // internal route's runWithService scope; null for in-app calls.
+        metadata: input.metadata ?? (currentService() ? { service: currentService() } : null),
       })
       .returning({ id: aiUsageEvents.id });
     if (row && subject?.events) subject.events.push(row.id);

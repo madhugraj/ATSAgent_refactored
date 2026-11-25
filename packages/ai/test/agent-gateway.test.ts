@@ -47,6 +47,7 @@ mock.module("../src/server/ai-usage", () => {
 });
 const { aiAgentStep, INVALID_TOOL_ARGS, toolParameters } =
   await import("../src/server/ai-gateway.server");
+const { runWithService } = await import("../src/server/context");
 
 afterAll(async () => {
   // The pass-through ledger rows this suite's stubbed calls wrote (org-less).
@@ -158,6 +159,23 @@ describe("mocks are live", () => {
     expect(ledger.length).toBe(0);
     await run("openai");
     expect(ledger.length).toBeGreaterThan(0);
+  });
+
+  test("the calling service lands in the ledger row's metadata (migration 0095)", async () => {
+    // The gateway's ledger input deliberately does not carry the service —
+    // recordAiUsage reads it from the context scope — so assert on the real
+    // rows (this suite runs with a DATABASE_URL; without one, realDb is the
+    // marker mock and the ledger assertions above cover it). Earlier tests'
+    // unscooped rows share the same createdAt millisecond, so clear the table
+    // first and assert every remaining row.
+    if (!realDb) return;
+    await realDb.db.delete(realDb.tables.aiUsageEvents);
+    await runWithService("legal-svc", () => run("openai"));
+    const rows = await realDb.db
+      .select({ metadata: realDb.tables.aiUsageEvents.metadata })
+      .from(realDb.tables.aiUsageEvents);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) expect(r.metadata).toEqual({ service: "legal-svc" });
   });
 });
 

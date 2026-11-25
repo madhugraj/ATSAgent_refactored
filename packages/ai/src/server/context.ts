@@ -48,3 +48,19 @@ export function withAiSubject<T>(subject: AiSubject, fn: () => Promise<T>): Prom
   };
   return aiSubjectScope.run(merged, fn);
 }
+
+/**
+ * The calling service on this async call chain (plan §9: Python services call
+ * the gateway over the internal route) — so the spend ledger records which
+ * service made each call. The internal route wraps its gateway call in the
+ * scope with the authenticated token's service name.
+ */
+const serviceScope = new AsyncLocalStorage<string>();
+
+export function runWithService<T>(service: string, fn: () => Promise<T>): Promise<T> {
+  return serviceScope.run(service, fn);
+}
+
+export function currentService(): string | undefined {
+  return serviceScope.getStore();
+}
