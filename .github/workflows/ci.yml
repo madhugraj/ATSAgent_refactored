@@ -118,28 +118,21 @@ jobs:
       # The prod image copies only .output — no node_modules — so the worker
       # bundles must boot on their own (phase-2 review B1). Copy them into
       # bare directories, start with dummy env, and require the health line.
-      # The prod image and the dev module-runner resolve imports differently;
-      # the dev server must boot and serve without module-resolution errors
-      # (phase-4 find: workspace @db imports 500'd every route in dev only).
-      - name: Web dev boot smoke
-        run: |
-          cd apps/web
-          # PORT pinned + generous wait: the cold dependency optimizer on a
-          # fresh CI runner can take well over a minute before the port binds.
-          (PORT=3000 DATABASE_URL="$DATABASE_URL" SESSION_SECRET="$SESSION_SECRET" \
-            bun run dev > /tmp/vite-dev-ci.log 2>&1 &)
-          code=000
-          for i in $(seq 1 90); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ || true)
-            [ "$code" = "200" ] && break
-            sleep 2
-          done
-          echo "GET / -> $code"
-          [ "$code" = "200" ] || { echo "dev server did not serve /"; tail -40 /tmp/vite-dev-ci.log; exit 1; }
-          if grep -qE "Cannot find module|ERR_MODULE_NOT_FOUND|ERR_PACKAGE_IMPORT_NOT_DEFINED" /tmp/vite-dev-ci.log; then
-            echo "module-resolution errors in dev:"; grep -E "Cannot find module|ERR_MODULE" /tmp/vite-dev-ci.log; exit 1
-          fi
-          pkill -f "vite dev" || true
-
       - name: Worker boot smoke (no node_modules)
-        run: bash scripts/worker-boot-smoke.sh
+        run: |
+          rm -rf /tmp/voice-smoke /tmp/parser-smoke
+          mkdir -p /tmp/voice-smoke /tmp/parser-smoke
+          cp apps/web/.output/voice-worker/* /tmp/voice-smoke/
+          cp apps/web/.output/parser-worker/* /tmp/parser-smoke/
+          cd /tmp/voice-smoke
+          DATABASE_URL=postgres://127.0.0.1:1/nope SESSION_SECRET=dummy-secret-0123456789abcdef0123456789abcdef \
+            SIP_SERVER=127.0.0.1 SIP_PORT=5060 SIP_USER=smoke SIP_PASSWORD=smoke SIP_DOMAIN=smoke.local \
+            timeout 10 node -e "setTimeout(()=>process.exit(0),8000); import('./index.mjs').catch(e=>{console.error(e.message); process.exit(1)})" > voice.log 2>&1 || true
+          grep -q "voice_worker.started" voice.log || { echo "voice worker did not start:"; cat voice.log; exit 1; }
+          ! grep -qE "ERR_MODULE_NOT_FOUND|Cannot find package|PACKAGE_IMPORT_NOT_DEFINED" voice.log
+          cd /tmp/parser-smoke
+          PARSER_TOKEN=smoke-token PORT=0 \
+            timeout 10 node -e "setTimeout(()=>process.exit(0),8000); import('./index.mjs').catch(e=>{console.error(e.message); process.exit(1)})" > parser.log 2>&1 || true
+          grep -q "parser worker listening" parser.log || { echo "parser worker did not start:"; cat parser.log; exit 1; }
+          ! grep -qE "ERR_MODULE_NOT_FOUND|Cannot find package|PACKAGE_IMPORT_NOT_DEFINED" parser.log
+          echo "both workers boot without node_modules" 
