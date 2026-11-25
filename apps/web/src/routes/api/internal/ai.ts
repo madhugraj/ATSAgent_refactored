@@ -34,6 +34,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 
 import { AI_FEATURES } from "@/server/ai-usage";
+// The ledger records which service made the call (ai_usage_events.metadata,
+// migration 0095): this route wraps its gateway call in the service scope.
+import { runWithService } from "@ats/ai/server";
 import {
   internalIngressAllowed,
   orgHasAiConsent,
@@ -123,14 +126,18 @@ async function handle(request: Request): Promise<Response> {
   }
 
   const { aiJson, INJECTION_RULES, untrusted } = await import("@/lib/ai-gateway.server");
-  const result = await aiJson({
-    // The service's own instructions, hardened with the injection rules; the
-    // forwarded text is data from an external person and enters as such.
-    system: `${INJECTION_RULES}\n\n${parsed.data.input.system}`,
-    prompt: untrusted("service_input", parsed.data.input.prompt),
-    orgId: parsed.data.input.orgId,
-    feature: parsed.data.feature,
-  });
+  // The ledger records which service made the call (ai_usage_events.metadata,
+  // migration 0095) — the service name comes from the authenticated token.
+  const result = await runWithService(auth.service, async () =>
+    aiJson({
+      // The service's own instructions, hardened with the injection rules; the
+      // forwarded text is data from an external person and enters as such.
+      system: `${INJECTION_RULES}\n\n${parsed.data.input.system}`,
+      prompt: untrusted("service_input", parsed.data.input.prompt),
+      orgId: parsed.data.input.orgId,
+      feature: parsed.data.feature,
+    }),
+  );
 
   if (!result.ok) {
     // The gateway message can quote provider errors (model ids, vendor text) —

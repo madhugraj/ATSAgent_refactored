@@ -73,7 +73,7 @@ export async function sweepHiringSla(orgId?: string, now = Date.now()): Promise<
         ? `${r.name} has passed the ${r.slaDays}-day hiring SLA: ${s.elapsedDays} days since applying, still at ${stage}.`
         : `${r.name} is behind the ${r.slaDays}-day hiring SLA at ${stage}: ${s.elapsedDays} days since applying, ${s.daysLeft} left to release an offer.`;
     try {
-      const desk = await import("./desk/desk.server");
+      const desk = await import("@ats/desk-core/server");
       const conv = await desk.conversationForRequisition(r.orgId, r.requisitionId);
       if (conv) {
         await desk.postMessage(conv, { role: "desk", body });

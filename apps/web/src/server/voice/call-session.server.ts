@@ -275,6 +275,14 @@ export async function runScreeningCall(
     return runSchedulingCall(orgId, call, deps);
   }
   // A pay discussion call is the Negotiation call agent's (same line, same worker).
+  if (call.purpose === "confirmation") {
+    const { runConfirmationCall } = await import("./confirm-calls.server");
+    return runConfirmationCall(orgId, call, deps);
+  }
+  if (call.purpose === "panel_check") {
+    const { runPanelCheckCall } = await import("./confirm-calls.server");
+    return runPanelCheckCall(orgId, call, deps);
+  }
   if (call.purpose === "negotiation") {
     const { runNegotiationCall } = await import("./negotiation-session.server");
     return runNegotiationCall(orgId, call, deps);
@@ -316,7 +324,12 @@ export async function runScreeningCall(
 export async function openCallRun(
   orgId: string,
   call: typeof screeningCalls.$inferSelect,
-  agentType: "screening_call" | "scheduling_call" | "negotiation_call" = "screening_call",
+  agentType:
+    | "screening_call"
+    | "scheduling_call"
+    | "negotiation_call"
+    | "confirmation_call"
+    | "panel_check_call" = "screening_call",
   goal = `Phone screening call, attempt ${call.attempt}.`,
 ): Promise<string | null> {
   let principal = call.requestedBy;
@@ -953,7 +966,7 @@ export async function postCallToThread(
   dueAt: Date | null,
 ) {
   if (!call.applicationId) return;
-  const desk = await import("../desk/desk.server");
+  const desk = await import("@ats/desk-core/server");
   const convId = await desk.conversationForSubject(orgId, "application", call.applicationId);
   if (!convId) return;
   const [row] = await db

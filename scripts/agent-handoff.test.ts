@@ -79,6 +79,8 @@ const SPECIALISTS = [
   "followup",
   "interview",
   "scheduling_call",
+  "confirmation_call",
+  "panel_check_call",
   "panel_l1",
   "panel_l2",
   "panel_l3",
@@ -227,7 +229,7 @@ afterAll(async () => {
 });
 
 describe("registry", () => {
-  test("23 agents are registered: Aditi (the Copilot agent) and the 22 specialists", () => {
+  test("25 agents are registered: Aditi (the Copilot agent) and the 24 specialists", () => {
     const types = listAgents()
       .map((a) => a.type)
       .sort();

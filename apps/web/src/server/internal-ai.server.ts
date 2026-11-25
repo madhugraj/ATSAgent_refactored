@@ -63,7 +63,8 @@ function constantTimeMatch(candidates: string[], given: string): boolean {
   });
 }
 
-export type ServiceAuth = { authorized: false } | { authorized: true; allowedFeatures: string[] };
+export type ServiceAuth =
+  { authorized: false } | { authorized: true; allowedFeatures: string[]; service: string };
 
 /**
  * Resolve `given` against the env bootstrap list and the stored service
@@ -72,12 +73,19 @@ export type ServiceAuth = { authorized: false } | { authorized: true; allowedFea
  */
 export async function resolveServiceToken(given: string): Promise<ServiceAuth> {
   if (constantTimeMatch(envServiceTokens(), given)) {
-    return { authorized: true, allowedFeatures: envServiceTokenFeatures() };
+    // The env bootstrap token is a dev/first-rotation artifact (deleted after
+    // the first stored token); it has no per-service row to name itself from.
+    return {
+      authorized: true,
+      allowedFeatures: envServiceTokenFeatures(),
+      service: "env-bootstrap",
+    };
   }
   const rows = await db
     .select({
       tokenEncrypted: serviceTokens.tokenEncrypted,
       allowed: serviceTokens.allowedFeatures,
+      service: serviceTokens.service,
     })
     .from(serviceTokens);
   const stored = rows.filter((r) => {
@@ -86,7 +94,11 @@ export async function resolveServiceToken(given: string): Promise<ServiceAuth> {
   });
   if (!stored.length) return { authorized: false };
   const allowed = (stored[0]!.allowed ?? []) as string[];
-  return { authorized: true, allowedFeatures: Array.isArray(allowed) ? allowed : [] };
+  return {
+    authorized: true,
+    allowedFeatures: Array.isArray(allowed) ? allowed : [],
+    service: stored[0]!.service,
+  };
 }
 
 /**

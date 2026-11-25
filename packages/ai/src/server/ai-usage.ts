@@ -1,5 +1,6 @@
-import { currentAgentRun, currentAiSubject } from "./context";
-import { aiUsageEvents, db, type AiUsageStatus } from "@ats/db/server";
+import { currentAgentRun, currentAiSubject, currentService } from "./context";
+import { db } from "@ats/db/server";
+import { aiUsageEvents, type AiUsageStatus } from "@ats/db/server";
 
 /**
  * Stable slugs for every AI-powered feature. Each provider request is logged
@@ -50,6 +51,8 @@ export const AI_FEATURES = [
   "agent_distribution",
   "agent_screening_call",
   "agent_scheduling_call",
+  "agent_confirmation_call",
+  "agent_panel_check_call",
   "agent_negotiation_call",
   "agent_followup",
   "agent_org_context",
@@ -79,6 +82,9 @@ export const AI_FEATURES = [
   "screening_call",
   // Live voice: the call to pick an interview time (docs/voice-scheduling-call-plan.md).
   "scheduling_call",
+  // Live voice: the day-before attendance confirmation call, and a panelist's time check (0092).
+  "confirmation_call",
+  "panel_check_call",
   // Live voice: the pay discussion call (docs/negotiator-voice-agent.md).
   "negotiation_call",
   // Pay call rehearsals (scripts/evals/negotiation-live-sim.ts): the AI candidate and the
@@ -119,6 +125,8 @@ export async function recordAiUsage(input: {
   durationMs?: number | null;
   grounded?: boolean | null;
   errorMessage?: string | null;
+  /** Call-site provenance (e.g. which Python service made an internal call). */
+  metadata?: Record<string, unknown> | null;
 }): Promise<void> {
   try {
     const clamp = (n: number | null | undefined) =>
@@ -149,6 +157,9 @@ export async function recordAiUsage(input: {
         requisitionId: subject?.requisitionId ?? null,
         applicationId: subject?.applicationId ?? null,
         candidateId: subject?.candidateId ?? null,
+        // Which Python service made an internal call (plan §9) — set by the
+        // internal route's runWithService scope; null for in-app calls.
+        metadata: input.metadata ?? (currentService() ? { service: currentService() } : null),
       })
       .returning({ id: aiUsageEvents.id });
     if (row && subject?.events) subject.events.push(row.id);

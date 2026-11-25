@@ -5,11 +5,15 @@
  * or written through any client-facing surface — only this module and the
  * requireOrg-gated server functions in integrations.functions.ts reach it.
  */
-import { eq } from "drizzle-orm";
-
-import { db } from "../server/db";
 import { env } from "../server/env";
-import { integrationCredentials } from "@db/schema";
+
+// SHIM: remove in Phase 8 — the generic credential store moved to
+// @ats/org/server (Phase 4, map §4 L2); this re-export keeps the provider
+// modules and the requireOrg-gated server functions on the old import. This
+// also retires the temporary readSecrets cycle accepted in map §11 ruling 5:
+// the app and the (later) integrations package now both import the store
+// downward from org.
+export { readSecrets, writeSecrets, clearSecrets } from "@ats/org/server";
 
 /**
  * Integration base URLs are org-member-supplied and the server attaches stored
@@ -53,43 +57,6 @@ export type TestOutcome = {
 };
 
 export type IntegrationConfig = Record<string, string | number | boolean | null>;
-
-export async function readSecrets(integrationId: string): Promise<Record<string, string>> {
-  const { decryptSecret } = await import("../server/crypto");
-  const [row] = await db
-    .select({ secrets: integrationCredentials.secrets })
-    .from(integrationCredentials)
-    .where(eq(integrationCredentials.integrationId, integrationId))
-    .limit(1);
-  const stored = (row?.secrets as Record<string, string> | undefined) ?? {};
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(stored)) out[k] = decryptSecret(v);
-  return out;
-}
-
-export async function writeSecrets(integrationId: string, patch: Record<string, string>) {
-  const { encryptSecret } = await import("../server/crypto");
-  const current = await readSecrets(integrationId);
-  const merged = { ...current };
-  for (const [k, v] of Object.entries(patch)) {
-    // An empty string means "leave the stored value alone".
-    if (v.trim().length > 0) merged[k] = encryptSecret(v.trim());
-  }
-  await db
-    .insert(integrationCredentials)
-    .values({ integrationId, secrets: merged, updatedAt: new Date() })
-    .onConflictDoUpdate({
-      target: integrationCredentials.integrationId,
-      set: { secrets: merged, updatedAt: new Date() },
-    });
-  return Object.keys(merged);
-}
-
-export async function clearSecrets(integrationId: string) {
-  await db
-    .delete(integrationCredentials)
-    .where(eq(integrationCredentials.integrationId, integrationId));
-}
 
 /* --------------------------------------------------------- provider tests */
 

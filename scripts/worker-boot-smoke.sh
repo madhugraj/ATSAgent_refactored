@@ -46,10 +46,10 @@ boot() { # name, output-dir, expected line, env...
   rm -rf "$dir"
 }
 
-boot voice-worker .output/voice-worker "voice_worker.started" \
+boot voice-worker apps/web/.output/voice-worker "voice_worker.started" \
   DATABASE_URL=postgres://127.0.0.1:1/none SESSION_SECRET="$(rand)" \
   SIP_SERVER=127.0.0.1 SIP_PORT=5060 SIP_USER=smoke SIP_PASSWORD="$(rand)" SIP_DOMAIN=smoke.invalid
-boot parser-worker .output/parser-worker "parser worker listening" PARSER_TOKEN="$(rand)" PORT=0
+boot parser-worker apps/web/.output/parser-worker "parser worker listening" PARSER_TOKEN="$(rand)" PORT=0
 
 # Web: boot.ts compiled in + one load-once guard per platform package, then boot.
 if [ ! -f apps/web/.output/server/index.mjs ]; then

@@ -55,6 +55,57 @@ import {
   candidateAssessments,
 } from "@db/schema";
 
+/* ------------------------------------------------------------------------ */
+/* The conversation store and thread lifecycle live in @ats/desk-core/server */
+/* (Phase 4, map §4 L2). Re-exports keep desk.server's exact surface for the */
+/* app's existing imports (SHIM: remove in Phase 8, when importers repoint). */
+/* ------------------------------------------------------------------------ */
+import {
+  clipText,
+  conversationForRequisition,
+  loadConversation,
+  postMessage,
+  readableAgentText,
+  registerDeskThreadEffects,
+  STATUS_WORDS,
+} from "@ats/desk-core/server";
+import type { Conversation, DeskCard } from "@ats/desk-core/server";
+
+export {
+  clipText,
+  conversationForRequisition,
+  conversationForSubject,
+  deletionAllowed,
+  deletionFor,
+  deleteThread,
+  deleteThreads,
+  deletedThreads,
+  deskSiblings,
+  humanizeInternals,
+  loadConversation,
+  plainPreview,
+  postMessage,
+  purgeDeletedThreads,
+  readableAgentText,
+  RESTORE_DAYS,
+  restoreThread,
+} from "@ats/desk-core/server";
+export type { DeskCard, DeskTrackView, ThreadDeletion } from "@ats/desk-core/server";
+
+// Deleting or restoring a thread stops agent runs through the effects
+// registered on @ats/desk-core (its L2 package must not import the L4
+// runtime). boot.ts registers the same implementations for the production
+// bundle; this load-time registration wires every direct desk.server import
+// (server-fns, tests) exactly as the pre-extraction lazy imports did.
+void import("../agents/runtime.server")
+  .then((rt) =>
+    registerDeskThreadEffects({
+      cancelRun: rt.cancelRun,
+      afterSubjectsDeleted: rt.afterSubjectsDeleted,
+    }),
+  )
+  .catch((e) => log.warn("desk.thread_effects_registration_failed", { error: e as Error }));
+
 /* ------------------------------------------------------------------ slots */
 
 const skillList = z.array(z.string().trim().min(1).max(60)).max(20);
@@ -232,104 +283,16 @@ export function describeNeed(s: DeskSlots): string {
 
 /* --------------------------------------------------------------- threads */
 
-type Conversation = typeof hiringConversations.$inferSelect;
-export type DeskCard = Record<string, unknown> & { type: string };
-
-/** Longest message body kept; the thread folds long text behind "Show more". */
-const MESSAGE_MAX = 12_000;
-
-/** Cut long text at a paragraph (never mid-sentence) and say where the rest is. */
-export function clipText(text: string, max: number): string {
-  if (text.length <= max) return text;
-  const at = text.lastIndexOf("\n\n", max - 80);
-  const cut = at > max / 2 ? at : text.lastIndexOf(". ", max - 80) + 1 || max - 80;
-  return `${text.slice(0, cut).trimEnd()}\n\n… The full text is in Agent activity.`;
-}
+/**
+ * The conversation store — postMessage, loadConversation,
+ * conversationForRequisition / ForSubject, thread deletion and the agent-text
+ * helpers — lives in @ats/desk-core/server (Phase 4, map §4 L2, fixes S3).
+ * desk.server re-exports its exact surface below (shims; Phase 8 removes
+ * them) so the app's desk imports keep working unchanged.
+ */
 
 /** "1 candidate", "3 candidates". */
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-export async function postMessage(
-  conv: { id: string; orgId: string },
-  m: { role: "user" | "desk" | "agent"; body: string; agentType?: string | null; card?: DeskCard },
-): Promise<void> {
-  await db.insert(hiringMessages).values({
-    conversationId: conv.id,
-    orgId: conv.orgId,
-    role: m.role,
-    agentType: m.agentType ?? null,
-    body: clipText(m.body, MESSAGE_MAX),
-    card: (m.card ?? null) as never,
-  });
-  await db
-    .update(hiringConversations)
-    .set({ updatedAt: new Date() })
-    .where(eq(hiringConversations.id, conv.id));
-}
-
-export async function loadConversation(
-  orgId: string,
-  id: string,
-  opts: { includeDeleted?: boolean } = {},
-): Promise<Conversation> {
-  const [c] = await db
-    .select()
-    .from(hiringConversations)
-    .where(
-      and(
-        eq(hiringConversations.id, id),
-        eq(hiringConversations.orgId, orgId),
-        // A deleted chat is gone for everyone but its restore.
-        opts.includeDeleted ? undefined : isNull(hiringConversations.deletedAt),
-      ),
-    )
-    .limit(1);
-  if (!c) throw new Error("Conversation not found.");
-  return c;
-}
-
-/** The thread a requisition belongs to (newest first), if any. */
-export async function conversationForRequisition(
-  orgId: string,
-  requisitionId: string,
-): Promise<Conversation | null> {
-  const [c] = await db
-    .select()
-    .from(hiringConversations)
-    .where(
-      and(
-        eq(hiringConversations.orgId, orgId),
-        eq(hiringConversations.kind, "hiring"),
-        eq(hiringConversations.requisitionId, requisitionId),
-        notInArray(hiringConversations.status, ["closed"]),
-        isNull(hiringConversations.deletedAt),
-      ),
-    )
-    .orderBy(desc(hiringConversations.createdAt))
-    .limit(1);
-  return c ?? null;
-}
-
-/** Thread for a run's subject: a requisition directly, an application through its requisition. */
-export async function conversationForSubject(
-  orgId: string,
-  subjectType: string | null | undefined,
-  subjectId: string | null | undefined,
-): Promise<string | null> {
-  if (!subjectId) return null;
-  let requisitionId: string | null = null;
-  if (subjectType === "requisition") requisitionId = subjectId;
-  else if (subjectType === "application") {
-    const [a] = await db
-      .select({ requisitionId: applications.requisitionId })
-      .from(applications)
-      .where(and(eq(applications.id, subjectId), eq(applications.orgId, orgId)))
-      .limit(1);
-    requisitionId = a?.requisitionId ?? null;
-  }
-  if (!requisitionId) return null;
-  return (await conversationForRequisition(orgId, requisitionId))?.id ?? null;
-}
 
 /* ---------------------------------------------------------- model turn */
 
@@ -1786,6 +1749,8 @@ const AGENT_TITLE: Record<string, string> = {
   screening: "Screening agent",
   screening_call: "Screening call agent",
   scheduling_call: "Scheduling call agent",
+  confirmation_call: "Confirmation call agent",
+  panel_check_call: "Panel time-check call agent",
   interview: "Interview coordinator",
   evaluation: "Evaluation agent",
   offer: "Offer agent",
@@ -2847,17 +2812,6 @@ export async function noteJdTemplate(
 
 /* ----------------------------------------- grounding and the role's end */
 
-const STATUS_WORDS: Record<string, string> = {
-  draft: "draft (not yet submitted)",
-  pending_dh: "waiting for the department head's approval",
-  pending_hr: "waiting for the HR head's approval",
-  pending_cbo: "waiting for the CBO's approval",
-  approved: "approved and open",
-  rejected: "rejected",
-  on_hold: "on hold",
-  closed: "closed",
-};
-
 /** One line on the approved organisation profile (or its absence), for FACTS. */
 async function organisationFact(orgId: string): Promise<string> {
   const { orgContextFor } = await import("@/lib/org-context.server");
@@ -3843,67 +3797,6 @@ export async function revisionOf(
   };
 }
 
-const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-/** Agent text shown to people: drop "… ID: <uuid>" lines and any stray internal ids. */
-export function readableAgentText(text: string): string {
-  // Links are kept whole — an id inside a URL (/apply/<id>) is the link itself.
-  const links: string[] = [];
-  const shielded = text.replace(/https?:\/\/[^\s<>()`'"]+/g, (url) => {
-    links.push(url);
-    return `\uE000${links.length - 1}\uE000`;
-  });
-  return humanizeInternals(stripIds(shielded)).replace(
-    /\uE000(\d+)\uE000/g,
-    (_, i) => links[Number(i)]!,
-  );
-}
-
-/**
- * Internal names an agent may echo: tool names (list_departments) become
- * words, "finalComplete: true"-style flags go. Code spans and links are kept.
- */
-export function humanizeInternals(text: string): string {
-  return text
-    .split(/(```[\s\S]*?```)/)
-    .map((part, i) =>
-      i % 2
-        ? part
-        : part
-            // "(finalComplete: true)", "; isFinal=false"
-            .replace(/\s*\(\s*[a-z]+[A-Z]\w*\s*[:=]\s*(?:true|false)\s*\)/g, "")
-            .replace(/(?:[;,]\s*)?\b[a-z]+[A-Z]\w*\s*[:=]\s*(?:true|false)\b/g, "")
-            // `list_departments` / list_departments → "list departments" (not emails or file names)
-            .replace(/`?(?<![\w@.])([a-z]+(?:_[a-z]+)+)(?![\w@]|\.\w)`?/g, (_m, w: string) =>
-              w.replace(/_/g, " "),
-            )
-            // What a removed flag leaves behind: "(``)", "``".
-            .replace(/\s*\(\s*`\s*`\s*\)/g, "")
-            .replace(/`\s*`/g, "")
-            .replace(/\(\s*\)/g, ""),
-    )
-    .join("");
-}
-
-/**
- * One-paragraph preview of agent text for lists (Agent activity): ids and
- * internal names out, markdown marks removed, cut at a word (pure; tested).
- */
-export function plainPreview(text: string | null, max: number): string | null {
-  if (!text) return text;
-  const plain = readableAgentText(text)
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/^\s*#{1,6}\s+/gm, "")
-    .replace(/^\s*[-*•]\s+/gm, "")
-    .replace(/^\s*\|?\s*:?-{2,}.*$/gm, "")
-    .replace(/\*\*|__|`/g, "")
-    .replace(/\s*\|\s*/g, " · ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (plain.length <= max) return plain;
-  const cut = plain.lastIndexOf(" ", max);
-  return `${plain.slice(0, cut > max / 2 ? cut : max)}…`;
-}
-
 const MONTHS =
   "January|February|March|April|May|June|July|August|September|October|November|December";
 const WEEKDAY = "(?:(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day,?\\s+)?";
@@ -3962,42 +3855,6 @@ export function tidyForPeople(text: string, timeZone: string): string {
 }
 
 export const deskTimeZone = (orgId: string) => orgTimeZone(orgId);
-
-const ENTITY = "Application|Candidate|Requisition|Offer|Run|Task|Assessment|Interview";
-
-function stripIds(text: string): string {
-  const id = `\`?${UUID.source}\`?`;
-  const hadId = new RegExp(UUID.source, "i");
-  // A line that was "Application ID: <id>" in any markdown dress, now empty.
-  const emptyLabel = /^[\s>*_\-•#]*[A-Za-z][\w ./&-]{0,40}[*_]*\s*[:=]?\s*[*_`]*\s*$/;
-  return (
-    text
-      .split("\n")
-      .map((line) => {
-        if (!hadId.test(line)) return line;
-        const left = line.replace(new RegExp(`\\s*${id}`, "gi"), "");
-        return /[:=]/.test(line) && emptyLabel.test(left) ? null : line;
-      })
-      .filter((line): line is string => line !== null)
-      // "Application ID:" left empty when an earlier pass removed its id.
-      .filter((line) => !/^[\s>*_\-•]*[A-Za-z ]{0,30}\bID\b[*_]*\s*[:=]?\s*[*_`]*\s*$/.test(line))
-      // A line that is only "<label> id: <id>" says nothing to a person.
-      .filter(
-        (line) => !new RegExp(`^[\\s*\\-•]*[\\w ]{0,30}:?\\s*${id}[\\s.,)]*$`, "i").test(line),
-      )
-      .join("\n")
-      // "Application ID: <id>", "(ID: <id>)", "Requisition: <id>": the label goes with the id.
-      .replace(new RegExp(`,?\\s*\\b[A-Za-z]+(?:\\s(?:ID|Id|id))?\\s*[:=]\\s*${id}`, "g"), "")
-      .replace(new RegExp(`\\s*${id}`, "gi"), "")
-      // …and what an earlier pass left of it: "(Application, Requisition)".
-      .replace(new RegExp(`\\s*\\((?:\\s*(?:${ENTITY})(?:\\s+ID)?\\s*,?)+\\s*\\)`, "gi"), "")
-      // "(<id>)" leaves "()" behind; "(<id>, x)" leaves "(, x)".
-      .replace(/\s*\(\s*\)/g, "")
-      .replace(/\(\s*,\s*/g, "(")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim()
-  );
-}
 
 /** Where an agent stands against its monthly token budget, with a suggested new budget. */
 export async function budgetOf(
@@ -5192,280 +5049,6 @@ export function suggestBudget(used: number, limit: number, now: Date): number {
   return Math.ceil(Math.max(limit * 2, used * 2, projected) / 50_000) * 50_000;
 }
 
-/* ------------------------------------------------------------ deleting a chat */
-
-/** How long a deleted chat can be restored before the sweep purges it. */
-export const RESTORE_DAYS = 30;
-
-export type ThreadDeletion =
-  { kind: "chat" } | { kind: "draft"; requisitionId: string; code: string } | null;
-
-/**
- * What the dustbin would delete (pure on its inputs; unit-tested): a chat
- * still gathering details (no requisition), or a chat with an unused draft
- * requisition. Anything in approval or later is rejected / closed instead,
- * so its trail stays.
- */
-export function deletionFor(
-  conv: { requisitionId: string | null },
-  req: { id: string; code: string; status: string; applications: number } | null,
-): ThreadDeletion {
-  if (!conv.requisitionId) return { kind: "chat" };
-  if (req && req.status === "draft" && req.applications === 0)
-    return { kind: "draft", requisitionId: req.id, code: req.code };
-  return null;
-}
-
-async function threadRequisition(conv: Conversation) {
-  if (!conv.requisitionId) return null;
-  const [req] = await db
-    .select({ id: requisitions.id, code: requisitions.code, status: requisitions.status })
-    .from(requisitions)
-    .where(and(eq(requisitions.id, conv.requisitionId), eq(requisitions.orgId, conv.orgId)))
-    .limit(1);
-  if (!req) return null;
-  const [a] = (await db.execute(sql`
-    select count(*)::int n from applications
-    where requisition_id = ${req.id} and org_id = ${conv.orgId}`)) as unknown as { n: number }[];
-  return { ...req, applications: a?.n ?? 0 };
-}
-
-/**
- * Whether this person may delete this chat now, and what it would delete.
- * A chat only: its starter, or the HR head / CBO / owner. With a draft
- * requisition: HR head / CBO / owner (the Requisitions page's rule).
- */
-export async function deletionAllowed(conv: Conversation, userId: string): Promise<ThreadDeletion> {
-  const what = deletionFor(conv, await threadRequisition(conv));
-  if (!what) return null;
-  const { assertRole } = await import("@/lib/auth.middleware");
-  const leader = await assertRole(userId, conv.orgId, ["hr_head", "president_cbo"]).then(
-    () => true,
-    () => false,
-  );
-  if (what.kind === "chat") return leader || conv.createdBy === userId ? what : null;
-  return leader ? what : null;
-}
-
-/** Delete a chat (and its unused draft): hidden now, restorable for 30 days; audited. */
-export async function deleteThread(
-  conv: Conversation,
-  userId: string,
-  reason: string,
-  now = new Date(),
-): Promise<{ kind: "chat" | "draft"; code: string | null; restoreUntil: string }> {
-  const { activeOrgOf } = await import("@/lib/auth.middleware");
-  const org = await activeOrgOf(userId);
-  if (!org || org.orgId !== conv.orgId)
-    throw new Error("You are not a member of this organisation.");
-  const what = await deletionAllowed(conv, userId);
-  if (!what) {
-    const req = await threadRequisition(conv);
-    throw new Error(
-      req && req.status !== "draft"
-        ? `${req.code} is ${STATUS_WORDS[req.status] ?? req.status}, so this chat cannot be deleted — reject or close the role instead; the chat then stays as its record.`
-        : req && req.applications > 0
-          ? `${req.code} already has applications, so this chat cannot be deleted.`
-          : "Only the person who started this chat, the HR head, the CBO or an owner can delete it.",
-    );
-  }
-  const why = reason.replace(/\s+/g, " ").trim().slice(0, 500);
-  if (what.kind === "draft" && why.length < 3)
-    throw new Error("Say why — the draft requisition is deleted with the chat.");
-  // Nothing keeps working for a deleted chat.
-  const active = await db
-    .select({ id: agentRuns.id })
-    .from(agentRuns)
-    .where(
-      and(
-        eq(agentRuns.orgId, conv.orgId),
-        eq(agentRuns.conversationId, conv.id),
-        inArray(agentRuns.status, ["queued", "running", "awaiting_human"]),
-      ),
-    );
-  const { cancelRun } = await import("../agents/runtime.server");
-  for (const r of active) await cancelRun({ orgId: conv.orgId, runId: r.id, userId });
-  const hidden = await db
-    .update(hiringConversations)
-    .set({ deletedAt: now, deletedBy: userId, deleteReason: why || null, updatedAt: now })
-    .where(and(eq(hiringConversations.id, conv.id), isNull(hiringConversations.deletedAt)))
-    .returning({ id: hiringConversations.id });
-  if (!hidden.length) throw new Error("This chat was already deleted.");
-  if (what.kind === "draft") {
-    await db
-      .delete(requisitions)
-      .where(
-        and(
-          eq(requisitions.id, what.requisitionId),
-          eq(requisitions.orgId, conv.orgId),
-          eq(requisitions.status, "draft"),
-        ),
-      );
-    await writeAudit({
-      actor: org.memberEmail,
-      actorUserId: userId,
-      orgId: conv.orgId,
-      action: "requisition.delete",
-      entityType: "requisition",
-      entityId: what.requisitionId,
-      detail: { code: what.code, reason: why, via: "hiring_desk", conversation_id: conv.id },
-    });
-    const { afterSubjectsDeleted } = await import("../agents/runtime.server");
-    await afterSubjectsDeleted(conv.orgId);
-  }
-  const [m] = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(hiringMessages)
-    .where(eq(hiringMessages.conversationId, conv.id));
-  await writeAudit({
-    actor: org.memberEmail,
-    actorUserId: userId,
-    orgId: conv.orgId,
-    action: "desk.thread_deleted",
-    entityType: "hiring_conversation",
-    entityId: conv.id,
-    detail: {
-      title: conv.title,
-      messages: Number(m?.n ?? 0),
-      stage: what.kind,
-      requisition: what.kind === "draft" ? what.code : null,
-      reason: why || null,
-      runsStopped: active.length,
-    },
-  });
-  return {
-    kind: what.kind,
-    code: what.kind === "draft" ? what.code : null,
-    restoreUntil: new Date(now.getTime() + RESTORE_DAYS * 864e5).toISOString(),
-  };
-}
-
-/**
- * Delete a thread — and with scope "split", the other tracks of its fan-out.
- * Each sibling passes the same rules as a single delete (deletionAllowed:
- * the starter or HR leadership; a draft only by leadership); one that may
- * not go is kept and named with the reason, never silently skipped.
- */
-export async function deleteThreads(
-  conv: Conversation,
-  userId: string,
-  reason: string,
-  scope: "track" | "split",
-  now = new Date(),
-): Promise<
-  Awaited<ReturnType<typeof deleteThread>> & {
-    alsoDeleted: number;
-    kept: { title: string; why: string }[];
-  }
-> {
-  // Read the group before this thread leaves it (siblings skip deleted ones).
-  const siblings = scope === "split" ? await deskSiblings(conv.orgId, conv.id) : [];
-  const res = await deleteThread(conv, userId, reason, now);
-  const kept: { title: string; why: string }[] = [];
-  let alsoDeleted = 0;
-  for (const sib of siblings) {
-    try {
-      await deleteThread(await loadConversation(conv.orgId, sib.id), userId, reason, now);
-      alsoDeleted++;
-    } catch (e) {
-      kept.push({ title: sib.title, why: e instanceof Error ? e.message : "Not deleted." });
-    }
-  }
-  return { ...res, alsoDeleted, kept };
-}
-
-/** Chats deleted in the last 30 days (owners restore them). */
-export async function deletedThreads(orgId: string, now = new Date()) {
-  return db
-    .select({
-      id: hiringConversations.id,
-      title: hiringConversations.title,
-      deletedAt: hiringConversations.deletedAt,
-      reason: hiringConversations.deleteReason,
-    })
-    .from(hiringConversations)
-    .where(
-      and(
-        eq(hiringConversations.orgId, orgId),
-        eq(hiringConversations.kind, "hiring"),
-        sql`${hiringConversations.deletedAt} > ${new Date(now.getTime() - RESTORE_DAYS * 864e5).toISOString()}::timestamptz`,
-      ),
-    )
-    .orderBy(desc(hiringConversations.deletedAt));
-}
-
-/**
- * An owner restores a chat within 30 days; audited. A draft deleted with it is
- * not brought back — the chat says so and the details are still there to raise it again.
- */
-export async function restoreThread(
-  orgId: string,
-  userId: string,
-  id: string,
-  now = new Date(),
-): Promise<{ ok: true }> {
-  const { activeOrgOf } = await import("@/lib/auth.middleware");
-  const org = await activeOrgOf(userId);
-  if (!org || org.orgId !== orgId || !org.isOwner)
-    throw new Error("Only an owner can restore a deleted chat.");
-  const conv = await loadConversation(orgId, id, { includeDeleted: true });
-  if (!conv.deletedAt) throw new Error("This chat is not deleted.");
-  if (now.getTime() - conv.deletedAt.getTime() > RESTORE_DAYS * 864e5)
-    throw new Error(
-      `Deleted chats can be restored for ${RESTORE_DAYS} days; this one has passed that.`,
-    );
-  await db
-    .update(hiringConversations)
-    .set({ deletedAt: null, deletedBy: null, deleteReason: null, updatedAt: now })
-    .where(and(eq(hiringConversations.id, conv.id), eq(hiringConversations.orgId, orgId)));
-  await writeAudit({
-    actor: org.memberEmail,
-    actorUserId: userId,
-    orgId,
-    action: "desk.thread_restored",
-    entityType: "hiring_conversation",
-    entityId: conv.id,
-    detail: { title: conv.title, deletedAt: conv.deletedAt.toISOString() },
-  });
-  const restored = await loadConversation(orgId, id);
-  if (conv.requisitionId === null && restored.status !== "gathering") {
-    // Its draft was deleted with it (the link is cleared): back to gathering details.
-    await db
-      .update(hiringConversations)
-      .set({ status: "gathering" })
-      .where(eq(hiringConversations.id, conv.id));
-    await postMessage(restored, {
-      role: "desk",
-      body: 'This chat was restored. Its draft requisition was deleted with it and is not brought back — the hiring details are still here; say "create it" to raise a new draft.',
-    });
-  } else await postMessage(restored, { role: "desk", body: "This chat was restored." });
-  return { ok: true };
-}
-
-/** Chats deleted more than 30 days ago are removed for good (scheduler sweep); audited. */
-export async function purgeDeletedThreads(now = new Date()): Promise<number> {
-  const gone = await db
-    .delete(hiringConversations)
-    .where(
-      sql`${hiringConversations.deletedAt} <= ${new Date(now.getTime() - RESTORE_DAYS * 864e5).toISOString()}::timestamptz`,
-    )
-    .returning({
-      id: hiringConversations.id,
-      orgId: hiringConversations.orgId,
-      title: hiringConversations.title,
-    });
-  for (const g of gone)
-    await writeAudit({
-      actor: "system:desk-retention",
-      orgId: g.orgId,
-      action: "desk.thread_purged",
-      entityType: "hiring_conversation",
-      entityId: g.id,
-      detail: { title: g.title, afterDays: RESTORE_DAYS },
-    });
-  return gone.length;
-}
-
 /**
  * Fan a multi-need message out into parallel hiring threads. The first need
  * stays in this thread; the rest get their own thread each, seeded with the
@@ -5525,79 +5108,4 @@ export async function splitNeeds(
     body: `${plural(needs.length, "track")} running in parallel — one thread each, and I'll ask what is missing in each separately. This thread is ${firstName}; the card below opens all of them side by side.`,
     card: { type: "needs_fanout", items } as never,
   });
-}
-
-/* ------------------------------------------------- tracks chip (siblings) */
-
-export type DeskTrackView = {
-  id: string;
-  title: string;
-  status: string;
-  /** Open agent requests waiting for the person in this thread. */
-  needsYou: number;
-  /** This is the thread being viewed. */
-  self: boolean;
-};
-
-/**
- * The other threads of the same fan-out, with what needs the person in each.
- * Threads created before `split_group_id` existed are linked lazily from
- * their fan-out card's track list, so older splits get the chip too.
- */
-export async function deskSiblings(
-  orgId: string,
-  conversationId: string,
-): Promise<DeskTrackView[]> {
-  const [conv] = await db
-    .select({ splitGroupId: hiringConversations.splitGroupId })
-    .from(hiringConversations)
-    .where(and(eq(hiringConversations.id, conversationId), eq(hiringConversations.orgId, orgId)))
-    .limit(1);
-  if (!conv) return [];
-  let groupId = conv.splitGroupId;
-  if (!groupId) {
-    // Write-behind: derive the group from this thread's fan-out card.
-    const msgs = await db
-      .select({ id: hiringMessages.id, card: hiringMessages.card })
-      .from(hiringMessages)
-      .where(eq(hiringMessages.conversationId, conversationId));
-    const fanout = msgs.find((m) => (m.card as { type?: string } | null)?.type === "needs_fanout");
-    const items =
-      (fanout?.card as { items?: { id: string }[] } | null)?.items ?? ([] as { id: string }[]);
-    if (items.length < 2) return [];
-    // The fan-out card's message id IS the group id: deterministic, so every
-    // thread of the split derives and stamps the same value whenever it runs.
-    groupId = fanout!.id;
-    await db
-      .update(hiringConversations)
-      .set({ splitGroupId: groupId })
-      .where(
-        and(
-          eq(hiringConversations.orgId, orgId),
-          inArray(hiringConversations.id, [conversationId, ...items.map((i) => i.id)]),
-        ),
-      );
-  }
-  const rows = (await db.execute(sql`
-    select hc.id, hc.title, hc.status, hc.created_by,
-      (select count(*)::int from agent_tasks t
-         join agent_runs r on r.id = t.run_id
-        where r.conversation_id = hc.id and t.status = 'open') as needs_you
-    from hiring_conversations hc
-    where hc.org_id = ${orgId} and hc.split_group_id = ${groupId}
-      and hc.id <> ${conversationId} and hc.deleted_at is null
-    order by hc.created_at`)) as unknown as {
-    id: string;
-    title: string;
-    status: string;
-    created_by: string;
-    needs_you: number;
-  }[];
-  return rows.map((r) => ({
-    id: r.id,
-    title: r.title,
-    status: r.status,
-    needsYou: r.needs_you,
-    self: false,
-  }));
 }
