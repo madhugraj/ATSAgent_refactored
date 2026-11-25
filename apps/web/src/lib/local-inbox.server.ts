@@ -1,73 +1,51 @@
 /**
- * Local careers inbox, one per organisation.
+ * Local careers inbox, one per organisation — the app-side handler half.
  *
  * Each tenant gets its own ATSIQ address (for example acme@careers.atsiq.yavar.ai).
  * Mail sent there — LinkedIn application alerts, board notifications, direct
  * applicants — arrives on the inbound webhook, is stored in inbox_messages and
  * the attached CV is parsed straight into the talent pool. HR configures nothing.
+ *
+ * The transport (tenant resolution, `onInboundMail`) moved to
+ * `@ats/comms/server` (map §11 ruling 4a); this module keeps the
+ * hiring-domain routing — CV parse into the talent pool (intake), pre-onboarding
+ * document filing (onboarding), job-channel sources — as the registered handler.
+ * The transport pieces are re-exported below so existing importers
+ * (email-outbox via careersReplyAddress, local-inbox.functions, routes) keep
+ * working unchanged.
  */
-import { channelForSender } from "./job-channels";
-import { and, desc, eq, ilike, inArray } from "drizzle-orm";
+import {
+  applicantSender,
+  displayName,
+  emailInText,
+  onInboundMail,
+  // SHIM: remove in Phase 8 (each moved symbol re-points to @ats/comms/server)
+  type InboundResult,
+  type ResolvedInbound,
+} from "@ats/comms/server";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { db } from "../server/db";
-import { inboxMessages, organizations, requisitions } from "@db/schema";
+import { inboxMessages, requisitions } from "@db/schema";
 import { ingestCandidate, parseCv } from "./intake.server";
+import { channelForSender } from "./job-channels";
 
-export const INBOX_DOMAIN = process.env["INBOUND_EMAIL_DOMAIN"] ?? "careers.atsiq.yavar.ai";
-
-export function inboxAddress(slug: string | null | undefined): string | null {
-  const clean = (slug ?? "").trim().toLowerCase();
-  return clean ? `${clean}@${INBOX_DOMAIN}` : null;
-}
-
-/** Local part of any recipient address, lower-cased. */
-export function localPart(address: string): string {
-  const m = /<([^>]+)>/.exec(address);
-  const bare = (m?.[1] ?? address).trim().toLowerCase();
-  const at = bare.indexOf("@");
-  return (at === -1 ? bare : bare.slice(0, at)).replace(/\+.*$/, "");
-}
-
-/** Every plain address found in a recipient header, lower-cased. */
-export function recipientAddresses(header: string): string[] {
-  const out: string[] = [];
-  for (const chunk of (header ?? "").split(",")) {
-    const m = /<([^>]+)>/.exec(chunk);
-    const bare = (m?.[1] ?? chunk).trim().toLowerCase();
-    if (bare.includes("@")) out.push(bare);
-  }
-  return out;
-}
-
-export function displayName(from: string): { email: string; name: string | null } {
-  const m = /^\s*"?([^"<]*)"?\s*<([^>]+)>\s*$/.exec(from);
-  if (m) return { email: (m[2] ?? "").trim().toLowerCase(), name: (m[1] ?? "").trim() || null };
-  return { email: from.trim().toLowerCase(), name: null };
-}
-
-const TEXT_EMAIL = /[\w.+-]+@[\w-]+\.[\w.-]+/;
-const RELAY_LOCAL =
-  /no-?reply|donotreply|^(notifications?|alerts?|jobs|careers|hr|talent|recruit)/i;
-
-/** First email address found in a document, lower-cased. */
-export function emailInText(text: string): string | null {
-  return TEXT_EMAIL.exec(text)?.[0]?.toLowerCase() ?? null;
-}
-
-/**
- * The sender, when plausibly the applicant themself. Board notifications and
- * mailbox relays (no-reply@, notifications@, careers@…) must never become a
- * candidate's identity — every applicant would collapse into one record.
- */
-export function applicantSender(sender: {
-  email: string | null | undefined;
-  name: string | null | undefined;
-}): { email: string; name: string | null } | null {
-  const email = (sender.email ?? "").trim().toLowerCase();
-  if (!email.includes("@")) return null;
-  if (RELAY_LOCAL.test(email.split("@")[0] ?? "")) return null;
-  return { email, name: sender.name ?? null };
-}
+// The moved transport surface, re-exported verbatim for existing importers.
+export {
+  INBOX_DOMAIN,
+  inboxAddress,
+  localPart,
+  recipientAddresses,
+  displayName,
+  emailInText,
+  applicantSender,
+  receiveMail,
+  // SHIM: remove in Phase 8 (each moved symbol re-points to @ats/comms/server)
+  type InboundAttachment,
+  type InboundMail,
+  type InboundResult,
+  type ResolvedInbound,
+} from "@ats/comms/server";
 
 /**
  * The source a careers-inbox CV is recorded under: the portal that sent the
@@ -77,28 +55,6 @@ export function applicantSender(sender: {
 export function inboxSource(senderEmail: string | null | undefined): string {
   return channelForSender(senderEmail)?.id ?? "careers_inbox";
 }
-
-export type InboundAttachment = {
-  filename: string;
-  content: string;
-  contentType?: string | undefined;
-};
-
-export type InboundMail = {
-  to: string;
-  from: string;
-  subject?: string | null | undefined;
-  text?: string | null | undefined;
-  messageId?: string | null | undefined;
-  attachments?: InboundAttachment[] | undefined;
-};
-
-export type InboundResult = {
-  status: "imported" | "updated" | "stored" | "skipped" | "error";
-  detail: string;
-  messageId: string | null;
-  candidateId?: string | null;
-};
 
 function base64ToBytes(data: string): Uint8Array {
   const b64 = data
@@ -129,61 +85,28 @@ async function matchRequisition(orgId: string, haystack: string): Promise<string
 }
 
 /**
- * Handle one inbound mail: resolve the tenant from the recipient, record it and
- * import any CV attachment. Never throws — every outcome is stored on the row so
- * HR can see exactly what happened to each mail.
+ * The app's inbound-mail handler: record the mail in inbox_messages (the
+ * provider dedupes on it) and import any CV attachment into the talent pool,
+ * filing anything else against a pre-onboarding offer. Never throws — every
+ * outcome is stored on the row so HR can see exactly what happened to each mail.
  */
-export async function receiveMail(mail: InboundMail): Promise<InboundResult> {
-  const addresses = recipientAddresses(mail.to ?? "");
-  const slug = localPart(mail.to ?? "");
-  if (!slug)
-    return { status: "error", detail: "No recipient address on the mail.", messageId: null };
-
-  // Mail sent straight to the ATSIQ address, or forwarded from the organisation's
-  // own careers address (careers@company.com) which it registered here.
-  let org: { id: string; status: string | null } | null = null;
-  if (addresses.length) {
-    const [row] = await db
-      .select({ id: organizations.id, status: organizations.status })
-      .from(organizations)
-      .where(inArray(organizations.careersEmail, addresses))
-      .limit(1);
-    org = row ?? null;
-  }
-  if (!org) {
-    const [row] = await db
-      .select({ id: organizations.id, status: organizations.status })
-      .from(organizations)
-      .where(ilike(organizations.inboxSlug, slug))
-      .limit(1);
-    org = row ?? null;
-  }
-  if (!org) {
-    return {
-      status: "error",
-      detail: `No organisation owns the address ${slug}.`,
-      messageId: null,
-    };
-  }
-
-  if (org.status && org.status !== "active") {
-    return { status: "error", detail: "That organisation is not active.", messageId: null };
-  }
-
-  const sender = displayName(mail.from ?? "");
+export async function localInboxHandler(mail: ResolvedInbound): Promise<InboundResult> {
+  const orgId = mail.orgId;
+  const sender = mail.sender;
+  const { mail: message } = mail;
   const { attachmentText, looksLikeCv } = await import("./cv-text.server");
   const attachments = (mail.attachments ?? []).filter((a) => looksLikeCv(a.filename ?? ""));
   const cv = attachments[0] ?? null;
 
   const row = {
-    orgId: org.id,
-    toAddress: mail.to,
+    orgId,
+    toAddress: message.to,
     fromEmail: sender.email || null,
     fromName: sender.name,
-    subject: mail.subject ?? null,
-    body: (mail.text ?? "").slice(0, 20000) || null,
+    subject: message.subject ?? null,
+    body: (message.text ?? "").slice(0, 20000) || null,
     attachmentName: cv?.filename ?? null,
-    providerMessageId: mail.messageId ?? null,
+    providerMessageId: message.messageId ?? null,
     status: "received",
     receivedAt: new Date(),
   };
@@ -221,7 +144,7 @@ export async function receiveMail(mail: InboundMail): Promise<InboundResult> {
   // experience letters and payslips to the same careers address. Those files are
   // filed against their offer and read by the extraction agent for HR to validate.
   const filedDocs = await filePreOnboardingAttachments({
-    orgId: org.id,
+    orgId,
     senderEmail: sender.email,
     attachments: (mail.attachments ?? []).filter((a) => a.filename !== cv?.filename),
     inboxMessageId: savedId,
@@ -248,10 +171,10 @@ export async function receiveMail(mail: InboundMail): Promise<InboundResult> {
       });
     }
     const requisitionId = await matchRequisition(
-      org.id,
-      `${mail.subject ?? ""} ${mail.text ?? ""} ${cv.filename}`,
+      orgId,
+      `${message.subject ?? ""} ${message.text ?? ""} ${cv.filename}`,
     );
-    const parsed = await parseCv(text, org.id);
+    const parsed = await parseCv(text, orgId);
     if (!parsed) {
       console.warn(
         `[careers-inbox] CV parse failed for ${cv.filename}; filing from the mail's own identity.`,
@@ -264,7 +187,7 @@ export async function receiveMail(mail: InboundMail): Promise<InboundResult> {
       resumeText: text,
       fileName: cv.filename,
       requisitionId,
-      orgId: org.id,
+      orgId,
       source: inboxSource(sender.email),
       parsed,
       fullName: parsed?.full_name || applicant?.name || null,
@@ -289,6 +212,12 @@ export async function receiveMail(mail: InboundMail): Promise<InboundResult> {
     });
   }
 }
+
+// Register with the comms transport at import time as well as in boot.ts:
+// every existing caller reaches receiveMail through this module, so the
+// handler is always in place even where boot.ts is not loaded (tests,
+// workers). The transport's single slot makes the double registration a no-op.
+onInboundMail(localInboxHandler);
 
 /** Retry a stored mail whose import failed, using the attachment text we kept. */
 export async function retryMessage(orgId: string, messageId: string): Promise<InboundResult> {

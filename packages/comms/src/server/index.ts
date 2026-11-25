@@ -1,7 +1,7 @@
 import "@tanstack/react-start/server-only";
 
 // @ats/comms/server — email templates, send-email, outbox, settings, ics,
-// inbound-mail transport. Empty until the Phase 4 move PR (map §4 L2).
-// Change PR planned with the move: onInboundMail(handler) registry; the
-// local-inbox transport lands here, its CV/documents handlers move to
-// candidates/onboarding and register in boot.ts.
+// inbound-mail transport. The inbound transport + onInboundMail(handler)
+// registry live here (map §11 ruling 4a); the app's CV/documents handler
+// registers in boot.ts. The email-outbox move follows (ruling 4c).
+export * from "./inbound.server";
