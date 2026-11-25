@@ -1,10 +1,11 @@
-# Extend the default rules; nothing is relaxed except the dummy credentials
-# in the CI worker-boot smoke step (phase-2 review B1's required smoke uses
-# literal dummy env values that the generic-api-key rule flags).
+# Extend the default rules; nothing is relaxed except dummy credentials in
+# tests/CI — literal env values that the generic-api-key rule flags but that
+# gate nothing real (phase-2 review B1's required worker-boot smoke; the
+# Phase 9b parser-shadow tests use the same pattern).
 [extend]
 useDefault = true
 
 [allowlist]
-description = "dummy worker-smoke credentials in .github/workflows/ci.yml — not real secrets"
-paths = ['''\.github/workflows/ci\.yml$''']
+description = "dummy credentials in CI smoke steps and parser/parity tests — not real secrets"
+paths = ['''\.github/workflows/ci\.yml$''', '''services/parser/tests/test_parse_contract\.py$''', '''scripts/parser-shadow\.test\.ts$''']
 regexes = ['''(SESSION_SECRET|SIP_PASSWORD|PARSER_TOKEN)=([a-z0-9][a-z0-9-]{2,})''']
