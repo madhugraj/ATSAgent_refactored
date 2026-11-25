@@ -154,6 +154,12 @@
         "@types/bun": "^1.3.14",
       },
     },
+    "packages/candidates": {
+      "name": "@ats/candidates",
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+      },
+    },
     "packages/comms": {
       "name": "@ats/comms",
       "dependencies": {
@@ -195,6 +201,12 @@
         "@ats/db": "workspace:*",
         "drizzle-orm": "^0.45.4",
       },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+      },
+    },
+    "packages/distribution": {
+      "name": "@ats/distribution",
       "devDependencies": {
         "@types/bun": "^1.3.14",
       },
@@ -278,6 +290,12 @@
         "@types/bun": "^1.3.14",
       },
     },
+    "packages/requisitions": {
+      "name": "@ats/requisitions",
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+      },
+    },
     "packages/security": {
       "name": "@ats/security",
       "dependencies": {
@@ -303,6 +321,8 @@
 
     "@ats/auth": ["@ats/auth@workspace:packages/auth"],
 
+    "@ats/candidates": ["@ats/candidates@workspace:packages/candidates"],
+
     "@ats/comms": ["@ats/comms@workspace:packages/comms"],
 
     "@ats/config": ["@ats/config@workspace:packages/config"],
@@ -310,6 +330,8 @@
     "@ats/db": ["@ats/db@workspace:packages/db"],
 
     "@ats/desk-core": ["@ats/desk-core@workspace:packages/desk-core"],
+
+    "@ats/distribution": ["@ats/distribution@workspace:packages/distribution"],
 
     "@ats/integrations": ["@ats/integrations@workspace:packages/integrations"],
 
@@ -322,6 +344,8 @@
     "@ats/org": ["@ats/org@workspace:packages/org"],
 
     "@ats/platform-http": ["@ats/platform-http@workspace:packages/platform-http"],
+
+    "@ats/requisitions": ["@ats/requisitions@workspace:packages/requisitions"],
 
     "@ats/security": ["@ats/security@workspace:packages/security"],
 
