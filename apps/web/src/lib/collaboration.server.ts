@@ -2,15 +2,18 @@
  * Collaboration query helpers (app .server module; no client surface).
  * Extracted from collaboration.functions so the respondReferral existence
  * check is testable structurally (drizzle .toSQL()) without executing the
- * server function (Phase 4 acceptance criterion, PR #52 review).
+ * server function (Phase 4 acceptance criterion, PR #52 review). respondReferral
+ * now attaches through addApplicationsCore (whose org-scoped skip must uphold
+ * this contract); the helper stays as the executable documentation of that
+ * contract, pinned by scripts/collaboration-scope.test.ts.
  */
 import { and, eq } from "drizzle-orm";
 
 import { db, applications } from "@ats/db/server";
 
-/** The respondReferral accept branch's duplicate-pair lookup, org-scoped:
- *  an application in ANOTHER org for the same (candidateId, requisitionId)
- *  must never suppress the insert (AGENTS.md: every query filtered by org). */
+/** The referral-accept duplicate-pair lookup, org-scoped: an application in
+ *  ANOTHER org for the same (candidateId, requisitionId) must never suppress
+ *  the insert (AGENTS.md: every query filtered by org). */
 export function findExistingApplicationForPair(
   orgId: string,
   candidateId: string,

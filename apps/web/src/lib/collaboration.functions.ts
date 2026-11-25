@@ -1,13 +1,11 @@
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 
-import { findExistingApplicationForPair } from "./collaboration.server";
 import { and, desc, eq, ilike, inArray, isNotNull, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { assertNotPanelOnly, requireIdentity } from "@/lib/auth.middleware";
 import { db } from "../server/db";
 import {
-  applications,
   candidateNotes,
   candidateOwnershipEvents,
   candidateReferrals,
@@ -17,6 +15,7 @@ import {
   organizations,
   talentRequestSuggestions,
   talentRequests,
+  users,
 } from "@db/schema";
 
 /**
@@ -229,6 +228,23 @@ export const respondReferral = createServerFn({ method: "POST" })
       throw new Error("Only the recruiter it was sent to can respond.");
     if (ref.status !== "pending") throw new Error("This referral has already been answered.");
 
+    // Reusability BEFORE anything is written (reviewer condition, PR #56):
+    // a role_only portal CV referred into another role is refused with
+    // nothing changed — the referral stays pending and the UI shows why.
+    if (data.accept && ref.requisitionId && ref.orgId) {
+      const { assertReusable } = await import("./pipeline.server");
+      const [cand] = await db
+        .select({
+          name: candidates.fullName,
+          poolUse: candidates.poolUse,
+          poolUseSource: candidates.poolUseSource,
+        })
+        .from(candidates)
+        .where(eq(candidates.id, ref.candidateId))
+        .limit(1);
+      if (cand) assertReusable([cand]);
+    }
+
     await db
       .update(candidateReferrals)
       .set({
@@ -257,20 +273,37 @@ export const respondReferral = createServerFn({ method: "POST" })
         reason: "Accepted referral",
       });
 
-      if (ref.requisitionId) {
-        const [existing] = await findExistingApplicationForPair(
-          ref.orgId!,
-          ref.candidateId,
-          ref.requisitionId,
-        );
-        if (!existing)
-          await db.insert(applications).values({
-            orgId: ref.orgId,
-            candidateId: ref.candidateId,
-            requisitionId: ref.requisitionId,
-            stage: "sourced",
-            source: "internal_referral",
+      if (ref.requisitionId && ref.orgId) {
+        // stage-writers.md §8: the attach goes through the pipeline core — its
+        // existence skip is org-scoped and the requisition is re-verified
+        // in-org at accept time. Reusability was asserted above, before
+        // anything was written. Catch-and-log is only for genuinely
+        // unexpected failures after the flip (e.g. a requisition deleted in
+        // between) — the referral stays accepted with the response unchanged.
+        try {
+          const { addApplicationsCore } = await import("./pipeline.server");
+          const [me] = await db
+            .select({ email: users.email })
+            .from(users)
+            .where(eq(users.id, context.userId))
+            .limit(1);
+          await addApplicationsCore(
+            { orgId: ref.orgId, userId: context.userId, memberEmail: me?.email ?? "" },
+            {
+              requisitionId: ref.requisitionId,
+              candidateIds: [ref.candidateId],
+              source: "internal_referral",
+              entryStage: "sourced",
+            },
+          );
+        } catch (e) {
+          const { log } = await import("@ats/observability/server");
+          log.error("collaboration.referral_attach_failed", {
+            org_id: ref.orgId,
+            referral_id: data.referralId,
+            error: e as Error,
           });
+        }
       }
     }
 
