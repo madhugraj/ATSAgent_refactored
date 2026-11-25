@@ -37,7 +37,7 @@ import {
   type Requisition,
 } from "@/lib/data";
 import { canonical, stalledDays, STAGE_LABEL, type Stage } from "@/lib/lifecycle";
-import { findDuplicateGroups, freshness } from "@/lib/dedupe";
+import { findDuplicateGroups, freshness } from "@ats/candidates/shared";
 import { rankPool } from "@/lib/shortlist";
 import { ScoreChip, StageBadge, StatusBadge, inr } from "@/components/ats";
 import { RolePeek } from "@/components/RolePeek";

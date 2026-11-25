@@ -6,7 +6,7 @@
  * returned in the exact PostgREST wire shape routes were written against:
  * snake_case column names, ISO date strings.
  */
-import { sharedFrom } from "./pool-share";
+import { sharedFrom } from "@ats/candidates/server";
 import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";

@@ -38,7 +38,7 @@ const { recordAiUsage } = await import("../apps/web/src/server/ai-usage");
 const { withAiSubject } = await import("../apps/web/src/server/agents/context");
 const { roleCost, candidateCost } =
   await import("../apps/web/src/server/agents/hiring-cost.server");
-const { labelCvCost } = await import("../apps/web/src/lib/intake.server");
+const { labelCvCost } = await import("@ats/candidates/server");
 const resp = await import("../apps/web/src/lib/offer-response.server");
 const offersLib = await import("../apps/web/src/lib/offers.functions");
 await import("../apps/web/src/server/agents");

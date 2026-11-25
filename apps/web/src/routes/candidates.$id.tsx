@@ -29,7 +29,7 @@ import { saveAiInterview } from "@/lib/interviews.functions";
 import { verifyCandidate } from "@/lib/verification.functions";
 import { createAssessment } from "@/lib/assessment.functions";
 import { getResumeDownloadUrl } from "@/lib/resume.functions";
-import { downloadResume } from "@/lib/resume-download";
+import { downloadResume } from "@ats/candidates/shared";
 import { normalizeExternalUrl } from "@/lib/external-links";
 import { nextAction, STAGE_LABEL, type Stage } from "@/lib/lifecycle";
 import { CandidateCostLine } from "@/components/HiringCost";

@@ -90,7 +90,7 @@ const {
 } = schema;
 const { getTool, resetRegistry } = await import("../apps/web/src/server/agents/registry");
 const { taskIsRemindable } = await import("../apps/web/src/server/agents/task-liveness");
-const { eraseCandidatesCore } = await import("../apps/web/src/server/erase.server");
+const { eraseCandidatesCore } = await import("@ats/candidates/server");
 const { registerPhase1Tools } = await import("../apps/web/src/server/agents/tools");
 const { registerPhase2Tools } = await import("../apps/web/src/server/agents/tools-phase2");
 const { registerPhase1Agents, registerPhase2Agents } =

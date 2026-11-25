@@ -1,14 +1,3 @@
-/**
- * Which of a partner organisation's candidates a consortium share may show:
- * only CVs that may join a talent pool. A CV a portal limited to its role
- * (candidates.pool_use = 'role_only', migration 0045) never leaves the
- * organisation that received it — Naukri's terms forbid onward transfer and
- * Internshala's forbid sharing.
- */
-import { and, eq, inArray } from "drizzle-orm";
-
-import { candidates } from "@db/schema";
-
-export function sharedFrom(ownerOrgIds: string[]) {
-  return and(inArray(candidates.orgId, ownerOrgIds), eq(candidates.poolUse, "pool"));
-}
+// SHIM: remove in Phase 8 — moved verbatim to @ats/candidates/server and
+// renamed pool-share.server.ts (map §4 L3, §1.2 S9: server-only).
+export { sharedFrom } from "@ats/candidates/server";

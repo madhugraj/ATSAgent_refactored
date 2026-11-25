@@ -51,7 +51,10 @@ import type { Json, Tables } from "@/lib/database.types";
 export type Department = Tables<"departments">;
 export type Requisition = Tables<"requisitions"> & { job_card_overrides: Json | null };
 export type JobDescription = Tables<"job_descriptions"> & { template_name: string | null };
-export type Candidate = Tables<"candidates">;
+// Candidate type moved to @ats/candidates/shared (map §4 L3); re-exported so
+// this file's importers keep working (shim by construction, remove in Phase 8).
+import type { Candidate } from "@ats/candidates/shared";
+export type { Candidate };
 export type Application = Tables<"applications">;
 export type MatchScore = Tables<"match_scores">;
 export type SocialProfile = Tables<"social_profiles">;

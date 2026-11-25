@@ -27,7 +27,7 @@ export const deleteCandidates = createServerFn({ method: "POST" })
       "Only the HR head or the CBO can delete candidates.",
     );
     // Org predicate everywhere: an id from another tenant simply does not match.
-    const { eraseCandidatesCore } = await import("../server/erase.server");
+    const { eraseCandidatesCore } = await import("@ats/candidates/server");
     const found = await eraseCandidatesCore(context.orgId, data.candidateIds);
     if (found.length === 0)
       throw new Error("No matching candidates found — they may already be deleted.");

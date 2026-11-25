@@ -21,7 +21,7 @@ import {
   requisitions,
   sourceIntegrations,
 } from "@ats/db/server";
-import { ingestCandidate, type ParsedCv } from "@/lib/intake.server";
+import { ingestCandidate, type ParsedCv } from "@ats/candidates/server";
 import { getBoardAdapter, integrationForWebhookToken, loadBoardConnection } from "./registry";
 import { deliveryEventId } from "./partner";
 import type { BoardProviderId, NormalizedApplication } from "./types";

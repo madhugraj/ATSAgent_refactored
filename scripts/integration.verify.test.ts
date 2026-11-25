@@ -20,9 +20,9 @@ import {
   users,
 } from "../apps/web/drizzle/schema";
 import { activeOrgOf, assertRole } from "../apps/web/src/lib/auth.middleware";
-import { capture, orgForCaptureToken } from "../apps/web/src/lib/capture.server";
+import { capture, orgForCaptureToken } from "@ats/candidates/server";
 import { submitApplicationImpl } from "@ats/distribution/server";
-import { storeResumeFile } from "../apps/web/src/lib/intake.server";
+import { storeResumeFile } from "@ats/candidates/server";
 
 let orgA: string;
 let orgB: string;
