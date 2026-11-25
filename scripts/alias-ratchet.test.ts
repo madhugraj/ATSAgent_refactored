@@ -9,17 +9,19 @@
  * came from the distribution boards' interim imports of app files whose
  * packages land next. Drop plan: −1 at the candidates move (its
  * boards/ingest.server intake import re-pointed to @ats/candidates/server) —
- * done, cap 5. The remaining five resolve per their marked phases
- * (screening/labour-policy Phase 6, meeting-ref/vtt Phase 6, agents.catalog
- * Phase 7), 0 by Phase 8. The candidates move's own upward references
- * (capture → verification/autoscore, erase → agents runtime, dedupe →
- * dedupe.functions) are relative interims marked SHIM(upward), not aliases.
+ * done, cap 5. −1 at change PR A (candidates erase emits the kernel
+ * subjects.deleted event; the agents-runtime interim import is gone) — done,
+ * cap 7. The remaining seven resolve per their marked phases
+ * (capture/screening/labour-policy/meeting-ref/vtt Phase 6, agents.catalog
+ * Phase 7), 0 by Phase 8. The candidates move's remaining upward references
+ * (capture → verification/autoscore, dedupe → dedupe.functions) are
+ * relative interims marked SHIM(upward), not aliases.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const PACKAGES = join(import.meta.dir, "..", "packages");
-const MAX_ALIAS_IMPORTS = 8; // TRUE total: 5 alias + 3 relative (counted now). Drop plans in the header — alias: 1 at the candidates move then ≤6; relative: −1 change PR A, −1 matching Phase 6, −1 interviews Phase 6. 0 by Phase 8.
+const MAX_ALIAS_IMPORTS = 7; // TRUE total: 5 alias + 2 relative (counted now). Drop plans in the header — relative: −1 matching Phase 6, −1 interviews Phase 6. 0 by Phase 8.
 
 function sourceFiles(dir: string): string[] {
   if (!existsSync(dir)) return [];
@@ -30,7 +32,7 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-test("packages import the app only through the marked upward shims (cap 8, dropping)", () => {
+test("packages import the app only through the marked upward shims (cap 7, dropping)", () => {
   const offenders: string[] = [];
   const total = sourceFiles(PACKAGES).reduce<string[]>((acc, f) => {
     const rel = f.slice(PACKAGES.length + 1);

@@ -17,6 +17,7 @@
     "@ats/ai": "workspace:*",
     "@ats/comms": "workspace:*",
     "@ats/db": "workspace:*",
+    "@ats/kernel": "workspace:*",
     "@ats/requisitions": "workspace:*",
     "@ats/security": "workspace:*",
     "@ats/std": "workspace:*",

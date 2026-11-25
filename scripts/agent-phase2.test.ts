@@ -101,6 +101,13 @@ const { processAgentEvents, scheduleSweeps } =
   await import("../apps/web/src/server/agents/orchestrator.server");
 const { moveStageCore } = await import("../apps/web/src/lib/pipeline.server");
 
+// The erase core no longer calls the runtime directly: it emits the kernel
+// subjects.deleted event (map §5) and boot.ts registers this same sweep as the
+// subscriber. Wire it here the way boot does, so the erase-cascade spec below
+// exercises the real production path.
+const { onSubjectsDeleted } = await import("@ats/kernel/server");
+onSubjectsDeleted((orgId) => afterSubjectsDeleted(orgId));
+
 let orgId: string;
 let otherOrg: string;
 let owner: string;

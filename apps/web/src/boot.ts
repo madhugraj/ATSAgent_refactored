@@ -16,7 +16,7 @@
  * production build (silently: dev still works). scripts/worker-boot-smoke.sh
  * fails when this file's registrations are missing from the built bundle.
  */
-import { onAgentEvent } from "@ats/kernel/server";
+import { onAgentEvent, onSubjectsDeleted } from "@ats/kernel/server";
 import { log, setAgentAlertMailer, setSloNotifier } from "@ats/observability/server";
 import { onInboundMail } from "@ats/comms/server";
 import { platformAdmins } from "@db/schema";
@@ -109,5 +109,11 @@ registerAppAgentPort();
 // posting rows so a second delivery writes nothing.
 registerDistributionDomainEvents();
 
-// Placeholder (later phases): the remaining domain-event (onDomainEvent) and
-// subject-deletion (onSubjectsDeleted) subscribers register here.
+// Candidate erasure (map §5 subjects.deleted): the erase core announces the
+// erased candidates through the kernel and the agents runtime's stale-request
+// sweep cleans up behind them — live runs whose subject is gone are cancelled
+// and their open requests closed — exactly as its interim direct call did
+// (app-side until Phase 7 moves the runtime). The event payload names the
+// candidates, so later subscribers (training-data capture) can cascade the
+// erasure into their own records without re-querying the gone rows.
+onSubjectsDeleted((orgId) => afterSubjectsDeleted(orgId));
