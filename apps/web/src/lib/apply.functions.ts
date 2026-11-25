@@ -231,7 +231,7 @@ export const submitApplicationImpl = createServerOnlyFn(async function submitApp
         .returning({ id: applications.id });
 
       if (createdApp && r.orgId) {
-        const { enqueueEmail } = await import("./email-outbox.server");
+        const { enqueueEmail } = await import("@ats/comms/server");
         const [org] = await db
           .select({ name: organizations.name, websiteUrl: orgProfiles.websiteUrl })
           .from(organizations)

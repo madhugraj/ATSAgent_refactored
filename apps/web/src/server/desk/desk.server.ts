@@ -5015,7 +5015,7 @@ export async function judgeGoingBack(
 }
 
 async function orgTimeZone(orgId: string): Promise<string> {
-  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   return (await getOrgEmailSettings(orgId)).timezone;
 }
 

@@ -66,7 +66,7 @@ export async function renderTemplateEmail(
   templateName: string,
   templateData: TemplateData = {},
   /** An org id (branding loaded from the database) or a brand given directly (previews). */
-  org?: string | import("@/server/email-brand.server").EmailBrand | null,
+  org?: string | import("../email-brand.server").EmailBrand | null,
 ): Promise<RenderedEmail> {
   const template = TEMPLATES[templateName];
   if (!template) {
@@ -78,7 +78,7 @@ export async function renderTemplateEmail(
   const inline: RenderedEmail["inline"] = [];
   let logoSrc: string | null = null;
   if (org) {
-    const { loadEmailBrand, BRAND_LOGO_CID } = await import("@/server/email-brand.server");
+    const { loadEmailBrand, BRAND_LOGO_CID } = await import("../email-brand.server");
     const brand = typeof org === "string" ? await loadEmailBrand(org) : org;
     if (brand) {
       color = readableBrandColor(brand.color);
@@ -109,7 +109,7 @@ export async function renderTemplateEmail(
 /**
  * Renders a registered template and sends it over the deployment's SMTP
  * relay (SMTP_URL). Any transport failure throws; the email outbox
- * (src/lib/email-outbox.server.ts) owns retries.
+ * (email-outbox.server, same package) owns retries.
  */
 export async function sendTemplateEmail(
   templateName: string,

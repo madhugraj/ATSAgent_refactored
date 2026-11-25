@@ -27,7 +27,8 @@ import {
 } from "@/components/CompetencyRating";
 import { declineRoundTranscription, retryRoundTranscription } from "@/lib/panel-agent.functions";
 import { createMeetingLink, meetingProviders } from "@/lib/meetings.functions";
-import { buildIcs, downloadIcs } from "@/lib/ics";
+import { buildIcs } from "@ats/comms/shared";
+import { downloadIcs } from "@/lib/ics";
 import { STAGE_LABEL } from "@/lib/lifecycle";
 import { EmptyState, PageHeader, ScoreChip, StageBadge } from "@/components/ats";
 import { Button } from "@/components/ui/button";

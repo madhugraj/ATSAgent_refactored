@@ -8,17 +8,17 @@
  */
 import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 
-import { db } from "../server/db";
 import {
+  db,
   emailOutbox,
   emailSettings,
   organizations,
   type EmailOutboxAttachment,
   type EmailOutboxKind,
   type EmailOutboxStatus,
-} from "@db/schema";
+} from "@ats/db/server";
 import { sendTemplateEmail } from "./email-templates/send-email";
-import { DEFAULT_EMAIL_SETTINGS, type EmailSettingsEffective } from "./email-settings.shared";
+import { DEFAULT_EMAIL_SETTINGS, type EmailSettingsEffective } from "@ats/comms/shared";
 
 const MAX_ATTEMPTS = 5;
 const ACK_HOURLY_CAP = 50;
@@ -114,7 +114,7 @@ export async function careersReplyAddress(
     .where(eq(organizations.id, orgId))
     .limit(1);
   if (org?.careersEmail) return org.careersEmail;
-  const { inboxAddress } = await import("./local-inbox.server");
+  const { inboxAddress } = await import("@ats/comms/server");
   return inboxAddress(org?.inboxSlug ?? org?.slug ?? null);
 }
 

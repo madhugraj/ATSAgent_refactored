@@ -281,8 +281,7 @@ export async function sendPanelSummary(
   if (!summary.topics.length && !summary.overview)
     throw new Error("The summary came back empty once judgements were removed.");
 
-  const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } =
-    await import("@/lib/email-outbox.server");
+  const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } = await import("@ats/comms/server");
   const tz = (await getOrgEmailSettings(ctx.orgId)).timezone;
   const site = env.PUBLIC_SITE_URL.replace(/\/$/, "");
   const { linkPanelist, issueScorecardLink } = await import("@/lib/panelist-links.server");

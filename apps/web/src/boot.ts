@@ -32,9 +32,9 @@ import { afterSubjectsDeleted, cancelRun } from "./server/agents/runtime.server"
 import "@ats/ai/server";
 import "@ats/observability/server";
 
-import { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } from "./lib/email-outbox.server";
+import { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } from "@ats/comms/server";
 import { localInboxHandler } from "./lib/local-inbox.server";
-import { sendTemplateEmail } from "./lib/email-templates/send-email";
+import { sendTemplateEmail } from "@ats/comms/server";
 import { db } from "./server/db";
 import { kickAgents } from "./server/agents/orchestrator.server";
 

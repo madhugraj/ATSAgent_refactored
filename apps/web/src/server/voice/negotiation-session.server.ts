@@ -187,7 +187,7 @@ async function place(
     return settle(orgId, call, brief, null, "gave_up", now(), { endReason: "no_number" });
 
   const policy = await phoneScreeningPolicyOf(orgId);
-  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   const system = `Current local time: ${localNow(now(), tz)} (${tz}).\n\n${negotiationSystemPrompt(brief.facts)}`;
 
@@ -546,7 +546,7 @@ async function settle(
   if (result === "no_answer") {
     if (call.attempt < NEGOTIATION_MAX_ATTEMPTS) {
       const policy = await phoneScreeningPolicyOf(orgId);
-      const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+      const { getOrgEmailSettings } = await import("@ats/comms/server");
       dueAt = retryAt(at, call.attempt, policy, (await getOrgEmailSettings(orgId)).timezone);
       status = "no_answer";
     } else {

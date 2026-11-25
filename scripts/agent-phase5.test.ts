@@ -96,7 +96,7 @@ const { dispatchAgentAlerts, sendTestAlertEmail, setAgentAlertMailer } =
   await import("../apps/web/src/server/agents/alerts.server");
 // The alerts package no longer imports the outbox (map §5: foundation must
 // not import comms) — inject the real one, exactly as boot.ts does.
-const outbox = await import("../apps/web/src/lib/email-outbox.server");
+const outbox = await import("@ats/comms/server");
 setAgentAlertMailer({
   enqueueEmail: outbox.enqueueEmail,
   getOrgEmailSettings: outbox.getOrgEmailSettings,

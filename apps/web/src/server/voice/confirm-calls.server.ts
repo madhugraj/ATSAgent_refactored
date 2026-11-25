@@ -190,7 +190,7 @@ export async function requestConfirmationCalls(orgId?: string, now = Date.now())
       if (readyByOrg.get(org)) continue;
       if (TERMINAL.includes(r.stage) || r.optedOut || !dialNumber(r.phone)) continue;
       const policy = await phoneScreeningPolicyOf(org);
-      const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+      const { getOrgEmailSettings } = await import("@ats/comms/server");
       const tz = (await getOrgEmailSettings(org)).timezone;
       const dueAt = nextWindowStart(now, policy, tz);
       // Not in time to be of use (the window opens too close to the round).
@@ -284,7 +284,7 @@ export async function requestPanelCheckCalls(orgId?: string, now = Date.now()): 
         .limit(1);
       if (!app) continue;
       const policy = await phoneScreeningPolicyOf(r.orgId);
-      const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+      const { getOrgEmailSettings } = await import("@ats/comms/server");
       const tz = (await getOrgEmailSettings(r.orgId)).timezone;
       const dueAt = nextWindowStart(now, policy, tz);
       const [row] = await db
@@ -362,7 +362,7 @@ export async function loadConfirmationBrief(
   if (!r || r.row.state !== "pending" || !r.at) return null;
   if (!["scheduled", "rescheduled"].includes(r.status)) return null;
   if (r.row.scheduledAt?.getTime() !== r.at.getTime() || r.at.getTime() <= now + HOUR) return null;
-  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   const policy = await phoneScreeningPolicyOf(orgId);
   const panelSize = (r.lead || r.leadName ? 1 : 0) + (r.panel?.length ?? 0);
@@ -445,7 +445,7 @@ export async function loadPanelBrief(
     : await db.execute<{ mode: string }>(
         sql`select mode from interview_slot_offers where id = ${r.offerId} and org_id = ${orgId}`,
       );
-  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   const policy = await phoneScreeningPolicyOf(orgId);
   const m = (mode as { mode?: string } | undefined)?.mode ?? "online";
@@ -604,7 +604,7 @@ async function placeConfirmation(
   const number = dialNumber(cand?.phone);
   if (!number) return settleAnswerCall(orgId, call, "gave_up", now(), { endReason: "no_number" });
   const policy = await phoneScreeningPolicyOf(orgId);
-  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   const system = `Current local time: ${localNow(now(), tz)} (${tz}).\n\n${confirmationSystemPrompt(brief.facts)}`;
   const state = freshConfirmationState();
@@ -720,7 +720,7 @@ async function placePanelCheck(
   const number = dialNumber(p?.phone);
   if (!number) return settleAnswerCall(orgId, call, "gave_up", now(), { endReason: "no_number" });
   const policy = await phoneScreeningPolicyOf(orgId);
-  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   const system = `Current local time: ${localNow(now(), tz)} (${tz}).\n\n${panelSystemPrompt(brief.facts)}`;
   const state = freshPanelCheckState();
@@ -827,7 +827,7 @@ export async function settleAnswerCall(
   if (result === "no_answer") {
     if (call.attempt < ANSWER_CALL_MAX_ATTEMPTS) {
       const policy = await phoneScreeningPolicyOf(orgId);
-      const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+      const { getOrgEmailSettings } = await import("@ats/comms/server");
       dueAt = nextWindowStart(
         at + (panel ? PANEL_CALL.retryMs : CONFIRMATION_CALL.retryMs),
         policy,
@@ -895,7 +895,7 @@ async function tellDeskUnreached(orgId: string, call: Call) {
     )
     .limit(1);
   if (!r?.at) return;
-  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   const desk = await import("../desk/desk.server");
   const convId = await desk.conversationForSubject(orgId, "application", call.applicationId);

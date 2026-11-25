@@ -23,7 +23,7 @@ async function run(request: Request) {
     /* no body is fine — defaults apply */
   }
 
-  const { processEmailOutbox } = await import("@/lib/email-outbox.server");
+  const { processEmailOutbox } = await import("@ats/comms/server");
 
   try {
     const counts = await processEmailOutbox({ max: opts.max ?? 25 });

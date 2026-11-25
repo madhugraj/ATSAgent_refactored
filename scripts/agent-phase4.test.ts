@@ -427,7 +427,7 @@ describe("candidate requests reach a person", () => {
   });
 
   test("replies go to the careers inbox when no reply-to or careers e-mail is set", async () => {
-    const { careersReplyAddress } = await import("../apps/web/src/lib/email-outbox.server");
+    const { careersReplyAddress } = await import("@ats/comms/server");
     expect(await careersReplyAddress(orgId)).toBe(`careers-${stamp}@p4.test`);
     const [o] = await db
       .insert(organizations)

@@ -1,14 +1,13 @@
 /**
- * E-mail branding (src/lib/email-templates/send-email.ts): an organisation's
+ * E-mail branding (@ats/comms email-templates/send-email.ts): an organisation's
  * colour replaces the placeholder everywhere, kept readable behind white
  * text; its logo travels as an inline cid: attachment; without branding the
  * header falls back to a monogram.
  */
 import { describe, expect, test } from "bun:test";
 
-const { renderTemplateEmail, readableBrandColor } =
-  await import("../apps/web/src/lib/email-templates/send-email");
-const { BRAND } = await import("../apps/web/src/lib/email-templates/email-layout");
+const { renderTemplateEmail, readableBrandColor } = await import("@ats/comms/server");
+const { BRAND } = await import("../packages/comms/src/server/email-templates/email-layout");
 
 const data = {
   memberName: "Ravi",
@@ -66,7 +65,7 @@ describe("rendering", () => {
   });
 
   test("the summary leads with counts, then reminders, then issues", async () => {
-    const { template } = await import("../apps/web/src/lib/email-templates/agent-digest");
+    const { template } = await import("../packages/comms/src/server/email-templates/agent-digest");
     const r = await renderTemplateEmail("agent_digest", template.previewData, null);
     const t = r.text;
     expect(t).toContain("Waiting for you");

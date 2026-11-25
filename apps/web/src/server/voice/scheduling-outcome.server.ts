@@ -38,7 +38,7 @@ export async function bookByPhone(
     .update(screeningCalls)
     .set({ status: "completed", endReason: "booked", updatedAt: new Date() })
     .where(and(eq(screeningCalls.id, call.id), eq(screeningCalls.orgId, orgId)));
-  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   return { ok: true, booked_for: spokenWhen(r.at, tz) };
 }
@@ -73,7 +73,7 @@ export async function callbackTime(
         "Not possible: a call-back was already arranged for these times. Say the times reach them by e-mail with a link to choose.",
     };
   const { phoneScreeningPolicyOf } = await import("./settings.server");
-  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const { inWindow } = await import("./schedule");
   const policy = await phoneScreeningPolicyOf(orgId);
   const tz = (await getOrgEmailSettings(orgId)).timezone;
@@ -138,7 +138,7 @@ export async function endSchedulingCall(
   let dueAt: Date | null = null;
   if (next === "retry") {
     const { phoneScreeningPolicyOf } = await import("./settings.server");
-    const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+    const { getOrgEmailSettings } = await import("@ats/comms/server");
     const { retryAt } = await import("./schedule");
     dueAt = retryAt(
       now,

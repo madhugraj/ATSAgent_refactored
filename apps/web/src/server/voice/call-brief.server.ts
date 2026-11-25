@@ -110,7 +110,7 @@ export async function loadBriefFacts(input: {
     .orderBy(desc(matchScores.computedAt))
     .limit(1);
 
-  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const { detailsFor } = await import("@/lib/compensation.server");
   const { callRulesFor } = await import("@/lib/labour-policy.server");
   const [email, pay, rules] = await Promise.all([

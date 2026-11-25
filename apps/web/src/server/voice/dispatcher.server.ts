@@ -120,7 +120,7 @@ export async function claimDueCalls(capacity: number, now = new Date()): Promise
           phoneScreeningReadiness(row.org_id),
           phoneScreeningPolicyOf(row.org_id),
         ]);
-        const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+        const { getOrgEmailSettings } = await import("@ats/comms/server");
         const tz = (await getOrgEmailSettings(row.org_id)).timezone;
         ok = ready.ready && inWindow(now.getTime(), policy, tz);
       } catch (e) {

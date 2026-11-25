@@ -89,7 +89,7 @@ export const createAssessmentCore = createServerOnlyFn(async function createAsse
   // One organisation policy decides the due date the candidate is told and
   // when the link closes (src/lib/assessment-timeline.server.ts).
   const { assessmentPolicyOf, timelineFor } = await import("./assessment-timeline.server");
-  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const timeZone = (await getOrgEmailSettings(orgId)).timezone;
   // One instant for "sent", the due date and the closing time — they must agree exactly.
   const issuedAt = new Date();

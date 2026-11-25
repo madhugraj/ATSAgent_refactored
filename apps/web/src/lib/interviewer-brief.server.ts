@@ -20,7 +20,7 @@ import {
   screeningRuns,
 } from "@db/schema";
 import { env } from "../server/env";
-import { buildIcs } from "./ics";
+import { buildIcs } from "@ats/comms/shared";
 
 /** The first sentence — a brief never ends mid-word on "…". */
 export const firstSentence = (s: string | null | undefined): string | undefined => {
@@ -144,8 +144,7 @@ export async function sendInterviewerBrief(
   } catch {
     /* the brief goes out either way */
   }
-  const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } =
-    await import("./email-outbox.server");
+  const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } = await import("@ats/comms/server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   const site = env.PUBLIC_SITE_URL.replace(/\/$/, "");
   const roundLabel = `L${r.level} interview`;

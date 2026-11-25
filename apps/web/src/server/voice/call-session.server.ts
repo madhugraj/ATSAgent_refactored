@@ -422,7 +422,7 @@ async function placeCall(
     return finish(orgId, call, { status: "fell_back", endReason: "opted_out", now: now() });
 
   const policy = await phoneScreeningPolicyOf(orgId);
-  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   const facts = await loadBriefFacts({
     orgId,
@@ -984,7 +984,7 @@ export async function postCallToThread(
   let body: string;
   let card: { type: "screening_result"; runId: string; applicationId: string } | undefined;
   if (status === "callback") {
-    const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+    const { getOrgEmailSettings } = await import("@ats/comms/server");
     const tz = (await getOrgEmailSettings(orgId)).timezone;
     body = `Called ${name}: now was not a good time, so we agreed to talk on ${dueAt ? spokenTime(dueAt, tz) : "a later time"}. A confirmation was e-mailed to them.`;
   } else if (status === "completed" && endReason !== "not_interested") {
@@ -1094,7 +1094,7 @@ async function confirmBooking(
     hourCycle: "h23",
     timeZone: tz,
   }).format(dueAt);
-  const { enqueueEmail } = await import("@/lib/email-outbox.server");
+  const { enqueueEmail } = await import("@ats/comms/server");
   await enqueueEmail({
     orgId,
     kind: "screening_call_booked",

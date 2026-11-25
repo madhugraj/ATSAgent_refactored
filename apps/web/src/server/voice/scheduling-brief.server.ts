@@ -152,7 +152,7 @@ export async function loadSchedulingBrief(
     .limit(1);
   if (!row) return null;
   const { SLOT_OFFER } = await import("@/lib/slot-offers.server");
-  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   const policy = await phoneScreeningPolicyOf(orgId);
   // Where they stand: the role's plan, their earlier rounds, the screening.

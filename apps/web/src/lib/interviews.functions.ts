@@ -18,7 +18,7 @@ import {
 } from "@db/schema";
 import { assertRole, requireOrg, requirePanel } from "./auth.middleware";
 import { canMove, REASON_REQUIRED, STAGE_LABEL, type Stage } from "./lifecycle";
-import { buildIcs } from "./ics";
+import { buildIcs } from "@ats/comms/shared";
 import { meetingRefOf, type MeetingRef } from "./meeting-ref";
 
 /* --------------------------------------------------------------- helpers */
@@ -325,7 +325,7 @@ export const submitScorecardCore = createServerOnlyFn(async function submitScore
       throw new Error("This round did not take place, so it cannot be scored.");
     // A scorecard records what happened in the interview: not before it starts.
     if (r.scheduledAt && r.scheduledAt.getTime() > now.getTime()) {
-      const { getOrgEmailSettings } = await import("./email-outbox.server");
+      const { getOrgEmailSettings } = await import("@ats/comms/server");
       const { localWhen } = await import("./local-time");
       const tz = (await getOrgEmailSettings(ctx.orgId)).timezone;
       throw new Error(
@@ -824,7 +824,7 @@ export const interviewerUnavailableCore = createServerOnlyFn(
       entityId: r.id,
       detail: { level: r.level, note: data.note || null },
     });
-    const { getOrgEmailSettings } = await import("./email-outbox.server");
+    const { getOrgEmailSettings } = await import("@ats/comms/server");
     const { localWhen } = await import("./local-time");
     const when = localWhen(r.scheduledAt, (await getOrgEmailSettings(ctx.orgId)).timezone);
     const name = member?.name ?? ctx.email;
@@ -1082,8 +1082,7 @@ export const scheduleInterviewCore = createServerOnlyFn(async function scheduleI
    * reschedule. The .ics UID is the interview id so reschedules update the
    * same calendar entry. */
   try {
-    const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } =
-      await import("./email-outbox.server");
+    const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } = await import("@ats/comms/server");
     const [ctxRow] = await db
       .select({ jobTitle: requisitions.title, orgName: organizations.name })
       .from(applications)

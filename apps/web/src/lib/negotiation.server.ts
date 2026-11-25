@@ -270,7 +270,7 @@ export async function sendNegotiationMessage(
   if (text.length < 80) throw new Error("The message is too short to send.");
   const app = await loadApp(orgId, r.applicationId);
   if (!app.email) throw new Error("The candidate has no email address.");
-  const { getOrgEmailSettings, enqueueEmail } = await import("./email-outbox.server");
+  const { getOrgEmailSettings, enqueueEmail } = await import("@ats/comms/server");
   const settings = await getOrgEmailSettings(orgId);
   if (!settings.enabled || !settings.offerEnabled)
     throw new Error(

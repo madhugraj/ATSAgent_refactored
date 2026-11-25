@@ -500,7 +500,7 @@ export const assessmentNudges = createServerOnlyFn(async function assessmentNudg
 ): Promise<Notification[]> {
   const { candidateAssessments, candidates, applications } = await import("@db/schema");
   const tl = await import("./assessment-timeline.server");
-  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   const policy = await tl.assessmentPolicyOf(orgId);
   const { loadPolicy, decideToolCall } = await import("../server/agents/policy");
@@ -617,7 +617,7 @@ export const payNudges = createServerOnlyFn(async function payNudges(
 ): Promise<Notification[]> {
   const comp = await import("./compensation.server");
   const tl = await import("./assessment-timeline.server");
-  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   const policy = await tl.assessmentPolicyOf(orgId);
   const auto = await comp.payRemindersAutomatic(orgId);

@@ -697,7 +697,7 @@ export function registerPhase4Tools(): void {
         .where(eq(organizations.id, ctx.orgId))
         .limit(1);
       const due = new Date(Date.now() + i.dueInDays * 864e5);
-      const { enqueueEmail, careersReplyAddress } = await import("@/lib/email-outbox.server");
+      const { enqueueEmail, careersReplyAddress } = await import("@ats/comms/server");
       await enqueueEmail({
         orgId: ctx.orgId,
         kind: "document_request",

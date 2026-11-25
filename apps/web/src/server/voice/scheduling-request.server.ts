@@ -213,7 +213,7 @@ export async function findAlternates(
 ): Promise<string[]> {
   const { findFreeSlots, roundNotBefore } = await import("@/lib/calendar-availability.server");
   const { SLOT_OFFER } = await import("@/lib/slot-offers.server");
-  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const timeZone = (await getOrgEmailSettings(orgId)).timezone;
   const r = await findFreeSlots(orgId, {
     interviewerEmail: offer.interviewerEmail,
@@ -257,7 +257,7 @@ export async function requestSchedulingCall(input: {
   if (!check.ok) throw new Error(check.reason);
   const alternates = await findAlternates(input.orgId, check.offer, now);
   const policy = await phoneScreeningPolicyOf(input.orgId);
-  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const tz = (await getOrgEmailSettings(input.orgId)).timezone;
   const dueAt = nextWindowStart(now, policy, tz);
   const [row] = await db
@@ -377,7 +377,7 @@ export async function remindUnansweredOffers(orgId?: string, now = Date.now()): 
     try {
       const alternates = await findAlternates(r.org_id, c.offer, now);
       const policy = await phoneScreeningPolicyOf(r.org_id);
-      const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+      const { getOrgEmailSettings } = await import("@ats/comms/server");
       const dueAt = nextWindowStart(now, policy, (await getOrgEmailSettings(r.org_id)).timezone);
       const [row] = await db
         .insert(screeningCalls)

@@ -229,7 +229,7 @@ async function orgInfo(orgId: string) {
     .from(organizations)
     .where(eq(organizations.id, orgId))
     .limit(1);
-  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const settings = await getOrgEmailSettings(orgId);
   return { orgName: o?.name ?? "", timeZone: settings.timezone, settings };
 }
@@ -258,7 +258,7 @@ async function emailForm(
 ) {
   const { orgName, timeZone } = await orgInfo(orgId);
   const { dayText } = await import("./assessment-timeline.server");
-  const { enqueueEmail } = await import("./email-outbox.server");
+  const { enqueueEmail } = await import("@ats/comms/server");
   await enqueueEmail({
     orgId,
     kind: "compensation_form",

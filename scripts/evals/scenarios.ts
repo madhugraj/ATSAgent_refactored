@@ -3881,7 +3881,7 @@ async function seedSchedulingCall(
   const { applications, screeningCalls } = await import("../../apps/web/drizzle/schema");
   const { eq } = await import("drizzle-orm");
   const { spokenWhen } = await import("../../apps/web/src/server/voice/scheduling-brief.server");
-  const { getOrgEmailSettings } = await import("../../apps/web/src/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const requisitionId = await seedRequisition(orgId, userId, "approved");
   const app = await seedApplication(orgId, requisitionId, name, "l1", 82);
   await seedPhoneScreening(orgId, userId, app);
@@ -3933,7 +3933,7 @@ async function seedConfirmationCall(
     await import("../../apps/web/drizzle/schema");
   const { eq } = await import("drizzle-orm");
   const { spokenWhen } = await import("../../apps/web/src/server/voice/scheduling-brief.server");
-  const { getOrgEmailSettings } = await import("../../apps/web/src/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const { candidateConfirmation } =
     await import("../../apps/web/src/lib/interview-confirmations.server");
   const requisitionId = await seedRequisition(orgId, userId, "approved");
@@ -4005,7 +4005,7 @@ async function seedPanelCheckCall(
     await import("../../apps/web/drizzle/schema");
   const { eq } = await import("drizzle-orm");
   const { spokenWhen } = await import("../../apps/web/src/server/voice/scheduling-brief.server");
-  const { getOrgEmailSettings } = await import("../../apps/web/src/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const requisitionId = await seedRequisition(orgId, userId, "approved");
   const app = await seedApplication(orgId, requisitionId, name, "l1", 82);
   await seedPhoneScreening(orgId, userId, app);
