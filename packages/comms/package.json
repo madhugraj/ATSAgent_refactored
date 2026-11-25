@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@ats/db": "workspace:*",
-    "drizzle-orm": "^0.45.4"
+    "drizzle-orm": "^0.45.4",
+    "@ats/observability": "workspace:*"
   }
 }

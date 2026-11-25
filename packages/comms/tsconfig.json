@@ -1,4 +1,14 @@
 {
   "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    // Interim (while app-side shims stand, removed in Phase 8): this package's
+    // typecheck reaches @ats/observability, whose moved files still consume
+    // app-side modules (`@/lib/agents.catalog` in alerts.server). Same aliases
+    // as apps/web/tsconfig.json and packages/security/tsconfig.json.
+    "paths": {
+      "@/*": ["../../apps/web/src/*"],
+      "@db/*": ["../../apps/web/drizzle/*"]
+    }
+  },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }

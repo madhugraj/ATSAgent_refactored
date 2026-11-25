@@ -19,6 +19,7 @@
 import { ilike, inArray } from "drizzle-orm";
 
 import { db, organizations } from "@ats/db/server";
+import { log } from "@ats/observability/server";
 
 export const INBOX_DOMAIN = process.env["INBOUND_EMAIL_DOMAIN"] ?? "careers.atsiq.yavar.ai";
 
@@ -172,8 +173,12 @@ export async function receiveMail(mail: InboundMail): Promise<InboundResult> {
   const sender = displayName(mail.from ?? "");
 
   if (!inboundHandler) {
-    // Nobody is routing mail for this deployment: nothing was filed.
-    return { status: "skipped", detail: "No CV attached — nothing to file.", messageId: null };
+    // Nobody is routing mail for this deployment: a wiring bug, not a normal
+    // outcome — surface it loudly instead of hiding it as a skip (reviewer,
+    // 2026-11-25). The app registers its handler at boot AND at module import
+    // of local-inbox.server, so this is unreachable in the running product.
+    log.error("inbound.no_handler", { org_id: org.id });
+    return { status: "error", detail: "Inbound mail handler is not registered.", messageId: null };
   }
   try {
     return await inboundHandler({
