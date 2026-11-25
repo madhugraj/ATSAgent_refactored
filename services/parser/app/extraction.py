@@ -304,5 +304,5 @@ def _pdf_text(content: bytes) -> str:
             # kept for parity with the TS marker semantics
     except Exception as e:  # noqa: BLE001 — unparseable documents are a 422
         raise ValueError("could not parse") from e
-    text = "\n".join(pages).strip()
+    text = _WS.sub(" ", " ".join(pages)).strip()
     return with_hidden_marker(text, hidden)
