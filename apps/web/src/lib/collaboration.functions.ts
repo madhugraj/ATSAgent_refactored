@@ -261,6 +261,7 @@ export const respondReferral = createServerFn({ method: "POST" })
           .from(applications)
           .where(
             and(
+              eq(applications.orgId, ref.orgId!),
               eq(applications.candidateId, ref.candidateId),
               eq(applications.requisitionId, ref.requisitionId),
             ),
