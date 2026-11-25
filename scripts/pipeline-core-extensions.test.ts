@@ -54,6 +54,7 @@ beforeAll(async () => {
 
 const { db } = await import("../apps/web/src/server/db");
 const schema = await import("../apps/web/drizzle/schema");
+const { screeningCalls } = schema;
 const {
   agentEvents,
   applications,
@@ -396,6 +397,55 @@ describe("moveStageCore ai principal + source (order 2)", () => {
 // ---------------------------------------------------------------------------
 
 describe("moveStagesCore bulk twin (order 3)", () => {
+  test("a recruiter cannot bulk-move into an HR-controlled target (one throw covers the batch)", async () => {
+    const a = await application("shortlisted");
+    const b = await application("shortlisted");
+    await expect(
+      moveStagesCore(actorFor(recruiter, `p5-rec-${stamp}@test.local`), {
+        applicationIds: [a.appId, b.appId],
+        toStage: "offer_pending",
+        reason: "Batch promotion",
+      }),
+    ).rejects.toThrow(/Only the HR head or an owner/);
+    expect((await appStageOf(a.appId)).stage).toBe("shortlisted");
+    expect((await appStageOf(b.appId)).stage).toBe("shortlisted");
+  });
+
+  test("a reason-required bulk target refuses the whole batch without one", async () => {
+    const a = await application("shortlisted");
+    await expect(
+      moveStagesCore(ownerActor(), {
+        applicationIds: [a.appId],
+        toStage: "rejected",
+        note: "no reason given",
+      }),
+    ).rejects.toThrow(/A reason is required/);
+    expect((await appStageOf(a.appId)).stage).toBe("shortlisted");
+  });
+
+  test("an open screening call blocks that row; the batch still moves the rest", async () => {
+    const { appId, candidateId } = await application("applied");
+    const free = await application("applied");
+    // The fixture mirrors pipeline.test.ts's own open-call shape (approved,
+    // due) — the same one moveStageCore's guard refuses on.
+    await db.insert(screeningCalls).values({
+      orgId,
+      candidateId,
+      applicationId: appId,
+      requisitionId: reqId,
+      status: "approved",
+      dueAt: new Date(Date.now() + 3_600_000),
+    });
+    const res = await moveStagesCore(ownerActor(), {
+      applicationIds: [appId, free.appId],
+      toStage: "l1",
+      note: "Batch panel",
+    });
+    expect(res.moved).toBe(1);
+    expect(res.blocked).toBe(1);
+    expect((await appStageOf(appId)).stage).toBe("applied");
+    expect((await appStageOf(free.appId)).stage).toBe("l1");
+  });
   test("a mixed valid/invalid batch returns {moved, blocked} without throwing", async () => {
     const core = bulkCore();
     const ok = await application("shortlisted");
@@ -484,6 +534,29 @@ describe("moveStagesCore bulk twin (order 3)", () => {
 // ---------------------------------------------------------------------------
 
 describe("recordOfferStageCore offer_declined (order 4)", () => {
+  test("a null actor can only record the candidate's own decisions (review P2)", async () => {
+    const raised = await application("l3");
+    // raise via the HR path first, so the app sits on offer_pending
+    await recordOfferStageCore(ownerActor(), {
+      applicationId: raised.appId,
+      toStage: "offer_pending",
+    });
+    await expect(
+      offerStageCore(null, {
+        applicationId: raised.appId,
+        toStage: "offer_pending",
+      }),
+    ).rejects.toThrow(/Only the candidate's own decisions/);
+    await expect(
+      offerStageCore(null, {
+        applicationId: raised.appId,
+        toStage: "offer_released",
+      }),
+    ).rejects.toThrow(/Only the candidate's own decisions/);
+    // The stages are untouched.
+    expect((await appStageOf(raised.appId)).stage).toBe("offer_pending");
+  });
+
   /** An offer row on the application, released so the private link is live. */
   async function releasedOffer(appId: string) {
     const [o] = await db
