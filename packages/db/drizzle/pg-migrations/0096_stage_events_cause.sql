@@ -3,4 +3,4 @@
 -- email covers it; offer: the offer workflow owns the messaging). Nullable —
 -- decision moves have no cause. Migration 0096 (Phase 5, change PR 1: the
 -- cause parameter on moveStageCore, Dev 2's stage-writers plan order 1).
-ALTER TABLE stage_events ADD COLUMN cause text;
+ALTER TABLE stage_events ADD COLUMN IF NOT EXISTS cause text;
