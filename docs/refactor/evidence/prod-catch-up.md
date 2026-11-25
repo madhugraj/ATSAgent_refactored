@@ -213,7 +213,15 @@ and a second instance (replica) so recovery is not host-bound. This is a CNPG `C
 (`backup:` section + `instances: 2`), applied as a normal CNPG rolling update. Until C lands, A + B are the
 posture, run by hand per release.
 
-Also, unchanged from before: `SECRET_ENCRYPTION_KEY` must stay safely backed up — losing it makes every
+Also, unchanged from before: `SECRET_ENCRYPTION_KEY` must stay safely backed up — losing it makes every stored credential (OAuth tokens, AI keys) unreadable.
+
+**Erasure-vs-retention note (2026-11-25, product owner approved):** `gs://atsiq` now has
+`versioning_enabled: true` and a 30-day **unlocked** retention policy (applied 2026-11-25; private
+access unchanged — `public_access_prevention: enforced`). Unlocked is deliberate: candidate erasure
+requests (the AGENTS.md erasure cascade) must be able to delete objects inside the retention window,
+so the policy stays removable per request; do not `--lock` it without a product decision. Versioned
+delete leaves noncurrent versions — a periodic cleanup of noncurrent copies is part of Dev 3's §5C
+backup-posture work, with erasure requests sweeping noncurrent versions of the erased objects too. — losing it makes every
 stored credential (OAuth tokens, AI keys) unreadable.
 
 ## 6. Rehearsal (required before §7)
