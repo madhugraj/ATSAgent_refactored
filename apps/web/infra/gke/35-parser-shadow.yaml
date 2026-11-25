@@ -1,0 +1,55 @@
+# Phase 9b: the Python parser-shadow service (services/parser). Receives the
+# same payload the real parser gets, after the TS parse completes; the TS
+# result is always the one served. Holds no candidate data at rest (one
+# request per handler, no disk). Wire parity: apps/web/src/lib/parser-shadow.contract.ts.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scouts-parser-shadow
+  namespace: scouts
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: scouts-parser-shadow } }
+  template:
+    metadata:
+      labels: { app: scouts-parser-shadow }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: parser-shadow
+          image: IMAGE_PLACEHOLDER
+          ports: [{ containerPort: 8080, name: http }]
+          env:
+            - { name: PORT, value: "8080" }
+            - { name: SERVICE_NAME, value: "parser" }
+            - name: PARSER_TOKEN
+              valueFrom: { secretKeyRef: { name: scouts-parser, key: PARSER_TOKEN } }
+          resources:
+            requests: { cpu: "250m", memory: "512Mi" }
+            limits: { memory: "1Gi" }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scouts-parser-shadow
+  namespace: scouts
+spec:
+  selector: { app: scouts-parser-shadow }
+  ports: [{ port: 8080, targetPort: http }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: scouts-parser-shadow-isolation
+  namespace: scouts
+spec:
+  podSelector: { matchLabels: { app: scouts-parser-shadow } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{ podSelector: { matchLabels: { app: scouts-app } } }]
+      ports: [{ port: 8080 }]
+  egress: [] # deny all: the shadow never reaches the network and stores nothing

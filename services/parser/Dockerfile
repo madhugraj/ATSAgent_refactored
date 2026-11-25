@@ -1,6 +1,6 @@
-# Shared service image template (refactor plan Phase 9). Copy per service.
-# Build from the repo root so the contract-generated code travels with it:
-#   docker build -f services/_template/Dockerfile services/_template
+# ATSAgent parser service (Phase 9b shadow of the TS parser worker).
+# Build from the repo root so the lockfile and app travel together:
+#   docker build -f services/parser/Dockerfile services/parser
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS build
 
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
