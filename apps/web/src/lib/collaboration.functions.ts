@@ -1,13 +1,11 @@
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 
-import { findExistingApplicationForPair } from "./collaboration.server";
 import { and, desc, eq, ilike, inArray, isNotNull, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { assertNotPanelOnly, requireIdentity } from "@/lib/auth.middleware";
 import { db } from "../server/db";
 import {
-  applications,
   candidateNotes,
   candidateOwnershipEvents,
   candidateReferrals,
@@ -17,6 +15,7 @@ import {
   organizations,
   talentRequestSuggestions,
   talentRequests,
+  users,
 } from "@db/schema";
 
 /**
@@ -257,20 +256,34 @@ export const respondReferral = createServerFn({ method: "POST" })
         reason: "Accepted referral",
       });
 
-      if (ref.requisitionId) {
-        const [existing] = await findExistingApplicationForPair(
-          ref.orgId!,
-          ref.candidateId,
-          ref.requisitionId,
-        );
-        if (!existing)
-          await db.insert(applications).values({
-            orgId: ref.orgId,
-            candidateId: ref.candidateId,
-            requisitionId: ref.requisitionId,
-            stage: "sourced",
-            source: "internal_referral",
-          });
+      if (ref.requisitionId && ref.orgId) {
+        // stage-writers.md §8: the attach goes through the pipeline core — its
+        // existence skip is org-scoped and the requisition is re-verified
+        // in-org at accept time. Decision (Dev 2, agreed by Dev 1 + reviewer):
+        // catch-and-log. The status flip and ownership transfer above have no
+        // transaction, so a core throw here ("Requisition not found" on a
+        // dangling or cross-tenant requisition) would leave a half-applied
+        // hand-off; instead the referral stays accepted with the response
+        // unchanged and the attach is skipped.
+        try {
+          const { addApplicationsCore } = await import("./pipeline.server");
+          const [me] = await db
+            .select({ email: users.email })
+            .from(users)
+            .where(eq(users.id, context.userId))
+            .limit(1);
+          await addApplicationsCore(
+            { orgId: ref.orgId, userId: context.userId, memberEmail: me?.email ?? "" },
+            {
+              requisitionId: ref.requisitionId,
+              candidateIds: [ref.candidateId],
+              source: "internal_referral",
+              entryStage: "sourced",
+            },
+          );
+        } catch (e) {
+          console.error("[collaboration] referral attach skipped (referral still accepted):", e);
+        }
       }
     }
 
