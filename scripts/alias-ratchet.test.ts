@@ -9,7 +9,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const PACKAGES = join(import.meta.dir, "..", "packages");
-const MAX_ALIAS_IMPORTS = 6; // T1 baseline; lower as each SHIM(upward) resolves.
+const MAX_ALIAS_IMPORTS = 5; // T1: cv-text resolved via @ats/std (phase-4 review follow-up); 0 by Phase 8.
 
 function sourceFiles(dir: string): string[] {
   if (!existsSync(dir)) return [];
