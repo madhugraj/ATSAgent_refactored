@@ -22,5 +22,17 @@
     "service": "parser",
     "module": "apps/web/src/lib/parser-shadow.contract.ts",
     "export": "ParserShadowResponse"
+  },
+  {
+    "id": "MatchingShadowRequest",
+    "service": "matching-ml",
+    "module": "apps/web/src/lib/matching-shadow.contract.ts",
+    "export": "MatchingShadowRequest"
+  },
+  {
+    "id": "MatchingShadowResponse",
+    "service": "matching-ml",
+    "module": "apps/web/src/lib/matching-shadow.contract.ts",
+    "export": "MatchingShadowResponse"
   }
 ]
