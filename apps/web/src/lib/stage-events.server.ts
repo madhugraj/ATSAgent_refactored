@@ -66,8 +66,8 @@ export interface RecordStageTransitionInput {
   actor: string;
   reason?: string | null;
   note?: string | null;
-  source?: "human" | "ai";
-  cause?: "interview_scheduled" | "offer";
+  source?: "human" | "ai" | null | undefined;
+  cause?: "interview_scheduled" | "offer" | null | undefined;
 }
 
 export async function recordStageTransition(input: RecordStageTransitionInput): Promise<void> {
@@ -90,6 +90,7 @@ export async function recordStageTransitions(inputs: RecordStageTransitionInput[
         actor: i.actor,
         reason: i.reason ?? null,
         note: i.note ?? null,
+        cause: i.cause ?? null,
       })),
     )
     .returning({ id: stageEvents.id });
