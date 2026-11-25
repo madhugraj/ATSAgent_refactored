@@ -36,6 +36,18 @@ Phase 0 notes found during the merge:
 
 <!-- Append one handoff note per phase below, using template E2 in 00-TEAM-BRIEF.md. -->
 
+### Phase 4 handoff (Dev 2 half): 2026-11-25
+
+- **Branch / PRs:** #21 (legal), #28 (comms (a): inbound transport + onInboundMail registry), #32 (comms (c): email-outbox, send-email, 26 templates, ics split, email-brand), #34 (integrations) — all MERGED; #35 open (Gate 4 inbound CV mail e2e + the drizzle dedupe fix it found, companion to ATSAgent#108).
+- **Source sync:** none moved by me (Dev 1 owns SOURCE_SHA); my work is on refactored mains from 102b0af → 55e0a38. Found-bug fix went source-first per rule 10: ATSAgent#108 (inbox dedupe catch vs drizzle 0.45's wrapped error — err.cause.code).
+- **Packages created/changed:** @ats/legal filled (5 documents shared, org-agreements server core, LegalSection type moved out of components/LegalPage.tsx — fixes the lib→UI inversion). @ats/comms filled (inbound transport + registry; outbox, send-email, 26 templates, email-settings.shared, email-brand.server (ruling 1), ics split buildIcs→shared / downloadIcs stays web (ruling 3)). @ats/integrations filled (5 provider files + ruling-2 createMeetingLinkCore extraction; credential store statically from @ats/org/server — no SHIM, no cycle (ruling 5 preferred path); exchangeCode pin). Empty scaffolds were PR #10.
+- **Change PRs (logic):** #28 (a) — the transport/registry split is itself the mandated change; #32's members.server.ts 3-line re-point in @ats/org (ack by Dev 1 as owner, reviewer ack; ruling 8 records the within-L2 edges org→comms + org→integrations); #35's one-line dedupe fix (drizzle 0.45 wraps driver errors — err.cause.code).
+- **Deviations from map/plan:** email-brand.server → comms (ruling 1); ics entry split (ruling 3); templates dir kept named email-templates (depcruise React exception keys on it — tools/ untouched); none else.
+- **Gate output:** per-package gates green on each PR (typecheck 14→16/16 as packages grew, lint 0 errors, frozen-lockfile passes, agents:lock no diff through the sync to 25 agents, depcruise ratchet never rose — 114→106 measured on #34). Gate 4: desk ordering = Dev 1's scripts/desk-ordering.test.ts (merged #23); inbound CV mail e2e = #35's scripts/inbound-cv-e2e.test.ts (mail → @ats/comms transport → app handler → candidate in the talent pool; duplicate-delivery case red before the dedupe fix).
+- **Test count before → after:** refactored scripts went 86 files / ~1,498 tests at Phase 3 close to 113 files / 1,505+ at the reviewer's #34 independent gate (their run; mine ran the affected suites per PR).
+- **Known gaps / follow-ups:** integrations' meeting-transcripts.server keeps interim app deps (meeting-ref, vtt) → Phase 6 (interviews) cleanup; combined-process test runs can show 3 pre-existing isolation failures — per-file is the documented rule, package test scripts join Dev 1's per-file follow-up; llm vendor names: platform-admin usage page approved as carve-out (map §11 ruling 7, PR #26).
+- **Questions for reviewer:** none open — both flagged deviations carry rulings.
+
 ### Phase 4 handoff (Dev 1 half): 2026-11-24
 
 - **Branch / PRs:** `refactor/p4-deskcore-org` → PR (Dev 1's half). Dev 2's legal landed (#21); comms and
