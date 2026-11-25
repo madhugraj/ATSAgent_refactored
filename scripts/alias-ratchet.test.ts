@@ -37,10 +37,5 @@ test("packages import the app only through the 6 marked upward shims", () => {
     }
     return acc;
   }, offenders);
-  expect(
-    offenders.length
-      ? `alias imports under packages/**/src: ${offenders.length} (max ${MAX_ALIAS_IMPORTS})\n${offenders.join("\n")}`
-      : "",
-  ).toBe("");
   expect(offenders.length).toBeLessThanOrEqual(MAX_ALIAS_IMPORTS);
 });
