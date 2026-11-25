@@ -32,14 +32,19 @@ import {
 import { parseResume } from "@/lib/matching.functions";
 import { verifyCandidates } from "@/lib/verification.functions";
 import { getResumeDownloadUrl } from "@/lib/resume.functions";
-import { downloadResume } from "@/lib/resume-download";
+import { downloadResume } from "@ats/candidates/shared";
 import { createCandidate, deleteCandidates } from "@/lib/candidates.functions";
 import { sourceLabel as channelSourceLabel, UPLOAD_SOURCES } from "@/lib/job-channels";
 import { CvUpload } from "@/components/CvUpload";
 import { normalizeExternalUrl } from "@/lib/external-links";
 import { canonical, nextAction, stalledDays, STAGE_LABEL, type Stage } from "@/lib/lifecycle";
 import { computeCareerMetrics, type EmploymentRow } from "@/lib/career";
-import { duplicateIndex, findDuplicateGroups, freshness, mergeCandidates } from "@/lib/dedupe";
+import {
+  duplicateIndex,
+  findDuplicateGroups,
+  freshness,
+  mergeCandidates,
+} from "@ats/candidates/shared";
 
 import { EmptyState, PageHeader, ScoreChip, StageBadge } from "@/components/ats";
 import { StageMover } from "@/components/StageMover";

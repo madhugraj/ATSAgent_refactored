@@ -258,7 +258,7 @@ export async function eraseRestricted(
 ): Promise<{ erased: string[]; skipped: number }> {
   const ids = [...new Set(candidateIds)].slice(0, DISTRIBUTION.eraseBatch);
   const eligible = await eligibleRestricted(orgId, ids);
-  const { eraseCandidatesCore } = await import("../erase.server");
+  const { eraseCandidatesCore } = await import("@ats/candidates/server");
   const erased = await eraseCandidatesCore(
     orgId,
     eligible.map((e) => e.id),

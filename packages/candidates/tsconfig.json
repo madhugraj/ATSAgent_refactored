@@ -1,4 +1,23 @@
 {
   "extends": "../../tools/tsconfig.base.json",
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "compilerOptions": {
+    // Interim (while app-side shims stand, removed in Phase 8): this package's
+    // typecheck reaches app-side modules — the marked SHIM(upward) relative
+    // imports (capture → verification/autoscore, erase → agents runtime, dedupe
+    // → dedupe.functions) and moved files' old-path shims. Same aliases as
+    // apps/web/tsconfig.json and packages/comms/tsconfig.json.
+    "paths": {
+      "@/*": ["../../apps/web/src/*"],
+      "@db/*": ["../../apps/web/drizzle/*"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "test/**/*.ts",
+    // mammoth-browser.d.ts (the module declaration for the browser mammoth
+    // import in shared/cv-extract.ts) stays app-side in apps/web/src/types —
+    // include it here so this package's typecheck sees it too.
+    "../../apps/web/src/types/*.d.ts"
+  ]
 }

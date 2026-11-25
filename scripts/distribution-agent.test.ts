@@ -33,8 +33,8 @@ const {
 } = await import("../apps/web/drizzle/schema");
 await import("../apps/web/src/server/agents");
 const channels = await import("@ats/std/shared");
-const { inboxSource } = await import("../apps/web/src/lib/local-inbox.server");
-const { ingestCandidate } = await import("../apps/web/src/lib/intake.server");
+const { inboxSource } = await import("@ats/candidates/server");
+const { ingestCandidate } = await import("@ats/candidates/server");
 const { addApplicationsCore } = await import("../apps/web/src/lib/pipeline.server");
 const dist = await import("../apps/web/src/server/agents/distribution-agent.server");
 const { getTool } = await import("../apps/web/src/server/agents/registry");
@@ -212,7 +212,7 @@ describe("a role-limited CV is never reused", () => {
   });
 
   test("never shown to a partner organisation through a pool share", async () => {
-    const { sharedFrom } = await import("../apps/web/src/lib/pool-share");
+    const { sharedFrom } = await import("@ats/candidates/server");
     const shared = await person("Shared");
     const kept = await person("Kept", limited("internshala", 1));
     const visible = (

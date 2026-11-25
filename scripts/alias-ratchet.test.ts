@@ -1,21 +1,25 @@
 /**
  * T1 ratchet (phase-4 review): workspace packages must not import the app
  * through the "@/" or "@db/" tsconfig aliases — those are layer inversions.
- * The count may only come DOWN: 6 known upward imports remain (each marked
+ * The count may only come DOWN: 5 known upward imports remain (each marked
  * // SHIM(upward) with its target phase), 0 by Phase 8. Any NEW alias import
  * under packages/**\/src fails this audit.
  *
  * Ruling 2026-11-25 (Phase 5 distribution move): cap temporarily 8. The peak
  * came from the distribution boards' interim imports of app files whose
- * packages land next. Drop plan: −1 when intake.server moves to
- * @ats/candidates (its boards/ingest.server import), then ≤6 — the original
- * five resolve per their marked phases, 0 by Phase 8.
+ * packages land next. Drop plan: −1 at the candidates move (its
+ * boards/ingest.server intake import re-pointed to @ats/candidates/server) —
+ * done, cap 5. The remaining five resolve per their marked phases
+ * (screening/labour-policy Phase 6, meeting-ref/vtt Phase 6, agents.catalog
+ * Phase 7), 0 by Phase 8. The candidates move's own upward references
+ * (capture → verification/autoscore, erase → agents runtime, dedupe →
+ * dedupe.functions) are relative interims marked SHIM(upward), not aliases.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const PACKAGES = join(import.meta.dir, "..", "packages");
-const MAX_ALIAS_IMPORTS = 8; // T1 ruling 2026-11-25: distribution move peak; drop plan in the header — 1 at the candidates move (intake.server), then ≤6, 0 by Phase 8.
+const MAX_ALIAS_IMPORTS = 5; // 6 known − 1 resolved at the candidates move (boards/ingest.server → @ats/candidates/server); drop plan in the header, 0 by Phase 8.
 
 function sourceFiles(dir: string): string[] {
   if (!existsSync(dir)) return [];
