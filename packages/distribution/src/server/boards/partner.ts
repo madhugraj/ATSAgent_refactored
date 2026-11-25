@@ -7,7 +7,7 @@
 import { createHash } from "crypto";
 
 import { safeFetch } from "@ats/security/server";
-import { assertIntegrationBaseUrl } from "@/lib/integrations.server";
+import { assertIntegrationBaseUrl } from "@ats/org/server";
 import { boardBaseUrl, integrationConfig, type BoardConnection } from "./types";
 
 /** The stored base_url, validated against the partner-host allowlist. */

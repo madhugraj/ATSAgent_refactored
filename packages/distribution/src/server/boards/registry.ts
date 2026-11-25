@@ -11,7 +11,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@ats/db/server";
 import { orgLinkedinConnections, organizations, sourceIntegrations } from "@ats/db/server";
 import { readSecrets } from "@ats/org/server";
-import type { IntegrationConfig } from "@/lib/integrations.server";
+import type { IntegrationConfig } from "@ats/org/server";
 import { linkedinOrgToken, linkedinEnvConfigured } from "@ats/integrations/server";
 import { indeedAdapter } from "./indeed";
 import { linkedinAdapter } from "./linkedin";
