@@ -4,13 +4,13 @@
  * provider: the requisition's approval state, the board's capability verdict
  * and the posting row are all resolved and written here.
  */
-import { placeLabel } from "@/lib/work-mode";
+import { placeLabel } from "@ats/requisitions/shared";
 import { and, eq, ne } from "drizzle-orm";
 
 import { db } from "@ats/db/server";
 import { requisitions, requisitionBoardPostings } from "@ats/db/server";
 import { writeAudit } from "@ats/audit/server";
-import { assertRequisitionInOrg } from "@/server/guards";
+import { assertRequisitionInOrg } from "@ats/requisitions/server";
 import { getBoardAdapter, isBoardProvider, loadBoardConnection } from "./registry";
 import type { BoardProviderId, RequisitionSnapshot } from "./types";
 import { env } from "@ats/config/server";
