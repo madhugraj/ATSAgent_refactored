@@ -1,5 +1,6 @@
 import { currentAgentRun, currentAiSubject } from "./context";
-import { aiUsageEvents, db, type AiUsageStatus } from "@ats/db/server";
+import { db } from "@ats/db/server";
+import { aiUsageEvents, type AiUsageStatus } from "@ats/db/server";
 
 /**
  * Stable slugs for every AI-powered feature. Each provider request is logged
@@ -50,6 +51,8 @@ export const AI_FEATURES = [
   "agent_distribution",
   "agent_screening_call",
   "agent_scheduling_call",
+  "agent_confirmation_call",
+  "agent_panel_check_call",
   "agent_negotiation_call",
   "agent_followup",
   "agent_org_context",
@@ -79,6 +82,9 @@ export const AI_FEATURES = [
   "screening_call",
   // Live voice: the call to pick an interview time (docs/voice-scheduling-call-plan.md).
   "scheduling_call",
+  // Live voice: the day-before attendance confirmation call, and a panelist's time check (0092).
+  "confirmation_call",
+  "panel_check_call",
   // Live voice: the pay discussion call (docs/negotiator-voice-agent.md).
   "negotiation_call",
   // Pay call rehearsals (scripts/evals/negotiation-live-sim.ts): the AI candidate and the

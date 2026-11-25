@@ -228,6 +228,37 @@ functions only) — fine for 9a, needed before 9b's first real service.
 **Question for reviewer:** approve the two documented deviations (consent = BYO-key credential;
 token table platform-scoped with env bootstrap) in the 9a review.
 
+### Freeze-exception sync (staged, pending the Phase 3 merge): 2026-11-24
+
+- **Branch:** `sync/bca8574` (ATSAgent_refactored-sync worktree). Source `3d55eb1` → `bca8574`
+  (#87 interview reminders, #90 voice confirmation and panel time-check calls) is applied here in
+  full: migrations 0092 + 0093, the schema columns and email kinds, the two new agents
+  (Confirmation call and Panel time-check, v0.1.0) with `agents.lock.json` regenerated
+  (**deliberate diff** — 2 new agents), the orchestrator sweeps, `short-call.server.ts`,
+  `confirm-calls.server.ts`, the panelist-mobile link, and the PRs' tests.
+- **This branch is pre-Phase-3** (`src/server.ts` monolith, app in `apps/web`): the sync is staged
+  here and rebases onto the Phase 3 merge (the pre-built `a2d2d24` sync of `3d55eb1` turns the
+  rebase into a formality; `worker-boot-smoke.sh` is pre-ported byte-identical from `a2d2d24` so
+  the smoke gate runs before that merge).
+- **Wrong-way watch (map §10 for reviewer review):** depcruise went 171 → **183** warnings
+  (ratchet deliberately NOT raised). The new module edges the sync adds —
+  `agents/orchestrator.server.ts` → `voice/confirm-calls.server.ts` (dynamic),
+  `agents/orchestrator.server.ts` → `lib/panelist-mobile.server.ts` (dynamic) and
+  `agents/orchestrator.server.ts` → `lib/interview-reminders.server.ts` (dynamic; the three
+  product-owner-flagged sweep edges), `agents/orchestrator.server.ts` →
+  `voice/scheduling-request.server.ts` (`remindUnansweredOffers`), `voice/confirm-calls.server.ts`
+  (new) → `desk/desk.server.ts` and → `agents/{context,policy}`, `voice/call-session.server.ts` →
+  `voice/confirm-calls.server.ts`, `voice/scheduling-request.server.ts` →
+  `voice/confirm-calls.server.ts`, `voice/scheduling-session.server.ts` →
+  `voice/short-call.server.ts`, `lib/interviewer-brief.server.ts` →
+  `lib/panelist-mobile.server.ts`, `lib/panelists.server.ts` → `server/voice/phone`,
+  `agents/tools-phase2.ts` → `agents/tools-confirm-calls.ts`, and `agents/definitions.ts` →
+  `voice/confirm-call-prompts.ts` — spawn 12 net-new no-cycles warnings. No WARN_MAX change.
+- Table owners: no new tables (0092/0093 add columns to `panelists` [interviews] and
+  `screening_calls` [voice]); `table-owners.mjs` passes unchanged, owners already match the steer.
+
+> > > > > > > 43be4fa (sync(bca8574) 4/4: SOURCE_SHA -> bca8574, phase-log freeze exception)
+
 ### Phase 2 handoff: 2026-11-23
 
 - **Branch / PRs:** `refactor/p2-l0-foundation` on madhugraj/ATSAgent_refactored, 7 commits:
