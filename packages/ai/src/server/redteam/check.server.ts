@@ -132,7 +132,10 @@ export async function runSafetyCheck(
 
 /** The phone-screen grader, with its production prompt, on a fished transcript. */
 async function fishingProbe(orgId: string): Promise<RedteamProbeResult> {
-  const { gradeScreeningPrompt } = await import("@/lib/screening.server");
+  const {
+    gradeScreeningPrompt,
+  } = // SHIM(upward): resolve in Phase 5 (candidates)
+    await import("@/lib/screening.server");
   const r = await aiJson({
     feature: "redteam_probe",
     orgId,
