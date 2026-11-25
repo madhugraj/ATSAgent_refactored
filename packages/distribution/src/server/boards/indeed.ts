@@ -8,7 +8,7 @@
  * Outbound: posting and application polling are partner-provisioned paths in
  * source_integrations.config — refused honestly until the pack lands.
  */
-import { safeFetch } from "../safe-fetch";
+import { safeFetch } from "@ats/security/server";
 import { verifyHexHmacSha256 } from "./hmac";
 import { assertBaseUrl, fetchClientToken, requirePath } from "./partner";
 import {

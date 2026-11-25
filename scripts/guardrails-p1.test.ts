@@ -18,7 +18,7 @@ const { aiJson, aiAgentStep, writeProviderKey } =
   await import("../apps/web/src/lib/ai-gateway.server");
 const { SPEND_CAP_MESSAGE, clearSpendCapCache, monthTokensUsed, scoresToday } =
   await import("../apps/web/src/server/ai-spend-cap");
-const { submitApplicationImpl } = await import("../apps/web/src/lib/apply.functions");
+const { submitApplicationImpl } = await import("@ats/distribution/server");
 const { HIDDEN_TEXT_MARKER } = await import("../apps/web/src/lib/document-hidden-text");
 
 let orgId: string;

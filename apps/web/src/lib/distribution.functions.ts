@@ -16,7 +16,7 @@ import { requireOrg, requireRole } from "./auth.middleware";
 const ReqId = z.object({ requisitionId: z.string().uuid() });
 const Channel = z.string().min(2).max(40);
 
-const server = () => import("../server/distribution/distribution.server");
+const server = () => import("@ats/distribution/server");
 const actorOf = (c: { memberEmail: string; userId: string }) => ({
   memberEmail: c.memberEmail,
   userId: c.userId,

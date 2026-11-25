@@ -10,7 +10,7 @@
  */
 import { and, eq, lt, sql } from "drizzle-orm";
 
-import { db } from "../db";
+import { db } from "@ats/db/server";
 import {
   applications,
   boardSyncState,
@@ -20,8 +20,8 @@ import {
   requisitionBoardPostings,
   requisitions,
   sourceIntegrations,
-} from "@db/schema";
-import { ingestCandidate, type ParsedCv } from "../../lib/intake.server";
+} from "@ats/db/server";
+import { ingestCandidate, type ParsedCv } from "@/lib/intake.server";
 import { getBoardAdapter, integrationForWebhookToken, loadBoardConnection } from "./registry";
 import { deliveryEventId } from "./partner";
 import type { BoardProviderId, NormalizedApplication } from "./types";
@@ -220,7 +220,7 @@ async function resumeTextFromUrl(
   url: string | null,
 ): Promise<string | null> {
   if (!url || !/^https?:\/\//i.test(url)) return null;
-  const { safeFetchText } = await import("../safe-fetch");
+  const { safeFetchText } = await import("@ats/security/server");
   try {
     const { text } = await safeFetchText(url, { hops: 1 });
     if (text.trim().length >= 80) return text;
@@ -232,7 +232,7 @@ async function resumeTextFromUrl(
     const conn = await loadBoardConnection(orgId, provider);
     const { fetchClientToken } = await import("./partner");
     const token = await fetchClientToken(conn);
-    const { safeFetchText } = await import("../safe-fetch");
+    const { safeFetchText } = await import("@ats/security/server");
     const { text } = await safeFetchText(url, {
       hops: 1,
       headers: { Authorization: `Bearer ${token}` },

@@ -10,7 +10,7 @@
  *    replaced link stops working at once;
  *  - posting by hand: contact details stripped, links checked, audited;
  *  - the per-channel report counts how far applicants got.
- * Run: DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test scripts/job-distribution.test.ts
+ * Run: DATABASE_URL=postgres://…/atsagent_test SESSION_SECRET=… bun test packages/distribution/test/job-distribution.test.ts
  */
 import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
@@ -25,8 +25,8 @@ process.env["GOOGLE_INDEXING_CREDENTIALS"] = JSON.stringify({
   private_key: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
 });
 
-const { db } = await import("../apps/web/src/server/db");
-const { env } = await import("../apps/web/src/server/env");
+const { db } = await import("@ats/db/server");
+const { env } = await import("@ats/config/server");
 const {
   applications,
   auditLog,
@@ -39,14 +39,13 @@ const {
   requisitions,
   stageEvents,
   users,
-} = await import("../apps/web/drizzle/schema");
-const channels = await import("../apps/web/src/lib/job-channels");
-const content = await import("../apps/web/src/server/distribution/content");
-const dist = await import("../apps/web/src/server/distribution/distribution.server");
-const indexing = await import("../apps/web/src/server/distribution/google-indexing.server");
-const { submitApplicationImpl } = await import("../apps/web/src/lib/apply.functions");
-const { closePostingsForRequisition } =
-  await import("../apps/web/src/server/boards/publish.server");
+} = await import("@ats/db/server");
+const channels = await import("@ats/std/shared");
+const content = await import("@ats/distribution/server");
+const dist = await import("@ats/distribution/server");
+const indexing = await import("@ats/distribution/server");
+const { submitApplicationImpl } = await import("@ats/distribution/server");
+const { closePostingsForRequisition } = await import("@ats/distribution/server");
 
 const stamp = Date.now();
 let orgA: string;
@@ -118,7 +117,7 @@ const auditActions = async (orgId: string) =>
   ).map((r) => r.action);
 
 beforeAll(async () => {
-  const url = process.env.DATABASE_URL ?? "";
+  const url = process.env["DATABASE_URL"] ?? "";
   if (!["127.0.0.1", "localhost", "::1"].includes(new URL(url).hostname))
     throw new Error("Refusing non-local database");
   userId = (
@@ -206,9 +205,7 @@ describe("tracked apply links", () => {
 });
 
 describe("content", () => {
-  const job = (
-    over: Partial<import("../apps/web/src/server/distribution/content").DistributableJob> = {},
-  ) => ({
+  const job = (over: Partial<import("@ats/distribution/server").DistributableJob> = {}) => ({
     id: "11111111-1111-1111-1111-111111111111",
     code: "REQ-1",
     title: "Platform </script><script>alert(1)</script> SRE",

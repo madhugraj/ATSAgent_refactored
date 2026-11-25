@@ -577,7 +577,7 @@ export function registerPhase1Tools(): void {
     describe: (i) => `Publish the requisition on ${i.provider}`,
     run: async (ctx, i) => {
       const a = await actor(ctx);
-      const { publishToBoardImpl } = await import("../boards/publish.server");
+      const { publishToBoardImpl } = await import("@ats/distribution/server");
       return publishToBoardImpl({
         orgId: ctx.orgId,
         actor: { memberEmail: a.memberEmail, userId: a.userId },
