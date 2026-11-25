@@ -536,7 +536,6 @@ describe("recordStageTransition", () => {
  *  - interviews.functions.ts  round-scheduled and AI-screen-completion writers
  *  - offer-response.server.ts offer accept/decline writer
  *  - lifecycle.functions.ts   bulk stage move (found by this grep)
- *  - candidates.functions.ts  create-candidate INSERT with stage: "sourced"
  */
 /**
  * Directories the guard scans, relative to the repo root. The refactor moves
@@ -562,7 +561,6 @@ const KNOWN_STAGE_WRITERS = [
   "interviews.functions.ts",
   "offer-response.server.ts",
   "lifecycle.functions.ts",
-  "candidates.functions.ts",
   // Test fixture (a disposable application row), moved with @ats/ai in Phase 3
   // from scripts/training-data.test.ts — scripts/ is not a scan root, so it
   // only appears here now that it lives under packages/.
