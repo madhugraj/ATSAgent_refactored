@@ -45,6 +45,7 @@ import {
   freshness,
   mergeCandidates,
 } from "@ats/candidates/shared";
+import { mergeCandidatesFn } from "@/lib/dedupe.functions";
 
 import { EmptyState, PageHeader, ScoreChip, StageBadge } from "@/components/ats";
 import { StageMover } from "@/components/StageMover";
@@ -555,7 +556,7 @@ function Candidates() {
     const survivor = members[0]!;
     setMerging(true);
     try {
-      const out = await mergeCandidates(survivor, members.slice(1));
+      const out = await mergeCandidates(survivor, members.slice(1), mergeCandidatesFn);
       await qc.invalidateQueries({ queryKey: ["candidates"] });
       await qc.invalidateQueries({ queryKey: ["applications"] });
       setSelected(new Set());

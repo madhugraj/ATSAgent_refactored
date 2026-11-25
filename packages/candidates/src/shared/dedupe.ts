@@ -10,13 +10,17 @@
  * Everything here is deterministic and explainable: no AI call is needed to
  * tell a recruiter *why* two rows look like the same human.
  */
-// SHIM(upward): the merge write path is the app's server-fn wrapper
-// (apps/web/src/lib/dedupe.functions.ts — createServerFn + requireOrg stay in
-// the web composition root, map §3) until the dedupe core lands in
-// @ats/candidates/server; relative interim so the alias ratchet
-// (scripts/alias-ratchet.test.ts) is not consumed. Resolved by that change PR.
-import { mergeCandidatesFn } from "../../../../apps/web/src/lib/dedupe.functions";
 import type { Candidate } from "./candidate-types";
+
+/**
+ * The merge write path is injected by the caller (dependency injection): the
+ * browser route passes the app's server-fn wrapper, keeping this shared file
+ * client-safe with no upward import (reviewer condition, PR #50). When the
+ * dedupe core lands in @ats/candidates/server, mergeCandidates moves there
+ * and takes the core directly — by the end of Phase 5.
+ */
+type MergeResult = { merged: number; movedApplications: number };
+type MergeFn = (args: { data: { survivorId: string; dupeIds: string[] } }) => Promise<MergeResult>;
 
 export const normEmail = (v: string | null | undefined) => {
   const raw = (v ?? "").trim().toLowerCase();
@@ -221,10 +225,10 @@ export function mergeCandidateFields(survivor: Candidate, dupes: Candidate[]) {
  * same requisition are removed as true duplicates. The writes run as an
  * org-scoped server function (see dedupe.functions.ts).
  */
-export async function mergeCandidates(survivor: Candidate, dupes: Candidate[]) {
+export async function mergeCandidates(survivor: Candidate, dupes: Candidate[], mergeFn: MergeFn) {
   const others = dupes.filter((d) => d.id !== survivor.id);
   if (others.length === 0) return { merged: 0, movedApplications: 0 };
-  return mergeCandidatesFn({
+  return mergeFn({
     data: { survivorId: survivor.id, dupeIds: others.map((d) => d.id) },
   });
 }

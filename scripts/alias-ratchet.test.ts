@@ -19,7 +19,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const PACKAGES = join(import.meta.dir, "..", "packages");
-const MAX_ALIAS_IMPORTS = 9; // TRUE total: 5 alias + 4 relative (counted now). Drop plans in the header — alias: 1 at the candidates move then ≤6; relative: −1 change PR A, −1 matching Phase 6, −1 interviews Phase 6. 0 by Phase 8.
+const MAX_ALIAS_IMPORTS = 8; // TRUE total: 5 alias + 3 relative (counted now). Drop plans in the header — alias: 1 at the candidates move then ≤6; relative: −1 change PR A, −1 matching Phase 6, −1 interviews Phase 6. 0 by Phase 8.
 
 function sourceFiles(dir: string): string[] {
   if (!existsSync(dir)) return [];
