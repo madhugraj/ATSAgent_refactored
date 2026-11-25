@@ -15,7 +15,7 @@ if (!["127.0.0.1", "localhost", "::1"].includes(new URL(url).hostname)) {
 
 const { ensureAgentsRegistered } = await import("../apps/web/src/server/agents/index");
 const { runAgentTick } = await import("../apps/web/src/server/agents/runtime.server");
-const { processEmailOutbox } = await import("../apps/web/src/lib/email-outbox.server");
+const { processEmailOutbox } = await import("@ats/comms/server");
 ensureAgentsRegistered();
 
 let stopping = false;

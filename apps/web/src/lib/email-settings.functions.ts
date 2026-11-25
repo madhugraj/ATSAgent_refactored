@@ -5,7 +5,7 @@ import { z } from "zod";
 import { db } from "../server/db";
 import { emailSettings } from "@db/schema";
 import { requireOrg, requireRole } from "./auth.middleware";
-import { DEFAULT_EMAIL_SETTINGS } from "./email-settings.shared";
+import { DEFAULT_EMAIL_SETTINGS } from "@ats/comms/shared";
 
 const Timezone = z.string().refine((tz) => {
   try {

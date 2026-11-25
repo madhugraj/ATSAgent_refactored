@@ -10,7 +10,7 @@ import { db } from "../../../server/db";
 import { users } from "@db/schema";
 import { hashPassword } from "../../../server/password";
 import { signActionToken } from "../../../server/action-token";
-import { sendTemplateEmail } from "../../../lib/email-templates/send-email";
+import { sendTemplateEmail } from "@ats/comms/server";
 import { workEmailProblem } from "../../../lib/work-email";
 import { passwordProblem } from "../../../lib/password-policy";
 

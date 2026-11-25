@@ -268,7 +268,7 @@ export async function substituteGateFor(
   const booked = await bookedRound(orgId, subject.applicationId, subject.level);
   let when = "Not booked yet: the stand-in is used when times are offered.";
   if (booked?.scheduledAt) {
-    const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+    const { getOrgEmailSettings } = await import("@ats/comms/server");
     const { localWhen } = await import("@/lib/local-time");
     const at = localWhen(booked.scheduledAt, (await getOrgEmailSettings(orgId)).timezone);
     when = pick.freeAtBookedTime

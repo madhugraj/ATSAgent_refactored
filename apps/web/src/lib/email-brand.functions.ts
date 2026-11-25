@@ -50,7 +50,7 @@ async function assertBrandEditor(ctx: { userId: string; orgId: string; isOwner?:
 }
 
 async function forget(orgId: string) {
-  const { clearEmailBrandCache } = await import("../server/email-brand.server");
+  const { clearEmailBrandCache } = await import("@ats/comms/server");
   clearEmailBrandCache(orgId);
 }
 

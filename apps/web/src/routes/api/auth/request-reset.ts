@@ -9,7 +9,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../../../server/db";
 import { users } from "@db/schema";
 import { signActionToken } from "../../../server/action-token";
-import { sendTemplateEmail } from "../../../lib/email-templates/send-email";
+import { sendTemplateEmail } from "@ats/comms/server";
 
 const GENERIC = "If that address has an ATSIQ account, a reset link is on its way.";
 

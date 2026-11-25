@@ -103,7 +103,7 @@ export { localWhen } from "@/lib/local-time";
 import { localWhen } from "@/lib/local-time";
 
 const orgZone = async (orgId: string) =>
-  (await (await import("@/lib/email-outbox.server")).getOrgEmailSettings(orgId)).timezone;
+  (await (await import("@ats/comms/server")).getOrgEmailSettings(orgId)).timezone;
 
 export function registerPhase3Tools(): void {
   /* ------------------------------------------------------ coordinator */
@@ -447,7 +447,7 @@ export function registerPhase3Tools(): void {
     }),
     risk: "read",
     run: async (ctx, i) => {
-      const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+      const { getOrgEmailSettings } = await import("@ats/comms/server");
       const { findFreeSlots, roundNotBefore } = await import("@/lib/calendar-availability.server");
       const timeZone = (await getOrgEmailSettings(ctx.orgId)).timezone;
       if (i.applicationId) await loadApplication(ctx.orgId, i.applicationId);

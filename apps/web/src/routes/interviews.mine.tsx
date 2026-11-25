@@ -13,7 +13,8 @@ import {
   submitScorecard,
   type MyInterview,
 } from "@/lib/interviews.functions";
-import { buildIcs, downloadIcs } from "@/lib/ics";
+import { buildIcs } from "@ats/comms/shared";
+import { downloadIcs } from "@/lib/ics";
 import { STAGE_LABEL } from "@/lib/lifecycle";
 import { EmptyState, PageHeader, StageBadge } from "@/components/ats";
 import {

@@ -156,7 +156,7 @@ export async function requestScreeningCall(input: {
   });
   if (!check.ok) throw new Error(check.reason);
   const policy = await phoneScreeningPolicyOf(input.orgId);
-  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const tz = (await getOrgEmailSettings(input.orgId)).timezone;
   const dueAt = nextWindowStart(input.now ?? Date.now(), policy, tz);
   // Two requests racing: only one open call per application.

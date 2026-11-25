@@ -472,7 +472,7 @@ export function registerPhase2Tools(): void {
         count: 6,
       });
       const { dayText } = await import("@/lib/assessment-timeline.server");
-      const { enqueueEmail } = await import("@/lib/email-outbox.server");
+      const { enqueueEmail } = await import("@ats/comms/server");
       await enqueueEmail({
         orgId: ctx.orgId,
         kind: "assessment_invite",
@@ -526,7 +526,7 @@ export function registerPhase2Tools(): void {
       if (!a) throw new Error("No assessment was sent to this candidate.");
       if (a.completedAt) throw new Error("The candidate already completed the assessment.");
       if (!app.candidateEmail) throw new Error("The candidate has no email address.");
-      const { enqueueEmail } = await import("@/lib/email-outbox.server");
+      const { enqueueEmail } = await import("@ats/comms/server");
       await enqueueEmail({
         orgId: ctx.orgId,
         kind: "assessment_invite",
@@ -680,7 +680,7 @@ export function registerPhase2Tools(): void {
         )
         .limit(1);
       if (!m?.email) throw new Error("That person is not an active member of this organisation.");
-      const { enqueueEmail } = await import("@/lib/email-outbox.server");
+      const { enqueueEmail } = await import("@ats/comms/server");
       const day = new Date().toISOString().slice(0, 10);
       await enqueueEmail({
         orgId: ctx.orgId,

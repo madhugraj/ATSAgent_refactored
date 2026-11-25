@@ -156,7 +156,7 @@ export const emailReleasedOffer = createServerOnlyFn(async function emailRelease
       .where(and(eq(offers.id, offerId), eq(offers.orgId, orgId)))
       .limit(1);
     if (offerRow?.candidateEmail && offerRow.letter) {
-      const { enqueueEmail } = await import("./email-outbox.server");
+      const { enqueueEmail } = await import("@ats/comms/server");
       const { buildOfferLetterPdf } = await import("./offer-letter-pdf");
       const pdf = buildOfferLetterPdf(offerRow.letter as OfferLetterPayload);
       await enqueueEmail({

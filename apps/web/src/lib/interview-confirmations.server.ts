@@ -67,7 +67,7 @@ export async function supersedeForInterview(
         sql`${interviewConfirmations.scheduledAt} is distinct from ${keepAt.toISOString()}::timestamptz`,
       ),
     );
-  const { dropHeldEmails } = await import("./email-outbox.server");
+  const { dropHeldEmails } = await import("@ats/comms/server");
   // The held invite for the old time never goes out; the new one carries the new time.
   await dropHeldEmails(orgId, invitePrefix(interviewId)).catch(() => {});
 }
@@ -235,7 +235,7 @@ async function liveRows(orgId: string, where: { interviewId?: string; offerId?: 
 export async function releaseIfAgreed(orgId: string, interviewId: string): Promise<boolean> {
   const rows = await liveRows(orgId, { interviewId });
   if (!panelAgreed(rows)) return false;
-  const { releaseHeldEmails } = await import("./email-outbox.server");
+  const { releaseHeldEmails } = await import("@ats/comms/server");
   return (await releaseHeldEmails(orgId, invitePrefix(interviewId))) > 0;
 }
 
@@ -254,8 +254,7 @@ export async function askPanelAboutOffer(
     applicationId: string;
   },
 ): Promise<void> {
-  const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } =
-    await import("./email-outbox.server");
+  const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } = await import("@ats/comms/server");
   const { env } = await import("../server/env");
   const site = env.PUBLIC_SITE_URL.replace(/\/$/, "");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
@@ -400,7 +399,7 @@ export async function publicConfirmation(token: string): Promise<PublicConfirmat
     .where(and(eq(applications.id, c.applicationId), eq(applications.orgId, r.orgId)))
     .limit(1);
   if (!ctx) return null;
-  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   return {
     party: r.party,
     kind: r.offerId ? "offer" : "round",
@@ -568,7 +567,7 @@ async function afterOfferAnswer(orgId: string, offerId: string, _r: Row, c: Ctx)
     .set({ status: "cancelled", updatedAt: new Date() })
     .where(and(eq(interviewSlotOffers.id, offerId), eq(interviewSlotOffers.orgId, orgId)));
   await withdrawOfferEmails(orgId, [offerId]);
-  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const { localWhen } = await import("./local-time");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   const panel = rows.filter((x) => x.party === "panelist");
@@ -751,7 +750,7 @@ async function moveToSuggested(
   }
   if (others.length && !(await allFree(orgId, others, at, i.durationMins, interviewId)).free)
     return false;
-  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const { localWhen } = await import("./local-time");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   const who = r.name ?? r.email;
@@ -808,7 +807,7 @@ export async function raiseUnavailable(
       .from(interviews)
       .where(and(eq(interviews.id, interviewId), eq(interviews.orgId, orgId)))
       .limit(1);
-    const { getOrgEmailSettings } = await import("./email-outbox.server");
+    const { getOrgEmailSettings } = await import("@ats/comms/server");
     const { localWhen } = await import("./local-time");
     const when = i?.at ? localWhen(i.at, (await getOrgEmailSettings(orgId)).timezone) : undefined;
     const { emitAgentEvent } = await import("../server/agents/events");
@@ -910,7 +909,7 @@ export async function releaseInviteNow(
   interviewId: string,
   by: { email: string; userId: string },
 ): Promise<number> {
-  const { releaseHeldEmails } = await import("./email-outbox.server");
+  const { releaseHeldEmails } = await import("@ats/comms/server");
   const n = await releaseHeldEmails(orgId, invitePrefix(interviewId));
   if (n) {
     const { writeAudit } = await import("../server/audit");
@@ -991,8 +990,7 @@ async function remind(r: Row, c: Ctx, now: number) {
     )
     .returning({ id: interviewConfirmations.id });
   if (!claimed) return;
-  const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } =
-    await import("./email-outbox.server");
+  const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } = await import("@ats/comms/server");
   const { env } = await import("../server/env");
   const tz = (await getOrgEmailSettings(r.orgId)).timezone;
   const [ctx] = await db

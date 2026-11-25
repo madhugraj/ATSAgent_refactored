@@ -136,7 +136,7 @@ export function registerSchedulingCallTools(): void {
       const c = await checkSchedulingCall(ctx.orgId, i.applicationId);
       if (!c.ok) return "";
       const { spokenWhen } = await import("../voice/scheduling-brief.server");
-      const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+      const { getOrgEmailSettings } = await import("@ats/comms/server");
       const tz = (await getOrgEmailSettings(ctx.orgId)).timezone;
       return [
         `The AI assistant phones the candidate${c.repeat ? " (they did not take the earlier times)" : " (the times went by e-mail only — no call was possible then)"} and books one of these L${c.offer.level} interview times, or notes when they are free:`,

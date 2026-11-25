@@ -284,7 +284,7 @@ export async function openScreeningCall(
   if (!call) return null;
   let when = "";
   if (call.dueAt) {
-    const { getOrgEmailSettings, formatInOrgTZ } = await import("./email-outbox.server");
+    const { getOrgEmailSettings, formatInOrgTZ } = await import("@ats/comms/server");
     when = ` — due ${formatInOrgTZ(call.dueAt, (await getOrgEmailSettings(orgId)).timezone)}`;
   }
   const who = call.name?.split(" ")[0] || "The candidate";

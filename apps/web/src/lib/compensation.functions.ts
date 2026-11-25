@@ -58,7 +58,7 @@ export const getCandidateCompensation = createServerFn({ method: "GET" })
     if (!(await payAccess(context.userId, context.orgId)))
       return { allowed: false as const, applications: [] };
     const comp = await import("./compensation.server");
-    const { getOrgEmailSettings } = await import("./email-outbox.server");
+    const { getOrgEmailSettings } = await import("@ats/comms/server");
     const { dayText } = await import("./assessment-timeline.server");
     const tz = (await getOrgEmailSettings(context.orgId)).timezone;
     const apps = await db

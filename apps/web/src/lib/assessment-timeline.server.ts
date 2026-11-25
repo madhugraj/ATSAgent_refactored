@@ -148,7 +148,7 @@ export async function openAssessments(orgId?: string) {
 type Row = typeof candidateAssessments.$inferSelect;
 
 async function context(row: Row) {
-  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const { candidates, requisitions, organizations } = await import("@db/schema");
   const [c] = await db
     .select({ name: candidates.fullName, email: candidates.email })
@@ -208,7 +208,7 @@ export async function sendAssessmentReminder(
   const ctx = await context(row);
   if (!ctx.email) throw new Error("The candidate has no email address.");
   const { env } = await import("../server/env");
-  const { enqueueEmail } = await import("./email-outbox.server");
+  const { enqueueEmail } = await import("@ats/comms/server");
   const n = row.remindersSent + 1;
   await enqueueEmail({
     orgId,

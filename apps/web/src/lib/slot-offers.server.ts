@@ -354,8 +354,7 @@ export async function sendOfferLink(orgId: string, offerId: string): Promise<boo
     .where(and(eq(applications.id, o.applicationId), eq(applications.orgId, orgId)))
     .limit(1);
   if (!app?.candidateEmail) return false;
-  const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } =
-    await import("./email-outbox.server");
+  const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } = await import("@ats/comms/server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   // A booked time of this round that was cancelled before it came (e.g. the
   // interviewer could not make it): the candidate is told it no longer stands.
@@ -534,7 +533,7 @@ export type PublicOffer = {
 export async function publicOffer(token: string): Promise<PublicOffer | null> {
   const o = await byToken(token);
   if (!o) return null;
-  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const expired = o.offer.status === "offered" && o.offer.expiresAt.getTime() < Date.now();
   const pickable = o.offer.slots.filter(
     (s) => Date.parse(s) > Date.now() + SLOT_OFFER.pickLeadHours * 3600_000,
@@ -826,7 +825,7 @@ export async function expireOffers(orgId?: string): Promise<number> {
 }
 
 async function whenText(orgId: string, at: Date) {
-  const { formatInOrgTZ, getOrgEmailSettings } = await import("./email-outbox.server");
+  const { formatInOrgTZ, getOrgEmailSettings } = await import("@ats/comms/server");
   return formatInOrgTZ(at, (await getOrgEmailSettings(orgId)).timezone);
 }
 

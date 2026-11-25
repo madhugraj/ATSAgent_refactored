@@ -128,7 +128,7 @@ async function place(
   if (!number) return settle(orgId, call, "gave_up", now(), { endReason: "no_number" });
 
   const policy = await phoneScreeningPolicyOf(orgId);
-  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const tz = (await getOrgEmailSettings(orgId)).timezone;
   const system = `Current local time: ${localNow(now(), tz)} (${tz}).\n\n${schedulingSystemPrompt(brief.facts)}`;
 
@@ -245,7 +245,7 @@ async function settle(
   if (result === "no_answer") {
     if (call.attempt < SCHEDULING_MAX_ATTEMPTS) {
       const policy = await phoneScreeningPolicyOf(orgId);
-      const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+      const { getOrgEmailSettings } = await import("@ats/comms/server");
       // Hourly the same day (hiring SLA), not the screening call's 2 h then next day.
       dueAt = nextWindowStart(
         at + SCHEDULING_RETRY_MS,
@@ -320,7 +320,7 @@ async function postToThread(orgId: string, call: Call, how: string, dueAt: Date 
   const at = dueAt
     ? spokenWhen(
         dueAt.toISOString(),
-        (await (await import("@/lib/email-outbox.server")).getOrgEmailSettings(orgId)).timezone,
+        (await (await import("@ats/comms/server")).getOrgEmailSettings(orgId)).timezone,
       )
     : null;
   const round = row?.level ? `L${row.level} interview` : "interview";

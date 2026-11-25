@@ -26,8 +26,7 @@ const ROLE_LABELS: Record<AppRole, string> = {
 /**
  * Tell an invited colleague they now have access. Best-effort: the roster
  * entry is already saved, so a mail failure must never fail the invitation.
- * Interim app import: the mail stack moves to @ats/comms in Phase 4 —
- * @/ resolves through the package tsconfig.
+ * The mail stack lives in @ats/comms (Phase 4, map §11 ruling 4c).
  */
 export async function notifyInvitedMember(args: {
   email: string;
@@ -40,7 +39,7 @@ export async function notifyInvitedMember(args: {
   orgId?: string | null;
 }) {
   try {
-    const { sendTemplateEmail } = await import("@/lib/email-templates/send-email");
+    const { sendTemplateEmail } = await import("@ats/comms/server");
     await sendTemplateEmail("member-invited", args.email, {
       idempotencyKey: `member-invited:${args.memberId ?? args.email}`,
       orgId: args.orgId ?? null,

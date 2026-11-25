@@ -216,7 +216,7 @@ async function remindInterviewer(
     p && r.scheduledAt
       ? `${site}/scorecard/${await issueScorecardLink(orgId, r.id, p.id, r.scheduledAt)}`
       : `${site}/interviews/mine`;
-  const { enqueueEmail } = await import("./email-outbox.server");
+  const { enqueueEmail } = await import("@ats/comms/server");
   await enqueueEmail({
     orgId,
     kind: "member_reminder",

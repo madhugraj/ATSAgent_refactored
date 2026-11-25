@@ -83,8 +83,7 @@ export async function sweepInterviewReminders(orgId?: string, now = Date.now()):
     )
     .limit(500);
 
-  const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } =
-    await import("./email-outbox.server");
+  const { enqueueEmail, formatInOrgTZ, getOrgEmailSettings } = await import("@ats/comms/server");
   const { interviewWith } = await import("./interview-with");
   const { env } = await import("../server/env");
   const site = env.PUBLIC_SITE_URL.replace(/\/$/, "");

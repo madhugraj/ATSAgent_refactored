@@ -321,7 +321,7 @@ export async function fileNormalizedApplication(input: {
         .leftJoin(orgProfiles, eq(orgProfiles.orgId, organizations.id))
         .where(eq(organizations.id, input.orgId))
         .limit(1);
-      const { enqueueEmail } = await import("../../lib/email-outbox.server");
+      const { enqueueEmail } = await import("@ats/comms/server");
       await enqueueEmail({
         orgId: input.orgId,
         kind: "ack",

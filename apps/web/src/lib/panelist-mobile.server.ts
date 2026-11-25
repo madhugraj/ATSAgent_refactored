@@ -138,7 +138,7 @@ export async function askForMobile(
     .where(and(eq(panelists.id, panelistId), eq(panelists.phoneAskCount, p.p.phoneAskCount)))
     .returning({ n: panelists.phoneAskCount });
   if (!claimed) return false;
-  const { enqueueEmail } = await import("./email-outbox.server");
+  const { enqueueEmail } = await import("@ats/comms/server");
   await enqueueEmail({
     orgId,
     kind: "panel_mobile_ask",

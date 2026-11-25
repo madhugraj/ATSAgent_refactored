@@ -151,7 +151,7 @@ if (!process.env["SMTP_URL"]) {
   console.log("This person already has a password; use “Forgot password” to change it.");
 } else {
   const { signActionToken } = await import("../apps/web/src/server/action-token");
-  const { sendTemplateEmail } = await import("../apps/web/src/lib/email-templates/send-email");
+  const { sendTemplateEmail } = await import("@ats/comms/server");
   const siteUrl = (process.env["PUBLIC_SITE_URL"] ?? "http://localhost:9000").replace(/\/$/, "");
   const token = signActionToken(user.id, "password-reset", 60 * 60 * 1000);
   await sendTemplateEmail("password-recovery", email, {

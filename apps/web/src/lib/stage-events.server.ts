@@ -20,7 +20,7 @@ import {
   screeningPrepJobs,
   stageEvents,
 } from "@db/schema";
-import { enqueueStageUpdates } from "./email-outbox.server";
+import { enqueueStageUpdates } from "@ats/comms/server";
 import type { Stage } from "./lifecycle";
 
 const STAGE_EMAIL_COPY: Partial<Record<Stage, { heading: string; body: string }>> = {

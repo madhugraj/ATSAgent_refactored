@@ -195,7 +195,7 @@ export async function requestNegotiationCall(input: {
   if (!check.ok) throw new Error(check.reason);
   const n = check.negotiation;
   const policy = await phoneScreeningPolicyOf(input.orgId);
-  const { getOrgEmailSettings } = await import("@/lib/email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const tz = (await getOrgEmailSettings(input.orgId)).timezone;
   const dueAt = nextWindowStart(now, policy, tz);
   const row = await db.transaction(async (tx) => {

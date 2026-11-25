@@ -15,7 +15,7 @@ const { dispatchAgentAlerts, dispatchAgentDigests, localDayHour } =
 const { evaluateAgentHealth } = await import("../apps/web/src/server/agents/health.server");
 // The alerts package no longer imports the outbox (map §5: foundation must
 // not import comms) — inject the real one, exactly as boot.ts does.
-const outbox = await import("../apps/web/src/lib/email-outbox.server");
+const outbox = await import("@ats/comms/server");
 const { setAgentAlertMailer } = await import("../apps/web/src/server/agents/alerts.server");
 setAgentAlertMailer({
   enqueueEmail: outbox.enqueueEmail,
@@ -107,7 +107,7 @@ describe("end-of-day digest", () => {
   });
 
   test("a member's reminders are held and arrive in their one summary, never alone", async () => {
-    const { enqueueEmail } = await import("../apps/web/src/lib/email-outbox.server");
+    const { enqueueEmail } = await import("@ats/comms/server");
     for (const h of ["REQ-1 waits for approval", "REQ-2 waits for approval"])
       await enqueueEmail({
         orgId,

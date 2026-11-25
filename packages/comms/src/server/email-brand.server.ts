@@ -6,10 +6,9 @@
  */
 import { eq } from "drizzle-orm";
 
-import { db } from "./db";
-import { getObject } from "./storage";
-import { log } from "./log";
-import { organizations } from "@db/schema";
+import { db, organizations } from "@ats/db/server";
+import { getObject } from "@ats/storage/server";
+import { log } from "@ats/observability/server";
 
 export const DEFAULT_BRAND_COLOR = "#4f46e5";
 export const BRAND_LOGO_CID = "org-logo";

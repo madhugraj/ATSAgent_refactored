@@ -170,7 +170,7 @@ async function allowedTimes(
     x.slaDays,
   );
   const { findFreeSlots, roundNotBefore } = await import("./calendar-availability.server");
-  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const panel = panelOf(x.i);
   if (!panel.length) return { times: [], latest };
   const notBefore = await roundNotBefore(x.r.orgId, x.i.applicationId, x.i.level).catch(() => null);
@@ -207,7 +207,7 @@ export async function changeOptions(
   if (why) return { can: false, why };
   const length = durationOf(x, durationMins);
   const { times, latest } = await allowedTimes(x, length);
-  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   return {
     can: true,
     durationMins: length,
@@ -297,7 +297,7 @@ export async function changeTime(
   });
 
   const cf = await import("./interview-confirmations.server");
-  const { getOrgEmailSettings } = await import("./email-outbox.server");
+  const { getOrgEmailSettings } = await import("@ats/comms/server");
   const { localWhen } = await import("./local-time");
   const tz = (await getOrgEmailSettings(x.r.orgId)).timezone;
   const who = x.r.name ?? x.r.email;

@@ -515,7 +515,7 @@ export const reviewOrganization = createServerFn({ method: "POST" })
     let emailError: string | null = null;
     if (owner?.email && org?.name) {
       try {
-        const { sendTemplateEmail } = await import("@/lib/email-templates/send-email");
+        const { sendTemplateEmail } = await import("@ats/comms/server");
         const res = await sendTemplateEmail(
           data.decision === "approve" ? "org-approved" : "org-rejected",
           owner.email,

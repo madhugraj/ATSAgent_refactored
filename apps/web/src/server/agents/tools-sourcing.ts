@@ -86,7 +86,7 @@ export function registerSourcingTools(): void {
         .from(organizations)
         .where(eq(organizations.id, ctx.orgId))
         .limit(1);
-      const { enqueueEmail } = await import("@/lib/email-outbox.server");
+      const { enqueueEmail } = await import("@ats/comms/server");
       const invited: string[] = [];
       for (const c of ok) {
         if (!eligible.has(c.id)) {
