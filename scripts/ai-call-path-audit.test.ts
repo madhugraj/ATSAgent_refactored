@@ -99,18 +99,22 @@ describe("ai call-path audit", () => {
         const rel = `apps/web/src/lib/${f}`;
         const text = readFileSync(join(fnDir, f), "utf8");
         const re = /^\s*(?:\.\.\.|["'\w]+)?\b(model|engine)\s*:/gm;
-        // BASELINE (pre-existing vendor-leak candidates, product decision pending — phase-3
-        // handoff findings; any NEW site fails this audit):
+        // BASELINE (vendor-leak candidates; any NEW site fails this audit).
+        // 2026-11-25 review: salary-benchmark / onboarding / verification /
+        // assessment entries are VERIFIED FALSE POSITIVES — the model: hits
+        // are persisted DB columns, the wire returns were already clean
+        // (reviewer; corrected in the Phase 3 review file, PR #18). They stay
+        // listed until their Phase 6 core extractions clear the files.
         const baseline = [
-          "apps/web/src/lib/salary-benchmark.functions.ts", // returns result.model to the client
-          "apps/web/src/lib/onboarding.functions.ts", // returns read.model to the client
-          "apps/web/src/lib/platform-ai-usage.functions.ts", // usage rows' model on the admin page
+          "apps/web/src/lib/salary-benchmark.functions.ts", // DB column write, not returned (verified false positive)
+          "apps/web/src/lib/onboarding.functions.ts", // DB column write, not returned (verified false positive)
+          "apps/web/src/lib/platform-ai-usage.functions.ts", // APPROVED CARVE-OUT (product owner via Dev 2, 2026-11-25): model names on the platform-admin usage page — requirePlatformAdmin-gated operator console, not a tenant surface
           "apps/web/src/lib/ontology.functions.ts", // stats.model: engine (may be a non-vendor label)
           "apps/web/src/lib/ai-settings.functions.ts", // BYO-key settings page (invariant carve-out)
           "apps/web/src/lib/matching.functions.ts", // echoes the org's own BYO config model (carve-out rationale)
           "apps/web/src/lib/screening.functions.ts", // the screening domain's own engine labels, not vendor models
-          "apps/web/src/lib/verification.functions.ts", // FINDING: returns result.model (vendor leak candidate)
-          "apps/web/src/lib/assessment.functions.ts", // FINDING: returns result.model (vendor leak candidate)
+          "apps/web/src/lib/verification.functions.ts", // DB column write, not returned (verified false positive)
+          "apps/web/src/lib/assessment.functions.ts", // DB column write, not returned (verified false positive)
         ];
         if (baseline.includes(rel)) continue;
         for (const m of text.matchAll(re))
