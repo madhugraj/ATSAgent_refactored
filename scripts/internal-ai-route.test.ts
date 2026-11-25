@@ -23,6 +23,7 @@ import {
 
 const realGateway = await import("../apps/web/src/lib/ai-gateway.server");
 const realCrypto = await import("../apps/web/src/server/crypto");
+const { currentService } = await import("@ats/ai/server");
 const { internalIngressAllowed } = await import("../apps/web/src/server/internal-ai.server");
 
 type GatewayResult = Record<string, unknown>;
@@ -36,11 +37,13 @@ let gatewayReply: (args: AiJsonArgs) => GatewayResult = () => ({
   provider: "openai",
 });
 const aiJsonCalls: AiJsonArgs[] = [];
+const scopeSeen: (string | undefined)[] = [];
 
 mock.module("../apps/web/src/lib/ai-gateway.server", () => ({
   ...realGateway,
   aiJson: async (args: AiJsonArgs) => {
     aiJsonCalls.push(args);
+    scopeSeen.push(currentService());
     return gatewayReply(args);
   },
 }));
@@ -177,7 +180,9 @@ describe("service-token auth", () => {
   test("a token stored through encryptSecret authenticates; a look-alike does not", async () => {
     const stored = realCrypto.encryptSecret("svc_stored-token-abcdef0123456789");
     expect(stored).toMatch(/^enc:v1\./); // never plaintext at rest
-    setRows(serviceTokens, [{ tokenEncrypted: stored, allowed: ["candidate_score"] }]);
+    setRows(serviceTokens, [
+      { tokenEncrypted: stored, allowed: ["candidate_score"], service: "stored-svc" },
+    ]);
     try {
       const ok = await post(VALID, { authorization: "Bearer svc_stored-token-abcdef0123456789" });
       expect(ok.status).toBe(200);
@@ -404,6 +409,9 @@ describe("gateway passthrough", () => {
     expect(text).not.toMatch(/openai|anthropic|google|gpt|claude|gemini/i);
     expect("model" in body).toBe(false);
     expect("provider" in body).toBe(false);
+    // The authenticated token's service reached the gateway scope (the ledger
+    // half of this assertion lives in packages/ai/test/ai-usage.test.ts).
+    expect(scopeSeen.at(-1)).toBe("env-bootstrap"); // the passthrough test auths with the env bootstrap token
   });
 
   test("vendor names nested inside data are stripped too", async () => {

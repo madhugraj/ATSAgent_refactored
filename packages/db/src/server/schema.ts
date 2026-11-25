@@ -1554,6 +1554,9 @@ export const aiUsageEvents = pgTable(
     requisitionId: uuid("requisition_id"),
     applicationId: uuid("application_id"),
     candidateId: uuid("candidate_id"),
+    // Call-site provenance for internal (plan §9) calls: which service made
+    // the request. Null for in-app calls. Set via the gateway's service scope.
+    metadata: jsonb("metadata"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
