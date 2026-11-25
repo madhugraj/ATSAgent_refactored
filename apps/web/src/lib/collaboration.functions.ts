@@ -1,4 +1,6 @@
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
+
+import { findExistingApplicationForPair } from "./collaboration.server";
 import { and, desc, eq, ilike, inArray, isNotNull, or } from "drizzle-orm";
 import { z } from "zod";
 
@@ -256,16 +258,11 @@ export const respondReferral = createServerFn({ method: "POST" })
       });
 
       if (ref.requisitionId) {
-        const [existing] = await db
-          .select({ id: applications.id })
-          .from(applications)
-          .where(
-            and(
-              eq(applications.candidateId, ref.candidateId),
-              eq(applications.requisitionId, ref.requisitionId),
-            ),
-          )
-          .limit(1);
+        const [existing] = await findExistingApplicationForPair(
+          ref.orgId!,
+          ref.candidateId,
+          ref.requisitionId,
+        );
         if (!existing)
           await db.insert(applications).values({
             orgId: ref.orgId,
