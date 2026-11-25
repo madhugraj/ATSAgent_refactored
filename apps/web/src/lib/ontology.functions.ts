@@ -264,7 +264,7 @@ export const rebuildTalentBrain = createServerFn({ method: "POST" })
     });
 
     // AI pass: canonical categories, merged aliases and an executive narrative.
-    let engine: string | null = null;
+
     let narrative: string | null = null;
     try {
       const { aiJson } = await import("./ai-gateway.server");
@@ -295,7 +295,6 @@ export const rebuildTalentBrain = createServerFn({ method: "POST" })
         }),
       });
       if (res.ok) {
-        engine = `${res.provider}/${res.model}`;
         narrative = res.data.narrative?.trim() || null;
         const aiCategories: Record<string, { category?: string; aliases?: string[] }> = {
           ...src.curated,
@@ -394,7 +393,6 @@ export const rebuildTalentBrain = createServerFn({ method: "POST" })
       dormant: build.diff.dormant.slice(0, 200),
       retired: [...new Set([...build.diff.retired, ...gone])].slice(0, 200),
       stats: build.stats,
-      model: engine,
     });
 
     const snaps = await db

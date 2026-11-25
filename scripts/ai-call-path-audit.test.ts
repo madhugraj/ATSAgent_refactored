@@ -102,15 +102,15 @@ describe("ai call-path audit", () => {
         // BASELINE (pre-existing vendor-leak candidates, product decision pending — phase-3
         // handoff findings; any NEW site fails this audit):
         const baseline = [
-          "apps/web/src/lib/salary-benchmark.functions.ts", // returns result.model to the client
-          "apps/web/src/lib/onboarding.functions.ts", // returns read.model to the client
+          "apps/web/src/lib/salary-benchmark.functions.ts", // verified false positive (phase-3 review): persisted column, not returned
+          "apps/web/src/lib/onboarding.functions.ts", // verified false positive (phase-3 review): persisted column, not returned
           "apps/web/src/lib/platform-ai-usage.functions.ts", // usage rows' model on the admin page
           "apps/web/src/lib/ontology.functions.ts", // stats.model: engine (may be a non-vendor label)
           "apps/web/src/lib/ai-settings.functions.ts", // BYO-key settings page (invariant carve-out)
           "apps/web/src/lib/matching.functions.ts", // echoes the org's own BYO config model (carve-out rationale)
           "apps/web/src/lib/screening.functions.ts", // the screening domain's own engine labels, not vendor models
-          "apps/web/src/lib/verification.functions.ts", // FINDING: returns result.model (vendor leak candidate)
-          "apps/web/src/lib/assessment.functions.ts", // FINDING: returns result.model (vendor leak candidate)
+          "apps/web/src/lib/verification.functions.ts", // verified false positive (phase-3 review): persisted column, not returned
+          "apps/web/src/lib/assessment.functions.ts", // verified false positive (phase-3 review): persisted column, not returned
         ];
         if (baseline.includes(rel)) continue;
         for (const m of text.matchAll(re))
