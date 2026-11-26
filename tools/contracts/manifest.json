@@ -16,5 +16,11 @@
     "service": "_template",
     "module": "apps/web/src/lib/ai-callback.contract.ts",
     "export": "AiCallbackOk"
+  },
+  {
+    "id": "ParserShadowResponse",
+    "service": "parser",
+    "module": "apps/web/src/lib/parser-shadow.contract.ts",
+    "export": "ParserShadowResponse"
   }
 ]

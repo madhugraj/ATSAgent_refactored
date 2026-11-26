@@ -108,7 +108,7 @@ export const RULES = [
   ],
   [
     "desk",
-    /^src\/server\/(desk|copilot\/|hiring-sla)|^src\/server\/desk\.server\.ts|^src\/lib\/(hiring-desk|desk-view|copilot|user-manual|onboarding\.catalogue|manual-export|org-desk|hiring-oversight|demand-outlook|pool-coverage)/,
+    /^src\/server\/(desk|copilot\/|hiring-sla)|^src\/server\/desk\.server\.ts|^src\/lib\/(hiring-desk|desk-view|copilot|user-manual|manual-export|org-desk|hiring-oversight|demand-outlook|pool-coverage)/,
   ],
   ["voice", /^src\/server\/voice\/|^src\/lib\/(screening-calls|phone-screening|call-reviews)/],
   ["analytics", /^src\/lib\/(roi|ontology\.|career|hr-performance|bias-report|reports)/],
