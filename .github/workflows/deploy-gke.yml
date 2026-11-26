@@ -9,11 +9,8 @@
 # packages/db, and the manifests live at apps/web/infra/gke/.
 name: Deploy (GKE)
 
+# Manual runs only (reviewer: no automatic deploys from CI in the monorepo).
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -119,7 +116,7 @@ jobs:
           # (35-parser-shadow.yaml + services/parser). The app gets
           # PARSER_SHADOW_URL pointing at the cluster-internal service; the TS
           # result stays the served one.
-          if kubectl -n "$NS" get secret scouts-parser >/dev/null 2>&1; then
+          if [ "${{ vars.PARSER_SHADOW_ENABLED }}" = "true" ] && kubectl -n "$NS" get secret scouts-parser >/dev/null 2>&1; then
             SHADOW_IMAGE="$REGION-docker.pkg.dev/$PROJECT/${{ vars.GAR_REPOSITORY }}/scouts-parser-shadow:$TAG"
             gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
             docker buildx build -f services/parser/Dockerfile --sbom=true               --provenance=mode=max --push -t "$SHADOW_IMAGE" services/parser

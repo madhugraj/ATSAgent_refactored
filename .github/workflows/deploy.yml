@@ -10,9 +10,9 @@
 # is "true".
 name: Deploy
 
+# Manual runs only (reviewer: no push-triggered deploys in the monorepo).
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: deploy-${{ github.ref }}
