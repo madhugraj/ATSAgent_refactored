@@ -22,7 +22,7 @@ import {
   fetchLinkedinSignal,
   fetchWritingSignal,
   type SocialSignal,
-} from "@ats/candidates/server";
+} from "./social.server";
 
 /** NaN can never enter a score: a broken number degrades to 0, never past a gate. */
 const clamp = (n: number) => (Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0);
@@ -537,6 +537,50 @@ export async function scoreCandidate(opts: {
     riskFlags.push(`${b} — held at ai_screened; a person decides before any advance`);
   if (opts.includeSocial && !signals.some((s) => s.status === "ok"))
     riskFlags.push("No verifiable public profile signal — social score defaulted to 0");
+
+  // Phase 9b shadow (refactor plan): the Python matching-ml service sees the
+  // derived features dict — the AI extraction rides in as input, no AI keys
+  // and no CV text leave the TS side — and the per-score diff is logged. The
+  // TS result is always the served one; fire-and-forget.
+  const { shadowMatchCompare } = await import("../server/matching/shadow");
+  void shadowMatchCompare(
+    {
+      orgId: opts.orgId ?? null,
+      now: new Date().toISOString(),
+      jd: { experienceMin: jd.experienceMin, experienceMax: jd.experienceMax },
+      candidate: { experienceYears: candidate.experienceYears },
+      weights,
+      customDimensions,
+      socialScore: social.score,
+      ai: {
+        skillsScore: skills,
+        educationScore: education,
+        employmentHistory: (ai.data.employment_history ?? []).map((h) => ({
+          company: h.company ?? "",
+          title: h.title ?? "",
+          start: h.start ?? "",
+          end: h.end ?? "",
+        })),
+        skillRecencyYears: ai.data.skill_recency_years ?? undefined,
+        impactScore: impact,
+        innovationScore: innovation,
+        additionalScores: (ai.data.additional_scores ?? []).map((a) => ({
+          key: a.key,
+          score: a.score,
+          evidence: a.evidence ?? "",
+        })),
+      },
+    },
+    {
+      overall,
+      skills,
+      experience,
+      career: career.score,
+      impactInnovation,
+      education,
+      social: social.score,
+    },
+  ).catch(() => {});
 
   return {
     skills_score: skills,
