@@ -277,8 +277,6 @@ export async function scoreUnscored(opts: {
             // as by: "ai", and never reaches the HR role gate. stageReason is
             // now populated with the auto decision (stage-writers §3 notes the
             // population as the accepted consequence of the switch).
-
-            // Journal the AI transition so the pipeline history stays complete.
             const gatedWhy = !injection
               ? result.experience_fit !== "within"
                 ? " — career level does not match the role, held at ai_screened"
