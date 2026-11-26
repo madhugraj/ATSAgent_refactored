@@ -1,0 +1,21 @@
+# Nightly base backup of atsiq-db into gs://atsiq/cnpg (barman format).
+# Apply ONLY after step 3 of the README (WAL archiving confirmed running).
+# The nightly base backup + archived WAL gives point-in-time recovery across
+# the whole retention window (30d) — the §5C posture of prod-catch-up.md.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: atsiq-db-nightly
+  namespace: atsiq
+  labels: { purpose: production-database-backup }
+spec:
+  # 03:00 UTC = 08:30 IST — after the previous evening's activity, well clear
+  # of the 07:00–11:00 IST release window.
+  schedule: "0 03 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: atsiq-db
+  # Take the first backup as soon as this is applied, so protection does not
+  # wait for the first night.
+  immediate: true
+  retentionPolicy: "30d"
