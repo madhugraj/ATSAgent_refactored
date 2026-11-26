@@ -769,24 +769,21 @@ export const persistMatchResult = createServerFn({ method: "POST" })
     }
 
     if (data.autoShortlist && application.stage === "applied" && recommendation === "select") {
-      // Same shape as autoscore: write the stage, then journal the transition
-      // (which also emails the candidate and enqueues background screening-kit
-      // preparation). This path previously skipped the stage_events audit row.
-      const now = new Date();
-      await db
-        .update(applications)
-        .set({ stage: "shortlisted", lastActivityAt: now })
-        .where(and(eq(applications.id, application.id), eq(applications.orgId, context.orgId)));
-      const { recordStageTransition } = await import("./stage-events.server");
-      await recordStageTransition({
-        orgId: context.orgId,
-        applicationId: application.id,
-        fromStage: application.stage,
-        toStage: "shortlisted",
-        actor: "ai",
-        reason: `Auto-shortlisted by matching score ${s.overallScore}/100`,
-        source: "ai",
-      });
+      // Same shape as autoscore: the pipeline core owns the stage write +
+      // journal (which also emails the candidate and enqueues background
+      // screening-kit preparation). This path previously skipped the
+      // stage_events audit row. stageReason is now populated with the auto
+      // decision (the accepted consequence noted in stage-writers §3).
+      const { moveStageCore } = await import("./pipeline.server");
+      await moveStageCore(
+        { orgId: context.orgId, userId: null, memberEmail: "ai" },
+        {
+          applicationId: application.id,
+          toStage: "shortlisted",
+          reason: `Auto-shortlisted by matching score ${s.overallScore}/100`,
+          source: "ai",
+        },
+      );
     }
 
     return { ok: true as const };

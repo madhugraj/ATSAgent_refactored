@@ -556,7 +556,6 @@ const MIN_STAGE_SCAN_FILES = 300;
 const KNOWN_STAGE_WRITERS = [
   "pipeline.server.ts",
   "stage-events.server.ts",
-  "matching.functions.ts",
   "interviews.functions.ts",
   "lifecycle.functions.ts",
   // Test fixture (a disposable application row), moved with @ats/ai in Phase 3
