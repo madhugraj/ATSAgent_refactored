@@ -1,0 +1,64 @@
+# Production database protection — the `atsiq-db` CNPG Cluster with backups
+# to gs://atsiq, WAL archiving, and a second instance.
+#
+# ⚠️ PLAN + MANIFESTS ONLY (product owner approved the design, not the apply).
+# prod-catch-up.md §5C. Applying needs the product owner's explicit OK and
+# follows apps/web/infra/cnpg/README.md — in particular: the backup section
+# is applied as a MERGE PATCH on the live cluster (never a full apply, whose
+# bootstrap section could re-initialise), and the second instance is added
+# only after WAL archiving is confirmed running.
+#
+# Ordering (README has the full runbook):
+#   0. product owner OK + bucket access for the CNPG service account
+#   1. create the GCS credential secret (see README §1)
+#   2. patch spec.backup (WAL archiving starts immediately)        — README §2
+#   3. verify WAL files land in gs://atsiq/cnpg/wals               — README §3
+#   4. patch spec.instances: 1 → 2 (CNPG clones the replica)       — README §4
+#   5. apply 20-scheduled-backup.yaml (nightly base backup)        — README §5
+#
+# This file documents the TARGET spec of the live cluster. Fields not shown
+# here (nodeName, resources, postgresql parameters, certificates) are already
+# set on the live cluster and are left untouched by the merge patches.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: atsiq-db
+  namespace: atsiq
+  labels: { purpose: production-database }
+spec:
+  # Two instances: primary + hot standby. CNPG clones the replica from the
+  # primary when this count goes 1 → 2 (README §4). Recovery from the backup
+  # store is exercised separately (§6 rehearsal of prod-catch-up.md).
+  instances: 2
+
+  # Switchover on primary spec changes is supervised: CNPG waits for the
+  # operator rather than restarting the primary in place.
+  primaryUpdateStrategy: supervised
+
+  storage:
+    size: 10Gi
+    storageClass: standard-rwo
+
+  backup:
+    # Barman object store on the existing restricted bucket. WAL archiving is
+    # implied by the barmanObjectStore presence: once applied, every WAL
+    # segment ships to gs://atsiq/cnpg/wals as it fills.
+    barmanObjectStore:
+      destinationPath: "gs://atsiq/cnpg"
+      googleCredentials:
+        # Least-privilege: a dedicated GCS credential in a Secret, not the
+        # node identity (README §1 creates it with objectAdmin on gs://atsiq
+        # only).
+        secret:
+          name: atsiq-db-backup-gcs
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+      # Server-side encryption comes from the bucket default; retention stays
+      # UNLOCKED on purpose — candidate erasure (plan rule 7) must remain able
+      # to delete objects (see prod-catch-up.md §5 erasure-vs-retention note).
+    retentionPolicy: "30d"
+
+  # No bootstrap section: the cluster already exists. This manifest is the
+  # reference for the merge patches in the README, not a create/apply file.
