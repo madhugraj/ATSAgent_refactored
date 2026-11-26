@@ -272,10 +272,12 @@ export async function scoreUnscored(opts: {
             // decides the stage.
             const held = injection || result.recommendation !== "select";
             const nextStage = held ? "ai_screened" : "shortlisted";
-            await db
-              .update(applications)
-              .set({ stage: nextStage, lastActivityAt: now })
-              .where(eq(applications.id, app.id));
+            // The pipeline core owns the stage write + journal (stage-writers
+            // §3): source "ai" journals actor "ai", rides into outcome capture
+            // as by: "ai", and never reaches the HR role gate. stageReason is
+            // now populated with the auto decision (stage-writers §3 notes the
+            // population as the accepted consequence of the switch).
+
             // Journal the AI transition so the pipeline history stays complete.
             const gatedWhy = !injection
               ? result.experience_fit !== "within"
@@ -296,15 +298,21 @@ export async function scoreUnscored(opts: {
               : injection
                 ? " — prompt-injection flag held at ai_screened"
                 : "";
-            await recordStageTransition({
-              orgId: opts.orgId,
-              applicationId: app.id,
-              fromStage: app.stage,
-              toStage: nextStage,
-              actor: AUTO_STAGE_ACTOR,
-              reason: `Auto-${nextStage === "shortlisted" ? "shortlisted" : "screened"} by matching score ${result.overall_score}/100${gatedWhy}`,
-              source: "ai",
-            });
+            // The pipeline core owns the stage write + journal (stage-writers
+            // §3): source "ai" journals actor "ai", rides into outcome capture
+            // as by: "ai", and never reaches the HR role gate. stageReason is
+            // now populated with the auto decision (stage-writers §3 notes the
+            // population as the accepted consequence of the switch).
+            const { moveStageCore } = await import("./pipeline.server");
+            await moveStageCore(
+              { orgId: opts.orgId, userId: "autoscore", memberEmail: AUTO_STAGE_ACTOR },
+              {
+                applicationId: app.id,
+                toStage: nextStage as never,
+                reason: `Auto-${nextStage === "shortlisted" ? "shortlisted" : "screened"} by matching score ${result.overall_score}/100${gatedWhy}`,
+                source: "ai",
+              },
+            );
           }
 
           ok += 1;
