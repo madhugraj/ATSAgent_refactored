@@ -32,8 +32,15 @@ export const HR_CONTROLLED_TARGETS = new Set<string>([
 
 const actorLabel = (a: LifecycleActor) => (a.via ? `${a.memberEmail} (via agent)` : a.memberEmail);
 
+/**
+ * The AI caller's principal (autoscore/matching cores): no member session —
+ * `userId` is deliberately null and is never persisted (assertRole and the
+ * journal's user attribution are skipped on this path — stage-writers §3).
+ */
+export type AiMoveActor = { orgId: string; userId: null; memberEmail: string };
+
 export async function moveStageCore(
-  actor: LifecycleActor,
+  actor: LifecycleActor | AiMoveActor,
   input: {
     applicationId: string;
     toStage: Stage;
@@ -86,6 +93,9 @@ export async function moveStageCore(
   // The AI path (autoscore/matching cores) never reaches assertRole — the
   // calling code is server-side and the org's own AI settings gate it (§3).
   if (input.source !== "ai" && HR_CONTROLLED_TARGETS.has(input.toStage)) {
+    if (!("userId" in actor) || actor.userId === null) {
+      throw new Error("A member move into an offer or hiring stage requires a member session.");
+    }
     await assertRole(
       actor.userId,
       actor.orgId,
@@ -109,7 +119,7 @@ export async function moveStageCore(
     applicationId: app.id,
     fromStage: from,
     toStage: input.toStage,
-    actor: ai ? "ai" : actorLabel(actor),
+    actor: ai ? "ai" : actorLabel(actor as LifecycleActor),
     source: ai ? "ai" : undefined,
     reason: skipNote ?? (input.reason?.trim() || null),
     note: input.note?.trim() || null,

@@ -531,10 +531,10 @@ describe("recordStageTransition", () => {
  * Confirmed against the codebase at Phase 0 (branch point 39ce992):
  *  - pipeline.server.ts       moveStageCore / recordOfferStageCore updates
  *  - stage-events.server.ts   the stage_events trail (brief-listed, not the column itself)
- *  - autoscore.server.ts      auto-advance after scoring
+ *  - (autoscore.server.ts: switched onto moveStageCore with source "ai" — removed)
  *  - matching.functions.ts    shortlist writer
  *  - interviews.functions.ts  round-scheduled and AI-screen-completion writers
- *  - offer-response.server.ts offer accept/decline writer
+ *  - (offer-response.server.ts: switched onto recordOfferStageCore — removed)
  *  - lifecycle.functions.ts   bulk stage move (found by this grep)
  */
 /**
@@ -556,10 +556,8 @@ const MIN_STAGE_SCAN_FILES = 300;
 const KNOWN_STAGE_WRITERS = [
   "pipeline.server.ts",
   "stage-events.server.ts",
-  "autoscore.server.ts",
   "matching.functions.ts",
   "interviews.functions.ts",
-  "offer-response.server.ts",
   "lifecycle.functions.ts",
   // Test fixture (a disposable application row), moved with @ats/ai in Phase 3
   // from scripts/training-data.test.ts — scripts/ is not a scan root, so it
