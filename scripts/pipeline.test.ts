@@ -535,7 +535,7 @@ describe("recordStageTransition", () => {
  *  - matching.functions.ts    shortlist writer
  *  - interviews.functions.ts  round-scheduled and AI-screen-completion writers
  *  - (offer-response.server.ts: switched onto recordOfferStageCore — removed)
- *  - lifecycle.functions.ts   bulk stage move (found by this grep)
+ *  - (lifecycle.functions.ts: bulk moveStages switched onto moveStagesCore — removed)
  */
 /**
  * Directories the guard scans, relative to the repo root. The refactor moves
@@ -558,7 +558,6 @@ const KNOWN_STAGE_WRITERS = [
   "stage-events.server.ts",
   "matching.functions.ts",
   "interviews.functions.ts",
-  "lifecycle.functions.ts",
   // Test fixture (a disposable application row), moved with @ats/ai in Phase 3
   // from scripts/training-data.test.ts — scripts/ is not a scan root, so it
   // only appears here now that it lives under packages/.
