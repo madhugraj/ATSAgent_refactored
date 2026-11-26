@@ -534,7 +534,7 @@ describe("recordStageTransition", () => {
  *  - autoscore.server.ts      auto-advance after scoring
  *  - matching.functions.ts    shortlist writer
  *  - interviews.functions.ts  round-scheduled and AI-screen-completion writers
- *  - offer-response.server.ts offer accept/decline writer
+ *  - (offer-response.server.ts: switched onto recordOfferStageCore — removed)
  *  - lifecycle.functions.ts   bulk stage move (found by this grep)
  */
 /**
@@ -559,7 +559,6 @@ const KNOWN_STAGE_WRITERS = [
   "autoscore.server.ts",
   "matching.functions.ts",
   "interviews.functions.ts",
-  "offer-response.server.ts",
   "lifecycle.functions.ts",
   // Test fixture (a disposable application row), moved with @ats/ai in Phase 3
   // from scripts/training-data.test.ts — scripts/ is not a scan root, so it
