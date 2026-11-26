@@ -3,7 +3,7 @@
  * automatic careers-inbox import: parse a CV, upsert the talent-pool record by
  * email, and raise the application against a requisition.
  */
-import { poolUseFor } from "@ats/std/shared";
+import { poolUseFor, sourceLabel } from "@ats/std/shared";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { createHash } from "crypto";
 import { z } from "zod";
@@ -315,23 +315,44 @@ async function ingestCandidateInner(input: {
 
   const result = await db.transaction(
     async (tx): Promise<{ candidateId: string; alreadyApplied: boolean; merged: boolean }> => {
-      let existing: { id: string; skills: string[] | null } | undefined;
+      let existing:
+        | {
+            id: string;
+            skills: string[] | null;
+            poolUse: "pool" | "role_only";
+            poolUseSource: string | null;
+          }
+        | undefined;
       if (row.linkedinUrl) {
         [existing] = await tx
-          .select({ id: candidates.id, skills: candidates.skills })
+          .select({
+            id: candidates.id,
+            skills: candidates.skills,
+            poolUse: candidates.poolUse,
+            poolUseSource: candidates.poolUseSource,
+          })
           .from(candidates)
           .where(and(orgScope, eq(candidates.linkedinUrl, row.linkedinUrl)))
           .limit(1);
       }
       if (!existing) {
         [existing] = await tx
-          .select({ id: candidates.id, skills: candidates.skills })
+          .select({
+            id: candidates.id,
+            skills: candidates.skills,
+            poolUse: candidates.poolUse,
+            poolUseSource: candidates.poolUseSource,
+          })
           .from(candidates)
           .where(and(orgScope, eq(candidates.email, email)))
           .limit(1);
       }
 
       let candidateId: string;
+      // The data-use rule the record lives under after this arrival (the
+      // originating-role assertion below reads it): an existing record keeps
+      // its own rule, a fresh record takes the portal's.
+      let recordRule: { poolUse: "pool" | "role_only"; poolUseSource: string | null };
       if (existing) {
         const skills = new Set(
           [...(existing.skills ?? []), ...row.skills].map((s) => s.trim()).filter(Boolean),
@@ -356,10 +377,12 @@ async function ingestCandidateInner(input: {
           .set({ ...refresh, skills: [...skills] })
           .where(eq(candidates.id, existing.id));
         candidateId = existing.id;
+        recordRule = { poolUse: existing.poolUse, poolUseSource: existing.poolUseSource };
       } else {
         // A CV a portal handed over may be limited to its role by the portal's
         // terms (src/lib/job-channels.ts); an existing record keeps its own rule.
         const poolUse = poolUseFor(input.source);
+        recordRule = { poolUse, poolUseSource: poolUse === "role_only" ? input.source : null };
         const [created] = await tx
           .insert(candidates)
           .values({
@@ -386,6 +409,29 @@ async function ingestCandidateInner(input: {
           .limit(1);
         alreadyApplied = Boolean(app);
         if (!app) {
+          // Originating-role assertion (Dev 1 ruling, stage-writers.md §9):
+          // this attach bypasses the reuse-terms guard the pipeline core
+          // (addApplicationsCore / assertReusable) applies, so it may file a
+          // role_only CV only where the requisition IS the CV's originating
+          // role — asserted here, not assumed. Provable in exactly two ways:
+          //  - the record was created by THIS call, from the CV this capture
+          //    handed over: its poolUseSource is this arrival's own source, so
+          //    input.requisitionId is the originating role by construction;
+          //  - an existing record's originating role is recorded nowhere (only
+          //    its limiting portal is, in pool_use_source), so the only new
+          //    role that can be proven is one the SAME portal handed the CV
+          //    over for again — this arrival's source is that portal.
+          // Any other arrival would reuse a role-limited CV for a new role and
+          // is refused, exactly as attachApplication and addApplicationsCore
+          // refuse. Nothing is written (the whole ingest transaction rolls
+          // back), and the HR-visible channel surfaces the terms message.
+          const samePortalArrival =
+            recordRule.poolUseSource !== null && input.source === recordRule.poolUseSource;
+          if (recordRule.poolUse === "role_only" && !samePortalArrival) {
+            throw new Error(
+              `${row.fullName} came from ${recordRule.poolUseSource ? sourceLabel(recordRule.poolUseSource) : "a portal"}, whose terms limit the CV to the role it was for — it cannot be filed against another role.`,
+            );
+          }
           await tx.insert(applications).values({
             candidateId,
             requisitionId: input.requisitionId,
