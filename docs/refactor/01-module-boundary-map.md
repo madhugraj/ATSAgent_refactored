@@ -14,15 +14,15 @@ is backed by a file there.
 
 ## 1. Facts about the current code
 
-| Item             | Value                                                                                                                                                                                  |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Stack            | TanStack Start 1.169.4 / Router 1.170, Vite 8 (rolldown), Nitro `node-server`, Drizzle 0.45 + Postgres, Bun tests                                                                      |
-| Size             | `src` 510 files ≈ 144k lines; `scripts` 93 files ≈ 38k; schema 3.7k lines, **102 tables**, 74 migrations                                                                               |
-| Server functions | 72 files, all named `*.functions.ts` (`createServerFn`)                                                                                                                                |
-| HTTP routes      | 24 under `src/routes/api/**` (8 auth, 7 cron, 9 webhook/OAuth/feed/extension) + `/metrics`                                                                                             |
-| Runtimes         | ① web server (SSR + server fns + API routes), ② **voice worker** (SIP/RTP over UDP, GKE), ③ **parser worker** (sandboxed CV parsing, Cloud Run), plus the browser extension (plain JS) |
-| Path aliases     | `@/*` → `src/*`, `@db/*` → `drizzle/*`                                                                                                                                                 |
-| Python           | `ai_interviewer/` is a **gitignored proof of concept**, not used in production                                                                                                         |
+| Item             | Value                                                                                                                                                                                                      |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stack            | TanStack Start 1.169.4 / Router 1.170, Vite 8 (rolldown), Nitro `node-server`, Drizzle 0.45 + Postgres, Bun tests                                                                                          |
+| Size             | `src` 510 files ≈ 144k lines; `scripts` 93 files ≈ 38k; schema 3.7k lines, **102 tables**, 74 migrations                                                                                                   |
+| Server functions | 72 files, all named `*.functions.ts` (`createServerFn`)                                                                                                                                                    |
+| HTTP routes      | 24 under `src/routes/api/**` (8 auth, 7 cron, 9 webhook/OAuth/feed/extension) + `/metrics`                                                                                                                 |
+| Runtimes         | ① web server (SSR + server fns + API routes), ② **voice worker** (SIP/RTP over UDP, GKE), ③ **parser worker** (sandboxed CV parsing, Cloud Run), plus the browser extension at `apps/extension` (plain JS) |
+| Path aliases     | `@/*` → `src/*`, `@db/*` → `drizzle/*`                                                                                                                                                                     |
+| Python           | `ai_interviewer/` is a **gitignored proof of concept**, not used in production                                                                                                                             |
 
 ### 1.1 Where the code actually lives (by target domain)
 
@@ -91,7 +91,7 @@ ATSAgent_refactored/
 │  ├─ web/               ONLY TanStack Start app: routes, UI, *.functions.ts (thin), routes/api/**, server.ts, start.ts
 │  ├─ voice-worker/      SIP/RTP phone screening worker (from src/server/voice/worker.ts)
 │  ├─ parser-worker/     sandboxed CV parser (from src/server/parser/worker.ts)
-│  └─ extension/         browser extension (unchanged plain JS)
+│  └─ apps/extension/    browser extension (unchanged plain JS)
 ├─ packages/             (all React-free except ui and comms email templates)
 │  ├─ std  config  observability  security  db  storage                     L0
 │  ├─ auth  audit  platform-http  ai  kernel                                L1

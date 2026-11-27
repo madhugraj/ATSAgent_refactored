@@ -39,3 +39,7 @@ services/**/Dockerfile
 services/**/.venv/
 services/**/__pycache__/
 *.sql
+
+# Browser extension — shipped plain JS, unchanged (map §4); a reformat
+# would be a content change to shipped code.
+apps/extension/
