@@ -363,7 +363,7 @@ src/lib/templates.functions.ts,web/server-fn,web
 src/lib/templates.server.ts,org,server
 src/lib/training.functions.ts,web/server-fn,web
 src/lib/user-manual.ts,desk,shared
-src/lib/utils.ts,std,shared
+src/lib/utils.ts,web,web
 src/lib/verification.functions.ts,web/server-fn,web
 src/lib/verification.server.ts,matching,server
 src/lib/vtt.ts,interviews,shared

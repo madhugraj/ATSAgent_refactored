@@ -16,9 +16,7 @@
   "dependencies": {
     "@ats/observability": "workspace:*",
     "@ats/security": "workspace:*",
-    "clsx": "^2.1.1",
     "fflate": "^0.8.3",
-    "pdfjs-dist": "^6.4.299",
-    "tailwind-merge": "^3.7.0"
+    "pdfjs-dist": "^6.4.299"
   }
 }
