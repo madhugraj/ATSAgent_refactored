@@ -16,7 +16,7 @@ export const getRoleHiringManager = createServerFn({ method: "GET" })
   .handler(async ({ data, context }) => {
     const { assertRequisitionInOrg } = await import("../server/guards");
     await assertRequisitionInOrg(data.requisitionId, context.orgId);
-    const { roleHiringManagerOf } = await import("./role-hiring-manager.server");
+    const { roleHiringManagerOf } = await import("@ats/requisitions/server");
     return roleHiringManagerOf(context.orgId, data.requisitionId);
   });
 
@@ -33,7 +33,7 @@ export const setRoleHiringManager = createServerFn({ method: "POST" })
       ["recruiter", "department_head", "hr_head", "president_cbo"],
       "Only the recruiter, the department head, the HR head or the CBO can change the hiring manager.",
     );
-    const { setRoleHiringManagerCore } = await import("./role-hiring-manager.server");
+    const { setRoleHiringManagerCore } = await import("@ats/requisitions/server");
     return setRoleHiringManagerCore(
       context.orgId,
       context.userId,

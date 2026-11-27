@@ -1050,10 +1050,10 @@ export async function scheduleSweeps(opts: { orgId?: string } = {}): Promise<num
   // Google for Jobs follows each role's state; Google is told within the
   // platform's daily quota (src/server/distribution/).
   try {
-    const { reconcileGoogleListings } = await import("../distribution/distribution.server");
+    const { reconcileGoogleListings } = await import("@ats/distribution/server");
     await reconcileGoogleListings(opts.orgId);
     if (!opts.orgId) {
-      const { processIndexQueue } = await import("../distribution/google-indexing.server");
+      const { processIndexQueue } = await import("@ats/distribution/server");
       await processIndexQueue();
     }
   } catch (err) {

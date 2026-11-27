@@ -15,6 +15,8 @@
 // demand-outlook, pool-coverage    -> desk (writers: copilot/data.server, desk)
 // iso/appearance/report-window     -> std (weight-advice -> matching, it
 //                                     imports matching/weight types)
+// src/server/parser/client.ts      -> std (§11 ruling 9: goes with cv-text,
+//                                     not candidates)
 // src/server.ts, start.ts          -> apps/web composition root
 // --------------------------------------------------------------------------
 
@@ -32,7 +34,7 @@ export const RULES = [
   ["config", /^src\/server\/env\.ts$/],
   [
     "std",
-    /^src\/lib\/(utils|money|cost-format|local-time|errors|error-page|public-paths|external-links|iso|appearance|report-window|cv-text\.server|wall-date|zoned-time|job-channels|code-select|product-catalogue)/,
+    /^src\/(lib\/(utils|money|cost-format|local-time|errors|error-page|public-paths|external-links|iso|appearance|report-window|cv-text\.server|wall-date|zoned-time|job-channels|code-select|product-catalogue)|server\/parser\/client\.ts)/,
   ],
   [
     "observability",
@@ -80,7 +82,8 @@ export const RULES = [
   ],
   [
     "candidates",
-    /^src\/server\/(parser|erase\.server)|^src\/lib\/(candidates|intake|cv-|resume|dedupe|capture|collect|collaboration|queries|pool-share|social)/,
+    // parser/client.ts is std (§11 ruling 9); worker/sandbox are the parser-worker app.
+    /^src\/server\/erase\.server|^src\/lib\/(candidates|intake|cv-|resume|dedupe|capture|collect|collaboration|queries|pool-share|social)/,
   ],
   ["pipeline", /^src\/lib\/(lifecycle|pipeline\.server|stage-events|assessment-timeline)/],
   [
@@ -105,7 +108,7 @@ export const RULES = [
   ],
   [
     "desk",
-    /^src\/server\/(desk|copilot\/|hiring-sla)|^src\/server\/desk\.server\.ts|^src\/lib\/(hiring-desk|desk-view|copilot|user-manual|onboarding\.catalogue|manual-export|org-desk|hiring-oversight|demand-outlook|pool-coverage)/,
+    /^src\/server\/(desk|copilot\/|hiring-sla)|^src\/server\/desk\.server\.ts|^src\/lib\/(hiring-desk|desk-view|copilot|user-manual|manual-export|org-desk|hiring-oversight|demand-outlook|pool-coverage)/,
   ],
   ["voice", /^src\/server\/voice\/|^src\/lib\/(screening-calls|phone-screening|call-reviews)/],
   ["analytics", /^src\/lib\/(roi|ontology\.|career|hr-performance|bias-report|reports)/],

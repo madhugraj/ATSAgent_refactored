@@ -32,14 +32,13 @@ const {
   users,
 } = await import("../apps/web/drizzle/schema");
 await import("../apps/web/src/server/agents");
-const channels = await import("../apps/web/src/lib/job-channels");
-const { inboxSource } = await import("../apps/web/src/lib/local-inbox.server");
-const { ingestCandidate } = await import("../apps/web/src/lib/intake.server");
+const channels = await import("@ats/std/shared");
+const { inboxSource } = await import("@ats/candidates/server");
+const { ingestCandidate } = await import("@ats/candidates/server");
 const { addApplicationsCore } = await import("../apps/web/src/lib/pipeline.server");
 const dist = await import("../apps/web/src/server/agents/distribution-agent.server");
 const { getTool } = await import("../apps/web/src/server/agents/registry");
-const { closePostingsForRequisition } =
-  await import("../apps/web/src/server/boards/publish.server");
+const { closePostingsForRequisition } = await import("@ats/distribution/server");
 const { decideToolCall } = await import("../apps/web/src/server/agents/policy");
 
 const stamp = Date.now();
@@ -212,8 +211,74 @@ describe("a role-limited CV is never reused", () => {
     });
   });
 
+  test("the ingest attach files a portal CV only against its originating role", async () => {
+    const a = await role();
+    const b = await role();
+    const email = `ingest-origin-${stamp}@cand.local`;
+    const parsed = { full_name: "Meena", email, skills: ["Go"] } as never;
+
+    // A portal CV captured through role A attaches to role A — its originating
+    // role, proven by construction (the record was created by this very call).
+    const fresh = await ingestCandidate({
+      resumeText: "Meena — Go engineer with eight years of platform work.",
+      fileName: "meena.pdf",
+      requisitionId: a,
+      orgId,
+      source: "naukri",
+      parsed,
+    });
+    const [own] = await db
+      .select({ id: applications.id })
+      .from(applications)
+      .where(
+        and(eq(applications.candidateId, fresh.candidateId), eq(applications.requisitionId, a)),
+      );
+    expect(own).toBeTruthy();
+
+    // The same role-limited CV arriving through a different channel is not
+    // filed against another role — the terms message surfaces instead.
+    await expect(
+      ingestCandidate({
+        resumeText: "Meena — Go engineer with eight years of platform work.",
+        fileName: "meena-again.pdf",
+        requisitionId: b,
+        orgId,
+        source: "careers_inbox",
+        parsed,
+      }),
+    ).rejects.toThrow(/limit the CV to the role it was for/);
+    expect(
+      await db
+        .select({ id: applications.id })
+        .from(applications)
+        .where(
+          and(eq(applications.candidateId, fresh.candidateId), eq(applications.requisitionId, b)),
+        ),
+    ).toHaveLength(0);
+
+    // The same portal handing the CV over again opens the new role: this
+    // arrival is its own originating role, so role B's attach goes through.
+    const again = await ingestCandidate({
+      resumeText: "Meena — Go engineer with eight years of platform work.",
+      fileName: "meena-portal.pdf",
+      requisitionId: b,
+      orgId,
+      source: "naukri",
+      parsed,
+    });
+    expect(again.candidateId).toBe(fresh.candidateId);
+    const [second] = await db
+      .select({ id: applications.id })
+      .from(applications)
+      .where(
+        and(eq(applications.candidateId, fresh.candidateId), eq(applications.requisitionId, b)),
+      );
+    expect(second).toBeTruthy();
+    expect(second!.id).not.toBe(own!.id);
+  });
+
   test("never shown to a partner organisation through a pool share", async () => {
-    const { sharedFrom } = await import("../apps/web/src/lib/pool-share");
+    const { sharedFrom } = await import("@ats/candidates/server");
     const shared = await person("Shared");
     const kept = await person("Kept", limited("internshala", 1));
     const visible = (
@@ -418,7 +483,7 @@ describe("the daily check", () => {
 
 describe("hand postings planned by the agent, posted in the person's browser", () => {
   test("planning, the extension's queue, recording only from the portal, withdrawal on close", async () => {
-    const dist2 = await import("../apps/web/src/server/distribution/distribution.server");
+    const dist2 = await import("@ats/distribution/server");
     const r = await role("approved", { responsibilities: "Run it. Mail jobs@acme.example." });
     const actorA = { memberEmail: "agent:distribution", userId };
     // Live postings are left alone.

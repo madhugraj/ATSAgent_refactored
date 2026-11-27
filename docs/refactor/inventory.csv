@@ -170,7 +170,7 @@ src/lib/copilot-scope.ts,desk,shared
 src/lib/copilot.functions.ts,web/server-fn,web
 src/lib/cost-format.ts,std,shared
 src/lib/cv-extract.ts,candidates,shared
-src/lib/cv-intake.ts,candidates,shared
+src/lib/cv-intake.ts,web/client,web
 src/lib/cv-text.server.ts,std,server
 src/lib/data.ts,web/client,shared
 src/lib/database.types.ts,db,shared
@@ -325,7 +325,7 @@ src/lib/platform-ai-usage.functions.ts,web/server-fn,web
 src/lib/platform-health.functions.ts,web/server-fn,web
 src/lib/platform.functions.ts,web/server-fn,web
 src/lib/pool-coverage.ts,desk,shared
-src/lib/pool-share.ts,candidates,shared
+src/lib/pool-share.server.ts (renamed from pool-share.ts),candidates,server
 src/lib/product-catalogue.ts,std,shared
 src/lib/prompt-echo.ts,ai,shared
 src/lib/public-paths.ts,std,shared

@@ -1,6 +1,2 @@
-import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
-
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+// SHIM: remove in Phase 8 — moved verbatim to @ats/std/shared
+export * from "@ats/std/shared";

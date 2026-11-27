@@ -37,7 +37,7 @@ export const advanceRequisition = createServerFn({ method: "POST" })
       .parse(data),
   )
   .handler(async ({ data, context }) => {
-    const { advanceRequisitionCore } = await import("./requisitions.server");
+    const { advanceRequisitionCore } = await import("@ats/requisitions/server");
     await advanceRequisitionCore(
       { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
       { id: data.id, status: data.status, comment: data.comment ?? null },
@@ -115,7 +115,7 @@ export const setRequisitionIjp = createServerFn({ method: "POST" })
     z.object({ id: z.string().uuid(), enabled: z.boolean() }).parse(data),
   )
   .handler(async ({ data, context }) => {
-    const { setRequisitionIjpCore } = await import("./requisitions.server");
+    const { setRequisitionIjpCore } = await import("@ats/requisitions/server");
     await setRequisitionIjpCore(
       { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
       data.id,
@@ -168,7 +168,7 @@ export const saveRequisitionWeights = createServerFn({ method: "POST" })
       .parse(data),
   )
   .handler(async ({ data, context }) => {
-    const { saveRequisitionWeightsCore } = await import("./requisitions.server");
+    const { saveRequisitionWeightsCore } = await import("@ats/requisitions/server");
     const out = await saveRequisitionWeightsCore(
       { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
       data.id,
@@ -193,7 +193,7 @@ export const updateRequisitionCompensation = createServerFn({ method: "POST" })
       .parse(data),
   )
   .handler(async ({ data, context }) => {
-    const { updateRequisitionCompensationCore } = await import("./requisitions.server");
+    const { updateRequisitionCompensationCore } = await import("@ats/requisitions/server");
     await updateRequisitionCompensationCore(
       { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
       {
@@ -239,7 +239,7 @@ export const saveJobDescription = createServerFn({ method: "POST" })
       .parse(data),
   )
   .handler(async ({ data, context }) => {
-    const { saveJobDescriptionCore } = await import("./requisitions.server");
+    const { saveJobDescriptionCore } = await import("@ats/requisitions/server");
     await saveJobDescriptionCore(
       { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
       {
@@ -259,7 +259,7 @@ export const approveJobDescription = createServerFn({ method: "POST" })
     z.object({ id: z.string().uuid(), fullText: z.string().nullish() }).parse(data),
   )
   .handler(async ({ data, context }) => {
-    const { approveJobDescriptionCore } = await import("./requisitions.server");
+    const { approveJobDescriptionCore } = await import("@ats/requisitions/server");
     await approveJobDescriptionCore(
       { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
       { id: data.id, fullText: data.fullText ?? null },
@@ -274,7 +274,7 @@ export const requestJdChanges = createServerFn({ method: "POST" })
     z.object({ id: z.string().uuid(), comment: z.string().min(1).max(4000) }).parse(data),
   )
   .handler(async ({ data, context }) => {
-    const { requestJdChangesCore } = await import("./requisitions.server");
+    const { requestJdChangesCore } = await import("@ats/requisitions/server");
     await requestJdChangesCore(
       { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
       { id: data.id, comment: data.comment },
@@ -380,7 +380,7 @@ export const createRequisition = createServerFn({ method: "POST" })
       .parse(data),
   )
   .handler(async ({ data, context }) => {
-    const { createRequisitionCore } = await import("./requisitions.server");
+    const { createRequisitionCore } = await import("@ats/requisitions/server");
     const num = (v: string) => Number(v) || 0;
     const { code } = await createRequisitionCore(
       { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
@@ -618,7 +618,7 @@ export const editRequisitionInApproval = createServerFn({ method: "POST" })
       .parse(data),
   )
   .handler(async ({ data, context }) => {
-    const { editRequisitionInApprovalCore } = await import("./requisitions.server");
+    const { editRequisitionInApprovalCore } = await import("@ats/requisitions/server");
     const { id, ...patch } = data;
     return editRequisitionInApprovalCore(
       { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
@@ -640,7 +640,7 @@ export const sendBackRequisition = createServerFn({ method: "POST" })
       .parse(data),
   )
   .handler(async ({ data, context }) => {
-    const { sendBackRequisitionCore } = await import("./requisitions.server");
+    const { sendBackRequisitionCore } = await import("@ats/requisitions/server");
     await sendBackRequisitionCore(
       { orgId: context.orgId, userId: context.userId, memberEmail: context.memberEmail },
       data,

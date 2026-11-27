@@ -159,17 +159,14 @@ export async function respondToOffer(
 
   const stage = STAGE_FOR[answer.action];
   if (stage) {
-    await db
-      .update(applications)
-      .set({ stage: stage as never, stageReason: reason, lastActivityAt: now })
-      .where(eq(applications.id, o.offer.applicationId));
-    const { recordStageTransition } = await import("./stage-events.server");
-    await recordStageTransition({
-      orgId: o.offer.orgId!,
+    // The pipeline core owns the stage write + journal (stage-writers §6):
+    // the once-only claim above stays ahead of it; the candidate variant
+    // takes the org from the offer row and journals actor "candidate" with
+    // cause "offer" — identical trail, stage and stageReason as before.
+    const { recordOfferStageCore } = await import("./pipeline.server");
+    await recordOfferStageCore(null, {
       applicationId: o.offer.applicationId,
-      fromStage: o.stage as never,
       toStage: stage as never,
-      actor: "candidate",
       reason: reason ?? (answer.action === "accept" ? "Accepted the offer" : null),
     });
   }

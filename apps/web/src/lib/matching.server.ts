@@ -22,7 +22,7 @@ import {
   fetchLinkedinSignal,
   fetchWritingSignal,
   type SocialSignal,
-} from "./social.server";
+} from "@ats/candidates/server";
 
 /** NaN can never enter a score: a broken number degrades to 0, never past a gate. */
 const clamp = (n: number) => (Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0);

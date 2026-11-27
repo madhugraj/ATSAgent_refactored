@@ -10,7 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { money } from "../apps/web/src/lib/money";
 import { contractEndOf } from "../apps/web/src/lib/pay-context.server";
 import { offerCompensationWords } from "../apps/web/src/lib/offers.functions";
-import { EMPLOYMENT_TYPE } from "../apps/web/src/server/distribution/content";
+import { EMPLOYMENT_TYPE } from "@ats/distribution/server";
 import { employmentWords } from "../apps/web/src/server/agents/tools";
 import { amountsIn } from "../apps/web/src/server/voice/negotiation-graders";
 import {

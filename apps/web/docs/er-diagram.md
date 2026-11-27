@@ -9,7 +9,7 @@
 > A domain diagram shows that domain's tables in full; references into other domains
 > point at a stub entity that is drawn complete in its own domain.
 
-125 tables across 9 domains.
+126 tables across 9 domains.
 
 ## Identity & access
 
@@ -454,6 +454,7 @@ erDiagram
     text actor "nullable"
     text reason "nullable"
     text note "nullable"
+    text cause "nullable"
     timestamptz created_at
   }
   match_scores {
@@ -1140,6 +1141,7 @@ erDiagram
     uuid requisition_id "nullable"
     uuid application_id "nullable"
     uuid candidate_id "nullable"
+    jsonb metadata "nullable"
     timestamptz created_at
   }
   email_outbox {
@@ -1442,6 +1444,7 @@ erDiagram
 | `screening_runs` | `kit_id` | `screening_kits` | cascade |
 | `screening_runs` | `org_id` | `organizations` | cascade |
 | `screening_runs` | `requisition_id` | `requisitions` | no action |
+| `service_tokens` | `rotated_by` | `users` | no action |
 | `sessions` | `user_id` | `users` | cascade |
 | `skill_edges` | `org_id` | `organizations` | cascade |
 | `skill_evidence` | `candidate_id` | `candidates` | cascade |
@@ -1513,7 +1516,7 @@ erDiagram
 | `ai_provider_credentials` | Communications & AI settings | 4 | (orgId+provider) |
 | `ai_redteam_checks` | — | 8 | — |
 | `ai_settings` | Communications & AI settings | 11 | (org_id) |
-| `ai_usage_events` | Communications & AI settings | 19 | — |
+| `ai_usage_events` | Communications & AI settings | 20 | — |
 | `applications` | Candidates & pipeline | 11 | (requisitionId+candidateId) |
 | `assessment_settings` | — | 8 | — |
 | `audit_log` | Identity & access | 10 | — |
@@ -1597,6 +1600,7 @@ erDiagram
 | `screening_prep_jobs` | Screening & interviews | 10 | (application_id) |
 | `screening_runs` | Screening & interviews | 23 | — |
 | `service_request_minutes` | — | 7 | — |
+| `service_tokens` | — | 7 | — |
 | `sessions` | Identity & access | 9 | (token_hash) |
 | `skill_edges` | Intelligence | 8 | — |
 | `skill_evidence` | Intelligence | 9 | — |
@@ -1604,7 +1608,7 @@ erDiagram
 | `slo_alerts` | — | 10 | — |
 | `social_profiles` | Candidates & pipeline | 13 | (candidateId+provider) |
 | `source_integrations` | Sourcing & integrations | 17 | (orgId+provider) |
-| `stage_events` | Candidates & pipeline | 9 | — |
+| `stage_events` | Candidates & pipeline | 10 | — |
 | `studio_agent_grants` | — | 6 | — |
 | `studio_agent_versions` | — | 11 | (blueprintId+version) |
 | `talent_request_suggestions` | Candidates & pipeline | 8 | (requestId+candidateId) |

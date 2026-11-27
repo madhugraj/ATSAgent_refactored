@@ -1,0 +1,58 @@
+/**
+ * T1 ratchet (phase-4 review): workspace packages must not import the app
+ * through the "@/" or "@db/" tsconfig aliases — those are layer inversions.
+ * The count may only come DOWN: 5 known upward imports remain (each marked
+ * // SHIM(upward) with its target phase), 0 by Phase 8. Any NEW alias import
+ * under packages/**\/src fails this audit.
+ *
+ * Ruling 2026-11-25 (Phase 5 distribution move): cap temporarily 8. The peak
+ * came from the distribution boards' interim imports of app files whose
+ * packages land next. Drop plan: −1 at the candidates move (its
+ * boards/ingest.server intake import re-pointed to @ats/candidates/server) —
+ * done, cap 5. −1 at change PR A (candidates erase emits the kernel
+ * subjects.deleted event; the agents-runtime interim import is gone) — done,
+ * cap 7. The remaining seven resolve per their marked phases
+ * (capture/screening/labour-policy/meeting-ref/vtt Phase 6, agents.catalog
+ * Phase 7), 0 by Phase 8. The candidates move's remaining upward references
+ * (capture → verification/autoscore, dedupe → dedupe.functions) are
+ * relative interims marked SHIM(upward), not aliases.
+ */
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+
+const PACKAGES = join(import.meta.dir, "..", "packages");
+const MAX_ALIAS_IMPORTS = 7; // TRUE total: 5 alias + 2 relative (counted now). Drop plans in the header — relative: −1 matching Phase 6, −1 interviews Phase 6. 0 by Phase 8.
+
+function sourceFiles(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).flatMap((entry) => {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) return sourceFiles(full);
+    return /\.(ts|tsx)$/.test(entry) && !/\.test\.tsx?$/.test(entry) ? [full] : [];
+  });
+}
+
+test("packages import the app only through the marked upward shims (cap 7, dropping)", () => {
+  const offenders: string[] = [];
+  const total = sourceFiles(PACKAGES).reduce<string[]>((acc, f) => {
+    const rel = f.slice(PACKAGES.length + 1);
+    const text = readFileSync(f, "utf8");
+    const isDbSchemaTypeImport =
+      rel === "db/src/server/schema.ts" &&
+      (text.includes('$type<import("../../../../apps/web/src/lib/demand-outlook")') ||
+        text.includes('$type<import("../../../../apps/web/src/lib/pay-settings")'));
+    if (isDbSchemaTypeImport) return acc; // Phase 2 deviation 3: type-only, exempt
+    for (const m of text.matchAll(
+      /from ["'](@\/|@db\/|(?:\.\.\/)+apps\/)[^"']+["']|import\(["'](@\/|@db\/|(?:\.\.\/)+apps\/)[^"']+["']\)/g,
+    )) {
+      // A marked line is a known, tracked inversion — still counted, but
+      // reported with its marker so the list and the count stay in step.
+      const lineNo = text.slice(0, m.index ?? 0).split("\n").length;
+      acc.push(
+        `${rel}:${lineNo} (${text.split("\n")[lineNo - 2]?.includes("SHIM(upward)") ? "marked" : "UNMARKED"})`,
+      );
+    }
+    return acc;
+  }, offenders);
+  expect(offenders.length).toBeLessThanOrEqual(MAX_ALIAS_IMPORTS);
+});

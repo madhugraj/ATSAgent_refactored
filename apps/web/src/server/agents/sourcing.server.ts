@@ -127,7 +127,7 @@ export async function publishChannels(
         eq(requisitionBoardPostings.orgId, orgId),
       ),
     );
-  const { getBoardAdapter, loadBoardConnection } = await import("../boards/registry");
+  const { getBoardAdapter, loadBoardConnection } = await import("@ats/distribution/server");
   const boards: BoardChannel[] = [];
   for (const provider of BOARDS) {
     const p = postings.find((x) => x.provider === provider);

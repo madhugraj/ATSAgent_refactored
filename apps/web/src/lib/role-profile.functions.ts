@@ -2,9 +2,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireOrg } from "./auth.middleware";
-import { draftRoleProfile, type RoleProfile } from "./role-profile.server";
+import { draftRoleProfile, type RoleProfile } from "@ats/requisitions/server";
 
-export type { RoleProfile } from "./role-profile.server";
+export type { RoleProfile } from "@ats/requisitions/server";
 
 const Input = z.object({
   role: z.string().min(2),

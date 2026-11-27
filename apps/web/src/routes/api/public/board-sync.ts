@@ -26,7 +26,7 @@ async function run(request: Request) {
     /* no body is fine — defaults apply */
   }
 
-  const { pollAllBoards } = await import("@/server/boards/poll.server");
+  const { pollAllBoards } = await import("@ats/distribution/server");
   try {
     const summary = await pollAllBoards(opts.max !== undefined ? { max: opts.max } : {});
     return Response.json(summary);

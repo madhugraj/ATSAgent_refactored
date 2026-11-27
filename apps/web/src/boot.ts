@@ -16,10 +16,11 @@
  * production build (silently: dev still works). scripts/worker-boot-smoke.sh
  * fails when this file's registrations are missing from the built bundle.
  */
-import { onAgentEvent } from "@ats/kernel/server";
+import { onAgentEvent, onSubjectsDeleted } from "@ats/kernel/server";
 import { log, setAgentAlertMailer, setSloNotifier } from "@ats/observability/server";
 import { onInboundMail } from "@ats/comms/server";
 import { platformAdmins } from "@db/schema";
+import { registerDistributionDomainEvents } from "@ats/distribution/server";
 import { registerDeskThreadEffects } from "@ats/desk-core/server";
 import { registerAppAgentPort } from "./agent-port.server";
 import { afterSubjectsDeleted, cancelRun } from "./server/agents/runtime.server";
@@ -100,5 +101,19 @@ registerDeskThreadEffects({ cancelRun, afterSubjectsDeleted });
 // at load so direct shim imports (tests, server-fn wrappers) are wired too.
 registerAppAgentPort();
 
-// Placeholder (later phases): the remaining domain-event (onDomainEvent) and
-// subject-deletion (onSubjectsDeleted) subscribers register here.
+// Distribution's domain-event subscribers (map §5, runbook §2 distribution
+// item 1): advanceRequisitionCore's close branch emits requisition.closed
+// through the kernel (Phase 5), and this subscriber closes the postings —
+// best-effort, exactly like the direct call it replaced. The handler no-ops
+// without a requisitionId, and a double close touches only "pending"/
+// "published" posting rows so a second delivery writes nothing.
+registerDistributionDomainEvents();
+
+// Candidate erasure (map §5 subjects.deleted): the erase core announces the
+// erased candidates through the kernel and the agents runtime's stale-request
+// sweep cleans up behind them — live runs whose subject is gone are cancelled
+// and their open requests closed — exactly as its interim direct call did
+// (app-side until Phase 7 moves the runtime). The event payload names the
+// candidates, so later subscribers (training-data capture) can cascade the
+// erasure into their own records without re-querying the gone rows.
+onSubjectsDeleted((orgId) => afterSubjectsDeleted(orgId));

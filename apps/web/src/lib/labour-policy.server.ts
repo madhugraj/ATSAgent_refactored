@@ -189,7 +189,7 @@ export async function seedSourcesCore(actor: PolicyActor): Promise<{ added: numb
   // No pay zones yet: the organisation's headquarters country stands in.
   if (!zones.length) {
     const { organizations } = await import("../../drizzle/schema");
-    const { countryCode } = await import("../server/distribution/content");
+    const { countryCode } = await import("@ats/distribution/server");
     const [org] = await db
       .select({ hq: organizations.hqCountry })
       .from(organizations)

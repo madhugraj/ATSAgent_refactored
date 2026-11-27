@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const WARN_MAX = 106; // freeze-exception sync (review: 89 post-Phase-4 + 17 temporary #87/#90 edges, map §10 — resolved in Phase 7). Lower per phase.
+export const WARN_MAX = 95; // freeze-exception sync 104 − 9 (Phase 5 requisitions move: the requisitions → boards publish close edge died with the requisition.closed kernel event, and the requisitions.server importers re-pointed to @ats/requisitions + @ats/auth; 17 temporary #87/#90 edges, map §10, remain — resolved in Phase 7). Lower per phase.
 
 // depcruise runs from apps/web (its tsconfig lives there); this script may
 // be invoked from the repo root (CI) or apps/web.

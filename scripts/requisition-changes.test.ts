@@ -30,10 +30,10 @@ const {
   userRoles,
   users,
 } = await import("../apps/web/drizzle/schema");
-const lifecycle = await import("../apps/web/src/lib/requisitions.server");
+const lifecycle = await import("@ats/requisitions/server");
 const desk = await import("../apps/web/src/server/desk/desk.server");
 const runtime = await import("../apps/web/src/server/agents/runtime.server");
-const { placeLabel } = await import("../apps/web/src/lib/work-mode");
+const { placeLabel } = await import("@ats/requisitions/shared");
 
 const stamp = Date.now();
 let orgId: string;

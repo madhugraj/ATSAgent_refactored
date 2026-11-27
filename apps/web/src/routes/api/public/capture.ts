@@ -71,7 +71,7 @@ async function handle(request: Request) {
   }
 
   try {
-    const { capture } = await import("@/lib/capture.server");
+    const { capture } = await import("@ats/candidates/server");
     const result = await capture({
       token: body.token,
       kind: body.kind,

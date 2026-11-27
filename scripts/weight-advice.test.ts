@@ -7,7 +7,7 @@
  */
 import { describe, expect, test } from "bun:test";
 
-import { weightsProblem } from "../apps/web/src/lib/requisitions.server";
+import { weightsProblem } from "@ats/requisitions/server";
 import { normaliseAdvice, WEIGHT_KEYS } from "../apps/web/src/lib/weight-advice";
 
 const total = (a: ReturnType<typeof normaliseAdvice>) =>

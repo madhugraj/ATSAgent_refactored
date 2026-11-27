@@ -21,7 +21,7 @@ import { ScreeningPanel } from "@/components/ScreeningPanel";
 import { StageMover } from "@/components/StageMover";
 import { EmptyState, PageHeader, ScoreChip, SkillPills, StageBadge } from "@/components/ats";
 import { getResumeDownloadUrl } from "@/lib/resume.functions";
-import { downloadResume } from "@/lib/resume-download";
+import { downloadResume } from "@ats/candidates/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

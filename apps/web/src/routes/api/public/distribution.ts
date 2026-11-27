@@ -60,7 +60,7 @@ async function handle(request: Request) {
       { status: 400, headers: cors },
     );
   }
-  const { orgForDistributionToken } = await import("@/lib/capture.server");
+  const { orgForDistributionToken } = await import("@ats/candidates/server");
   const org = await orgForDistributionToken(body.token);
   // Deliberately generic: no signal which part failed.
   if (!org)
@@ -68,7 +68,7 @@ async function handle(request: Request) {
       { status: "error", detail: "Not paired." },
       { status: 401, headers: cors },
     );
-  const dist = await import("@/server/distribution/distribution.server");
+  const dist = await import("@ats/distribution/server");
   try {
     if (body.action === "queue") {
       return Response.json(

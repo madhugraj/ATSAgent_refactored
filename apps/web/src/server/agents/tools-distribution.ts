@@ -22,7 +22,7 @@ const BY_HAND = JOB_CHANNELS.filter((c) => c.route === "assisted" || c.route ===
 ) as [string, ...string[]];
 
 const actor = async (ctx: ToolContext) => {
-  const { actorFor } = await import("@/lib/requisitions.server");
+  const { actorFor } = await import("@ats/auth/server");
   return actorFor(ctx.orgId, ctx.principalUserId);
 };
 
@@ -61,7 +61,7 @@ export function registerDistributionTools(): void {
     approverRole: "hr_head",
     describe: (i) => `List the role on the ${channelById(i.channel)?.name ?? i.channel} job feed`,
     precheck: async (ctx, i) => {
-      const { distributionStatus } = await import("../distribution/distribution.server");
+      const { distributionStatus } = await import("@ats/distribution/server");
       const s = await distributionStatus(ctx.orgId, i.requisitionId);
       if (!s.approved) return "The role is not approved, so it cannot be advertised.";
       if (s.forClient) return "The role is hired for a client; aggregators list only direct hires.";
@@ -71,7 +71,7 @@ export function registerDistributionTools(): void {
     },
     run: async (ctx, i) => {
       const a = await actor(ctx);
-      const { addToFeed, distributionStatus } = await import("../distribution/distribution.server");
+      const { addToFeed, distributionStatus } = await import("@ats/distribution/server");
       await addToFeed(ctx.orgId, a, i.requisitionId, i.channel);
       const s = await distributionStatus(ctx.orgId, i.requisitionId);
       return {
@@ -94,7 +94,7 @@ export function registerDistributionTools(): void {
       `Plan the role for posting on ${i.channels.map((c) => channelById(c)?.name ?? c).join(", ")}`,
     run: async (ctx, i) => {
       const a = await actor(ctx);
-      const { planHandPosting } = await import("../distribution/distribution.server");
+      const { planHandPosting } = await import("@ats/distribution/server");
       return planHandPosting(ctx.orgId, a, i.requisitionId, i.channels);
     },
   });

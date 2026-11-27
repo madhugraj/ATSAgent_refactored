@@ -7,9 +7,12 @@
  * the attached CV is parsed straight into the talent pool. HR configures nothing.
  *
  * The transport (tenant resolution, `onInboundMail`) moved to
- * `@ats/comms/server` (map §11 ruling 4a); this module keeps the
- * hiring-domain routing — CV parse into the talent pool (intake), pre-onboarding
- * document filing (onboarding), job-channel sources — as the registered handler.
+ * `@ats/comms/server` (map §11 ruling 4a); the CV branch of the handler (CV
+ * parse into the talent pool) moved to `@ats/candidates/server`
+ * (`handleCvInbound`, map §5 onInboundMail) and is delegated to below. This
+ * module keeps what is left of the hiring-domain routing — the
+ * inbox_messages row insert with provider-dedupe, the pre-onboarding document
+ * filing (onboarding stays Phase 6), retries — as the registered handler.
  * The transport pieces are re-exported below so existing importers
  * (email-outbox via careersReplyAddress, local-inbox.functions, routes) keep
  * working unchanged.
@@ -20,15 +23,21 @@ import {
   emailInText,
   onInboundMail,
   // SHIM: remove in Phase 8 (each moved symbol re-points to @ats/comms/server)
+  type InboundAttachment,
   type InboundResult,
   type ResolvedInbound,
 } from "@ats/comms/server";
 import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { db } from "../server/db";
-import { inboxMessages, requisitions } from "@db/schema";
-import { ingestCandidate, parseCv } from "./intake.server";
-import { channelForSender } from "./job-channels";
+import { inboxMessages } from "@db/schema";
+import {
+  handleCvInbound,
+  ingestCandidate,
+  inboxSource,
+  matchRequisition,
+  parseCv,
+} from "@ats/candidates/server";
 
 // The moved transport surface, re-exported verbatim for existing importers.
 export {
@@ -48,13 +57,12 @@ export {
 } from "@ats/comms/server";
 
 /**
- * The source a careers-inbox CV is recorded under: the portal that sent the
- * mail (by its sender's domain — application mails a portal relays), else the
- * careers inbox itself.
+ * The source a careers-inbox CV is recorded under (the portal that sent the
+ * mail, else the careers inbox) lives with the CV branch in
+ * `@ats/candidates/server` (`inboxSource`) — re-exported for existing
+ * importers (sourcing.server, distribution-agent tests).
  */
-export function inboxSource(senderEmail: string | null | undefined): string {
-  return channelForSender(senderEmail)?.id ?? "careers_inbox";
-}
+export { inboxSource } from "@ats/candidates/server";
 
 function base64ToBytes(data: string): Uint8Array {
   const b64 = data
@@ -67,35 +75,26 @@ function base64ToBytes(data: string): Uint8Array {
   return out;
 }
 
-/** The open role whose title appears in the mail, so the CV joins the right pipeline. */
-async function matchRequisition(orgId: string, haystack: string): Promise<string | null> {
-  const rows = await db
-    .select({ id: requisitions.id, title: requisitions.title })
-    .from(requisitions)
-    .where(and(eq(requisitions.orgId, orgId), eq(requisitions.status, "approved")));
-  const text = haystack.toLowerCase();
-  let best: { id: string; len: number } | null = null;
-  for (const r of rows) {
-    const title = (r.title ?? "").trim().toLowerCase();
-    if (title.length > 3 && text.includes(title) && (!best || title.length > best.len)) {
-      best = { id: r.id, len: title.length };
-    }
-  }
-  return best?.id ?? null;
-}
+/** The open role whose title appears in the mail lives with the CV branch in
+ * `@ats/candidates/server` (`matchRequisition`) — re-exported for the retry path.
+ */
+export { matchRequisition } from "@ats/candidates/server";
 
 /**
  * The app's inbound-mail handler: record the mail in inbox_messages (the
- * provider dedupes on it) and import any CV attachment into the talent pool,
- * filing anything else against a pre-onboarding offer. Never throws — every
- * outcome is stored on the row so HR can see exactly what happened to each mail.
+ * provider dedupes on it), file anything that is not a CV against a
+ * pre-onboarding offer, and delegate the CV attachment to
+ * `handleCvInbound` (@ats/candidates/server). Never throws — every outcome is
+ * stored on the row so HR can see exactly what happened to each mail.
  */
 export async function localInboxHandler(mail: ResolvedInbound): Promise<InboundResult> {
   const orgId = mail.orgId;
   const sender = mail.sender;
   const { mail: message } = mail;
-  const { attachmentText, looksLikeCv } = await import("./cv-text.server");
-  const attachments = (mail.attachments ?? []).filter((a) => looksLikeCv(a.filename ?? ""));
+  const { looksLikeCv } = await import("@ats/std/server");
+  const attachments: InboundAttachment[] = (mail.attachments ?? []).filter((a) =>
+    looksLikeCv(a.filename ?? ""),
+  );
   const cv = attachments[0] ?? null;
 
   const row = {
@@ -166,57 +165,11 @@ export async function localInboxHandler(mail: ResolvedInbound): Promise<InboundR
     });
   }
 
-  try {
-    const bytes = base64ToBytes(cv.content);
-    const text = await attachmentText(cv.filename, bytes);
-    if (text.trim().length < 40) {
-      return finish({
-        status: "error",
-        detail: "The attachment could not be read.",
-        messageId: savedId,
-      });
-    }
-    const requisitionId = await matchRequisition(
-      orgId,
-      `${message.subject ?? ""} ${message.text ?? ""} ${cv.filename}`,
-    );
-    const parsed = await parseCv(text, orgId);
-    if (!parsed) {
-      console.warn(
-        `[careers-inbox] CV parse failed for ${cv.filename}; filing from the mail's own identity.`,
-      );
-    }
-    // Identity must survive a failed AI parse: the CV text, then the sender —
-    // but only when they plausibly are the applicant, never a board relay.
-    const applicant = applicantSender(sender);
-    const ingested = await ingestCandidate({
-      resumeText: text,
-      fileName: cv.filename,
-      requisitionId,
-      orgId,
-      source: inboxSource(sender.email),
-      parsed,
-      fullName: parsed?.full_name || applicant?.name || null,
-      email: parsed?.email ?? emailInText(text) ?? applicant?.email ?? null,
-      resumeFile: { filename: cv.filename, bytes },
-    });
-    await db
-      .update(inboxMessages)
-      .set({ requisitionId, attachmentBytes: bytes.length })
-      .where(eq(inboxMessages.id, savedId));
-    return finish({
-      status: ingested.alreadyApplied ? "updated" : "imported",
-      detail: `${ingested.name} (${ingested.email})${requisitionId ? " added to the matching role" : " filed in the talent pool"}.`,
-      messageId: savedId,
-      candidateId: ingested.candidateId,
-    });
-  } catch (e) {
-    return finish({
-      status: "error",
-      detail: e instanceof Error ? e.message : "The CV could not be imported.",
-      messageId: savedId,
-    });
-  }
+  // CV branch: parse and file the candidate (the inbox row's requisition/
+  // attachment bookkeeping happens inside the package handler); the row's
+  // final status write stays here, same writes in the same order as before
+  // the split.
+  return finish(await handleCvInbound(mail, savedId, cv));
 }
 
 // Register with the comms transport at import time as well as in boot.ts:

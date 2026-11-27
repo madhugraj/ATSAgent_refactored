@@ -8,10 +8,17 @@ import { sourceLabel } from "./job-channels";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "../server/db";
-import { applications, candidateNotes, candidates, requisitions, screeningCalls } from "@db/schema";
+import {
+  offers,
+  applications,
+  candidateNotes,
+  candidates,
+  requisitions,
+  screeningCalls,
+} from "@db/schema";
 import { assertRole } from "./auth.middleware";
 import { canMove, REASON_REQUIRED, STAGE_LABEL, type Stage } from "./lifecycle";
-import type { LifecycleActor } from "./requisitions.server";
+import type { LifecycleActor } from "@ats/auth/server";
 
 /** Offer and hiring stages are HR-controlled — not every org member may act. */
 export const HR_CONTROLLED_TARGETS = new Set<string>([
@@ -25,9 +32,25 @@ export const HR_CONTROLLED_TARGETS = new Set<string>([
 
 const actorLabel = (a: LifecycleActor) => (a.via ? `${a.memberEmail} (via agent)` : a.memberEmail);
 
+/**
+ * The AI caller's principal (autoscore/matching cores): no member session —
+ * `userId` is deliberately null and is never persisted (assertRole and the
+ * journal's user attribution are skipped on this path — stage-writers §3).
+ */
+export type AiMoveActor = { orgId: string; userId: null; memberEmail: string };
+
 export async function moveStageCore(
-  actor: LifecycleActor,
-  input: { applicationId: string; toStage: Stage; reason?: string | null; note?: string | null },
+  actor: LifecycleActor | AiMoveActor,
+  input: {
+    applicationId: string;
+    toStage: Stage;
+    reason?: string | null;
+    note?: string | null;
+    /** Why the move happened when it must stay candidate-silent (plan §5 order 1). */
+    cause?: "interview_scheduled" | "offer";
+    /** "ai" journals actor "ai", rides into outcome capture as by: "ai", and never reaches assertRole (§3). */
+    source?: "ai";
+  },
 ): Promise<{ from: Stage; to: Stage; unchanged: boolean }> {
   const [app] = await db
     .select({ id: applications.id, stage: applications.stage })
@@ -67,7 +90,12 @@ export async function moveStageCore(
       );
     skipNote = `Screening skipped: ${why}`;
   }
-  if (HR_CONTROLLED_TARGETS.has(input.toStage)) {
+  // The AI path (autoscore/matching cores) never reaches assertRole — the
+  // calling code is server-side and the org's own AI settings gate it (§3).
+  if (input.source !== "ai" && HR_CONTROLLED_TARGETS.has(input.toStage)) {
+    if (!("userId" in actor) || actor.userId === null) {
+      throw new Error("A member move into an offer or hiring stage requires a member session.");
+    }
     await assertRole(
       actor.userId,
       actor.orgId,
@@ -85,16 +113,120 @@ export async function moveStageCore(
     })
     .where(eq(applications.id, app.id));
   const { recordStageTransition } = await import("./stage-events.server");
+  const ai = input.source === "ai";
   await recordStageTransition({
     orgId: actor.orgId,
     applicationId: app.id,
     fromStage: from,
     toStage: input.toStage,
-    actor: actorLabel(actor),
+    actor: ai ? "ai" : actorLabel(actor as LifecycleActor),
+    source: ai ? "ai" : undefined,
     reason: skipNote ?? (input.reason?.trim() || null),
     note: input.note?.trim() || null,
+    cause: input.cause ?? null,
   });
   return { from, to: input.toStage, unchanged: false };
+}
+
+/**
+ * The bulk twin of moveStageCore (lifecycle.functions.ts's moveStages):
+ * partial success by design — a mixed batch moves the rows whose transition
+ * is allowed and reports the rest as blocked instead of aborting (§7). One
+ * batched journal write for the whole batch; the email pass keys on the
+ * batch's own stage_events ids. Step-up on bulk reject stays in the
+ * server-fn layer; same-stage rows are no-ops, like moveStageCore.
+ */
+export async function moveStagesCore(
+  actor: LifecycleActor,
+  input: { applicationIds: string[]; toStage: Stage; reason?: string | null; note?: string | null },
+): Promise<{ moved: number; blocked: number }> {
+  const unique = [...new Set(input.applicationIds)];
+  if (!unique.length) return { moved: 0, blocked: 0 };
+
+  // A bulk move is never weaker than a single one (phase-5 review P1): the
+  // role gate and the reason rule run for the whole batch up front (one throw
+  // covers the batch), and the screening guards apply per row — a row whose
+  // move is refused is counted as blocked, never silently skipped.
+  if (HR_CONTROLLED_TARGETS.has(input.toStage)) {
+    await assertRole(
+      actor.userId,
+      actor.orgId,
+      ["hr_head", "president_cbo"],
+      "Only the HR head or an owner can move candidates into an offer or hiring stage.",
+    );
+  }
+  if (REASON_REQUIRED.includes(input.toStage) && !input.reason?.trim()) {
+    throw new Error(`A reason is required to move candidates to ${STAGE_LABEL[input.toStage]}.`);
+  }
+
+  const rows = await db
+    .select({ id: applications.id, stage: applications.stage })
+    .from(applications)
+    .where(and(inArray(applications.id, unique), eq(applications.orgId, actor.orgId)));
+
+  const movedIds: string[] = [];
+  const journals: {
+    orgId: string;
+    applicationId: string;
+    fromStage: Stage;
+    toStage: Stage;
+    actor: string;
+    reason: string | null;
+    note: string | null;
+  }[] = [];
+  let blocked = 0;
+
+  for (const row of rows) {
+    const from = row.stage as Stage;
+    if (from === input.toStage) continue; // same stage: a no-op, like the core
+    if (!canMove(from, input.toStage)) {
+      blocked++;
+      continue;
+    }
+    // Into an interview round with the screening call still arranged or no
+    // screening on record: refused per row (the note carries the skip reason
+    // batch-wide, mirroring moveStageCore's skipNote).
+    let skipNote: string | null = null;
+    if (INTERVIEW_STAGES.includes(input.toStage) && PRE_INTERVIEW.includes(from)) {
+      if (await openScreeningCall(actor.orgId, row.id)) {
+        blocked++;
+        continue;
+      }
+      if (!(await screeningOnRecord(actor.orgId, row.id))) {
+        const why = (input.note?.trim() || input.reason?.trim() || "").trim();
+        if (!why) {
+          blocked++;
+          continue;
+        }
+        skipNote = `Screening skipped: ${why}`;
+      }
+    }
+    movedIds.push(row.id);
+    journals.push({
+      orgId: actor.orgId,
+      applicationId: row.id,
+      fromStage: from,
+      toStage: input.toStage,
+      actor: actorLabel(actor),
+      reason: skipNote ?? (input.reason?.trim() || null),
+      note: input.note?.trim() || null,
+    });
+  }
+
+  if (movedIds.length) {
+    await db
+      .update(applications)
+      .set({
+        stage: input.toStage,
+        stageReason: input.reason?.trim() || null,
+        stageNote: input.note?.trim() || null,
+        lastActivityAt: new Date(),
+      })
+      .where(inArray(applications.id, movedIds));
+    const { recordStageTransitions } = await import("./stage-events.server");
+    await recordStageTransitions(journals);
+  }
+  return { moved: movedIds.length, blocked };
 }
 
 /**
@@ -105,29 +237,63 @@ export async function moveStageCore(
  * stale agent request cleanup.
  */
 export async function recordOfferStageCore(
-  actor: LifecycleActor,
-  input: { applicationId: string; toStage: "offer_pending" | "offer_released" | "offer_accepted" },
+  actor: LifecycleActor | null,
+  input: {
+    applicationId: string;
+    toStage: "offer_pending" | "offer_released" | "offer_accepted" | "offer_declined";
+    /** The candidate's decline reason (candidate variant) — recorded on the application and the trail. */
+    reason?: string | null;
+  },
 ): Promise<{ from: Stage; to: Stage; unchanged: boolean } | null> {
-  const [app] = await db
-    .select({ id: applications.id, stage: applications.stage })
-    .from(applications)
-    .where(and(eq(applications.id, input.applicationId), eq(applications.orgId, actor.orgId)))
-    .limit(1);
-  if (!app) return null;
+  // The candidate variant (§6): no actor at all — the org comes from the
+  // offer row, not from a member session, and only the candidate's OWN
+  // decisions may be recorded this way (accept/decline). A null actor can
+  // never raise or release an offer (phase-5 review P2).
+  if (!actor && !["offer_accepted", "offer_declined"].includes(input.toStage)) {
+    throw new Error("Only the candidate's own decisions are recorded without a member session.");
+  }
+  let orgId: string | null = actor?.orgId ?? null;
+  let app: { id: string; stage: Stage } | undefined;
+  if (actor) {
+    [app] = await db
+      .select({ id: applications.id, stage: applications.stage })
+      .from(applications)
+      .where(and(eq(applications.id, input.applicationId), eq(applications.orgId, actor.orgId)))
+      .limit(1);
+  } else {
+    const [offerRow] = await db
+      .select({ orgId: offers.orgId })
+      .from(offers)
+      .where(eq(offers.applicationId, input.applicationId))
+      .limit(1);
+    if (!offerRow?.orgId) return null;
+    orgId = offerRow.orgId;
+    [app] = await db
+      .select({ id: applications.id, stage: applications.stage })
+      .from(applications)
+      .where(and(eq(applications.id, input.applicationId), eq(applications.orgId, offerRow.orgId)))
+      .limit(1);
+  }
+  if (!app || !orgId) return null;
   const from = app.stage as Stage;
   if (from === input.toStage) return { from, to: input.toStage, unchanged: true };
   await db
     .update(applications)
-    .set({ stage: input.toStage, lastActivityAt: new Date() })
-    .where(and(eq(applications.id, app.id), eq(applications.orgId, actor.orgId)));
+    .set({
+      stage: input.toStage,
+      stageReason: input.reason?.trim() || null,
+      lastActivityAt: new Date(),
+    })
+    .where(and(eq(applications.id, app.id), eq(applications.orgId, orgId)));
   const { recordStageTransition } = await import("./stage-events.server");
   await recordStageTransition({
-    orgId: actor.orgId,
+    orgId,
     applicationId: app.id,
     fromStage: from,
     toStage: input.toStage,
-    actor: actorLabel(actor),
+    actor: actor ? actorLabel(actor) : "candidate",
     cause: "offer",
+    reason: input.reason?.trim() || null,
   });
   return { from, to: input.toStage, unchanged: false };
 }
@@ -150,7 +316,15 @@ export function assertReusable(
 
 export async function addApplicationsCore(
   actor: LifecycleActor,
-  input: { requisitionId: string; candidateIds: string[]; source: string },
+  input: {
+    requisitionId: string;
+    candidateIds: string[];
+    source: string;
+    /** Portal CVs limited to their role may return to that role (§8: onboarding.functions parity). */
+    skipReusable?: boolean;
+    /** Entry stage instead of the DB default "applied" (§8: createCandidate parity — sourced only; phase-5 review P3). */
+    entryStage?: "applied" | "sourced";
+  },
 ): Promise<{ added: number; skipped: { candidateId: string; name: string; reason: string }[] }> {
   const [requisition] = await db
     .select({ id: requisitions.id })
@@ -171,7 +345,7 @@ export async function addApplicationsCore(
   if (owned.length !== requestedIds.length) {
     throw new Error("Some candidates are not in this organisation's talent pool.");
   }
-  assertReusable(owned);
+  if (!input.skipReusable) assertReusable(owned);
   // Candidates already in this requisition's pipeline are skipped and
   // reported, never a database error: the unique (requisition, candidate)
   // index used to fail the whole batch, and the caller then retried it.
@@ -204,6 +378,9 @@ export async function addApplicationsCore(
           candidateId,
           orgId: actor.orgId,
           source: input.source,
+          // createCandidate parity (§9): referrals and sourced portal entries
+          // land at "sourced"; the plain attach keeps the DB default "applied".
+          ...(input.entryStage ? { stage: input.entryStage } : null),
         })),
       )
       .onConflictDoNothing();

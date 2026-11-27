@@ -70,3 +70,64 @@ test("emitAgentEvent triggers the registered handlers; boot.ts registers the orc
     await sql`delete from organizations where id = ${org.id}`;
   }
 });
+
+test("boot registers a requisition.closed handler; emitting one closes the postings", async () => {
+  await import(BOOT_MODULE);
+
+  const { sql } = await import("../apps/web/src/server/db");
+  const { emitDomainEvent } = await import("../packages/kernel/src/server/ports");
+  const { domainEventHandlers } = await import("../packages/kernel/src/server/ports");
+
+  // Registration half: importing boot registered a requisition.closed handler.
+  expect(domainEventHandlers("requisition.closed").length).toBeGreaterThanOrEqual(1);
+
+  const slug = `boot-wiring-close-${Date.now()}`;
+  let orgId: string;
+  let reqId: string;
+  try {
+    orgId = (
+      await sql`
+        insert into organizations (name, slug)
+        values ('Boot Wiring Close Spec', ${slug})
+        returning id`
+    )[0]!.id;
+    reqId = (
+      await sql`
+        insert into requisitions (org_id, code, title, status, created_by)
+        values (${orgId}, 'REQ-BOOT-CLOSE', 'Boot wiring close spec', 'approved', null)
+        returning id`
+    )[0]!.id;
+    // A published vendor posting and a planned hand posting for the role.
+    const [published] = (await sql`
+        insert into requisition_board_postings (org_id, requisition_id, provider, status, payload)
+        values (${orgId}, ${reqId}, 'linkedin', 'published', '{}')
+        returning id`) as { id: string }[];
+    const [pending] = (await sql`
+        insert into requisition_board_postings (org_id, requisition_id, provider, status, payload)
+        values (${orgId}, ${reqId}, 'naukri', 'pending', '{}')
+        returning id`) as { id: string }[];
+    await emitDomainEvent({
+      orgId,
+      type: "requisition.closed",
+      payload: { requisitionId: reqId, actor: "system" },
+    });
+
+    // The published vendor posting is closed; the planned hand posting is
+    // withdrawn. (The vendor-side close call fails without credentials —
+    // best-effort, same as the direct call it replaced.)
+    const [pub] = (await sql`
+        select status from requisition_board_postings where id = ${published.id}`) as {
+      status: string;
+    }[];
+    expect(pub.status).toBe("closed");
+    const [pen] = (await sql`
+        select status from requisition_board_postings where id = ${pending.id}`) as {
+      status: string;
+    }[];
+    expect(pen.status).toBe("withdrawn");
+  } finally {
+    if (orgId) await sql`delete from requisition_board_postings where org_id = ${orgId}`;
+    if (reqId) await sql`delete from requisitions where id = ${reqId}`;
+    if (orgId) await sql`delete from organizations where id = ${orgId}`;
+  }
+});

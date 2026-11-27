@@ -23,7 +23,7 @@ import {
   type MatchWire,
 } from "./matching.server";
 import { CTC_CEILING_BLOCKER } from "./logistics";
-import { type SocialSignal } from "./social.server";
+import { type SocialSignal } from "@ats/candidates/server";
 
 export type { MatchWire };
 

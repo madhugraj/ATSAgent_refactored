@@ -146,7 +146,10 @@ export async function orgContextFor(input: {
   // every agent works within them, profile or not. Interim app import (like
   // the L1 packages' interim paths): the labour-policy module moves to the
   // offers package in Phase 6 — @/ resolves through the package tsconfig.
-  const { approvedRuleLines } = await import("@/lib/labour-policy.server");
+  const {
+    approvedRuleLines,
+  } = // SHIM(upward): resolve in Phase 6 (offers)
+    await import("@/lib/labour-policy.server");
   const labourRules = await approvedRuleLines(input.orgId);
   if (!version) {
     const blocks = labourRules.length
@@ -891,9 +894,9 @@ export async function uploadOrgDocumentCore(
       note = ocrResult.note;
     }
   } else {
-    // Interim app import: cv-text is a shared util that moves with the `std`
-    // package (map §4 L0) — @/ resolves through the package tsconfig.
-    const { attachmentText } = await import("@/lib/cv-text.server");
+    // cv-text is an L0 shared util (map §4 L0, §11 ruling 9) — downward, no
+    // upward mark needed.
+    const { attachmentText } = await import("@ats/std/server");
     text = await attachmentText(input.fileName, input.bytes);
     if (!text) throw new Error("No text could be read from this document.");
   }

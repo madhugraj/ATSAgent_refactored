@@ -1,10 +1,10 @@
 import { poolUseFor } from "./job-channels";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { db } from "../server/db";
-import { candidates, applications, requisitions } from "@db/schema";
+import { candidates, users } from "@db/schema";
 import { assertRole, requireOrg } from "./auth.middleware";
 
 /**
@@ -27,7 +27,7 @@ export const deleteCandidates = createServerFn({ method: "POST" })
       "Only the HR head or the CBO can delete candidates.",
     );
     // Org predicate everywhere: an id from another tenant simply does not match.
-    const { eraseCandidatesCore } = await import("../server/erase.server");
+    const { eraseCandidatesCore } = await import("@ats/candidates/server");
     const found = await eraseCandidatesCore(context.orgId, data.candidateIds);
     if (found.length === 0)
       throw new Error("No matching candidates found — they may already be deleted.");
@@ -53,34 +53,28 @@ export const attachApplication = createServerFn({ method: "POST" })
       .parse(data),
   )
   .handler(async ({ data, context }) => {
-    const [req] = await db
-      .select({ id: requisitions.id })
-      .from(requisitions)
-      .where(and(eq(requisitions.id, data.requisitionId), eq(requisitions.orgId, context.orgId)))
+    const [me] = await db
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.id, context.userId))
       .limit(1);
-    if (!req) throw new Error("Requisition not found.");
-
-    const [cand] = await db
-      .select({
-        id: candidates.id,
-        name: candidates.fullName,
-        poolUse: candidates.poolUse,
-        poolUseSource: candidates.poolUseSource,
-      })
-      .from(candidates)
-      .where(and(eq(candidates.id, data.candidateId), eq(candidates.orgId, context.orgId)))
-      .limit(1);
-    if (!cand) throw new Error("Candidate not found.");
-    const { assertReusable } = await import("./pipeline.server");
-    assertReusable([cand]);
-
-    // The (requisition_id, candidate_id) unique index keeps repeat attaches out.
-    await db.insert(applications).values({
-      requisitionId: req.id,
-      candidateId: cand.id,
-      source: data.source,
-      orgId: context.orgId,
-    });
+    // The core re-checks the requisition in-org and the candidate in-org and
+    // runs assertReusable itself (stage-writers §9) — no entryStage (the DB
+    // default "applied" applies) and no skipReusable.
+    const { addApplicationsCore } = await import("./pipeline.server");
+    const { added } = await addApplicationsCore(
+      { orgId: context.orgId, userId: context.userId, memberEmail: me?.email ?? "" },
+      { requisitionId: data.requisitionId, candidateIds: [data.candidateId], source: data.source },
+    );
+    // The (requisition_id, candidate_id) unique index kept repeat attaches
+    // out with a raw insert error; the core instead skips duplicates silently.
+    // The UI surfaces handler errors as toasts (routes/index.tsx
+    // addToPipeline), so a silent skip would show a success toast — keep the
+    // throw, with the same text the index raised.
+    if (added === 0)
+      throw new Error(
+        'duplicate key value violates unique constraint "applications_requisition_candidate_key"',
+      );
     return { ok: true as const };
   });
 
@@ -156,13 +150,25 @@ export const createCandidate = createServerFn({ method: "POST" })
       const { assertRequisitionInOrg } = await import("../server/guards");
       await assertRequisitionInOrg(data.requisitionId, context.orgId);
       try {
-        await db.insert(applications).values({
-          requisitionId: data.requisitionId,
-          candidateId: row.id,
-          orgId: context.orgId,
-          source: data.source,
-          stage: "sourced",
-        });
+        // skipReusable BY DESIGN (stage-writers §9): the requisition IS the
+        // role this portal CV was captured for — assertReusable must not
+        // reject the CV's own originating requisition.
+        const { addApplicationsCore } = await import("./pipeline.server");
+        const [me] = await db
+          .select({ email: users.email })
+          .from(users)
+          .where(eq(users.id, context.userId))
+          .limit(1);
+        await addApplicationsCore(
+          { orgId: context.orgId, userId: context.userId, memberEmail: me?.email ?? "" },
+          {
+            requisitionId: data.requisitionId,
+            candidateIds: [row.id],
+            source: data.source,
+            entryStage: "sourced",
+            skipReusable: true,
+          },
+        );
       } catch (e) {
         console.error("[createCandidate] could not attach the application:", e);
       }
