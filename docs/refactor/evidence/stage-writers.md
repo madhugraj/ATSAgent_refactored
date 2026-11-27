@@ -34,6 +34,30 @@ what it writes, which pipeline core replaces the write, and the risk. Cores live
 
 9. **`candidates.functions.ts`** — writes: `attachApplication` inserts without stage (DB default `applied`); `createCandidate` inserts at `stage: "sourced"` when a requisitionId is supplied, non-fatally inside try/catch. Note today's inconsistency: attach lands at `applied`, create at `sourced`; neither journals. Replaces: `addApplicationsCore` for both. Risk: **the subtle one** — the core's `assertReusable` would reject attaching a fresh `role_only` portal CV to its own originating requisition (today's flow depends on skipping that check), so the core needs a `skipReusable` option or the write stays; duplicate attaches change from a raw unique-index error to a silent `{added: 0}`; if the core never sets a stage, `createCandidate`'s entries silently drift `sourced` → `applied` — needs an `entryStage` option if `sourced` is intended.
 
+10. **`candidates.functions.ts`** — writes: `attachApplication` inserts without stage (DB default `applied`); `createCandidate` inserts at `stage: "sourced"` when a requisitionId is supplied, non-fatally inside try/catch. Note today's inconsistency: attach lands at `applied`, create at `sourced`; neither journals. Replaces: `addApplicationsCore` for both. Risk: **the subtle one** — the core's `assertReusable` would reject attaching a fresh `role_only` portal CV to its own originating requisition (today's flow depends on skipping that check), so the core needs a `skipReusable` option or the write stays; duplicate attaches change from a raw unique-index error to a silent `{added: 0}`; if the core never sets a stage, `createCandidate`'s entries silently drift `sourced` → `applied` — needs an `entryStage` option if `sourced` is intended.
+
+    **Onboarding portal-CV attach (Dev 2, 2026-11-26; needs Dev 1 ratification):** the ingest attach
+    (`packages/candidates/src/server/intake.server.ts`, the `tx.insert(applications)` inside
+    `ingestCandidateInner`) is **structurally blocked** from re-pointing to `addApplicationsCore`: the
+    attach runs inside the ingest transaction where the candidate row is inserted and not yet
+    committed, and the core queries `candidates` through the non-tx `db`, so its existence/org check
+    cannot see the fresh row — a mid-tx call would throw "not in this organisation's talent pool" on
+    the main path, and a post-commit call (option B) would break today's atomicity, where an attach
+    failure rolls the candidate back too (a committed role_only candidate against no role is a
+    retention liability, not a harmless half-write). So the ruling was implemented as the assertion
+    only: the attach now refuses to file a `role_only` CV against a requisition that is not
+    provably its originating role — fresh records pass by construction (created by the same call,
+    `poolUseSource` === this arrival's source); existing records pass only when the SAME limiting
+    portal handed the CV over again (an existing record's originating role is recorded nowhere —
+    `pool_use_source` names the portal, not the role). The same-portal case is the legitimate
+    re-apply flow the retention rule already contemplates ("back in an open role"). **Behaviour
+    tightened** in one narrow case: an existing `role_only` candidate's CV arriving through a
+    DIFFERENT channel (careers inbox, browser capture, manual upload) for a NEW role used to attach
+    silently; it is now refused with the assertReusable-style terms message and nothing is written.
+    If a tx-aware core variant (`addApplicationsCore` taking a tx / accepting the caller's
+    candidate proof) is ever built, this assertion is exactly what its `skipReusable` gate must
+    encode — the proof lives in one place, at the attach.
+
 ## Phase 5 order suggestion (feeds Dev 1)
 
 Hardest extensions first, so cores stabilise before the wave of pure repoints: (1) `cause` param on
